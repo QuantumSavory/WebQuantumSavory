@@ -6,7 +6,8 @@ docs/build
 log/*
 sessions/*
 !*.gitkeep
-Manifest.toml
+# Manifest.toml
+test/Manifest.toml
 .env
 
 # Vagrant
