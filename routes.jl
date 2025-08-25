@@ -111,6 +111,33 @@ end
                       doc:
                         type: string
                         description: Documentation describing the protocol type
+                      parameters:
+                        type: array
+                        description: List of constructor parameters for the protocol type
+                        items:
+                          type: object
+                          properties:
+                            field:
+                              type: string
+                              description: The parameter field name
+                            type:
+                              oneOf:
+                                - type: string
+                                - type: object
+                                  properties:
+                                    name:
+                                      type: string
+                                      description: The type name
+                                    lb:
+                                      type: string
+                                      description: The lower bound type
+                                    ub:
+                                      type: string
+                                      description: The upper bound type
+                              description: The parameter type (can be a string or complex type object)
+                            doc:
+                              type: string
+                              description: Documentation describing the parameter
 """
 route("/protocol_types") do
   Dict(:protocol_types => get_protocol_types()) |> json
