@@ -4,11 +4,11 @@ using SwaggerMarkdown
 using Genie.Renderer.Json
 using InteractiveUtils
 using QuantumSavory
-
+using QuantumSavory.ProtocolZoo
 
 
 route("/") do
-
+  "OK"
 end
 
 ########################################################
@@ -84,6 +84,36 @@ end
 """
 route("/slot_types") do
   Dict(:slot_types => get_slot_types()) |> json
+end
+
+########################################################
+
+@swagger """
+/protocol_types:
+  get:
+    description: Get the available protocol types.
+    responses:
+      '200':
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                protocol_types:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        description: The name of the protocol type
+                      doc:
+                        type: string
+                        description: Documentation describing the protocol type
+"""
+route("/protocol_types") do
+  Dict(:protocol_types => get_protocol_types()) |> json
 end
 
 ########################################################
@@ -296,4 +326,15 @@ end
 function get_slot_types()
   slot_types = QuantumSavory.available_slot_types()
   [Dict(:type => string(nameof(st.type)), :doc => string(st.doc)) for st in slot_types]
+end
+
+function get_protocol_types()
+  protocol_types = QuantumSavory.ProtocolZoo.available_protocol_types()
+
+  result = []
+  for pt in protocol_types
+    push!(result, Dict(:type => string(pt.type), :doc => string(pt.doc), :parameters => QuantumSavory.constructor_metadata(pt.type)))
+  end
+
+  result
 end
