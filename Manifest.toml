@@ -2,7 +2,7 @@
 
 julia_version = "1.11.6"
 manifest_format = "2.0"
-project_hash = "ac02e9a8bf37e69151702d9c89c2d9e63d6a35e8"
+project_hash = "4c0eb678d8f9b640790855ec190f442154b03bf7"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "60665b326b75db6517939d0e1875850bc4a54368"
@@ -363,9 +363,9 @@ version = "1.16.0"
 
 [[deps.DataFrames]]
 deps = ["Compat", "DataAPI", "DataStructures", "Future", "InlineStrings", "InvertedIndices", "IteratorInterfaceExtensions", "LinearAlgebra", "Markdown", "Missings", "PooledArrays", "PrecompileTools", "PrettyTables", "Printf", "Random", "Reexport", "SentinelArrays", "SortingAlgorithms", "Statistics", "TableTraits", "Tables", "Unicode"]
-git-tree-sha1 = "fb61b4812c49343d7ef0b533ba982c46021938a6"
+git-tree-sha1 = "a37ac0840a1196cd00317b57e39d6586bf0fd6f6"
 uuid = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
-version = "1.7.0"
+version = "1.7.1"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -777,9 +777,9 @@ version = "0.2.0"
 
 [[deps.Genie]]
 deps = ["ArgParse", "Base64", "Dates", "Distributed", "DotEnv", "EzXML", "FilePathsBase", "HTTP", "HttpCommon", "Inflector", "JSON3", "JuliaFormatter", "Logging", "LoggingExtras", "LoweredCodeUtils", "MIMEs", "Markdown", "Millboard", "Nettle", "OrderedCollections", "Pkg", "REPL", "Random", "Reexport", "Revise", "SHA", "Serialization", "Sockets", "UUIDs", "Unicode", "XML2_jll", "YAML"]
-git-tree-sha1 = "8416fe254cc94e7ec96a0c9ddf188968fb6de649"
+git-tree-sha1 = "c81ba28b635110915d9a970605148d38bdf28073"
 uuid = "c43c736e-a2d1-11e8-161f-af95117fbd1e"
-version = "5.33.9"
+version = "5.33.10"
 
 [[deps.GeometryBasics]]
 deps = ["EarCut_jll", "Extents", "IterTools", "LinearAlgebra", "PrecompileTools", "Random", "StaticArrays"]
@@ -885,9 +885,9 @@ uuid = "6d011eab-0732-4556-8808-e463c76bf3b6"
 version = "1.1.0"
 
 [[deps.InlineStrings]]
-git-tree-sha1 = "8594fac023c5ce1ef78260f24d1ad18b4327b420"
+git-tree-sha1 = "8f3d257792a522b4601c24a577954b0a8cd7334d"
 uuid = "842dd82b-1e85-43dc-bf29-5d0ee9dffc48"
-version = "1.4.4"
+version = "1.4.5"
 
     [deps.InlineStrings.extensions]
     ArrowTypesExt = "ArrowTypes"
@@ -1804,20 +1804,21 @@ version = "0.5.9"
 
 [[deps.QuantumSavory]]
 deps = ["Combinatorics", "ConcurrentSim", "Distributions", "DocStringExtensions", "Graphs", "GraphsMatching", "HiGHS", "IterTools", "JuMP", "LinearAlgebra", "NetworkLayout", "PrecompileTools", "Printf", "QuantumClifford", "QuantumInterface", "QuantumOptics", "QuantumOpticsBase", "QuantumSymbolics", "Random", "Reexport", "ResumableFunctions", "Statistics", "SumTypes", "Symbolics"]
-git-tree-sha1 = "cbbb48ddfa68656aa829642cab0665c284e850d1"
+git-tree-sha1 = "e7e83b0e12a9acb5ef1ff04129ea802617253432"
 repo-rev = "master"
 repo-url = "https://github.com/QuantumSavory/QuantumSavory.jl.git"
 uuid = "2de2e421-972c-4cb5-a0c3-999c85908079"
 version = "0.5.1"
 
     [deps.QuantumSavory.extensions]
-    QuantumSavoryInteractiveUtils = "InteractiveUtils"
+    QuantumSavoryInteractiveUtils = ["InteractiveUtils", "REPL"]
     QuantumSavoryMakie = "Makie"
     QuantumSavoryTylerMakie = ["Tyler", "Makie"]
 
     [deps.QuantumSavory.weakdeps]
     InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
     Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+    REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
     Tyler = "e170d443-b9d6-418a-9ee8-061e966341ef"
 
 [[deps.QuantumSymbolics]]
@@ -1928,9 +1929,9 @@ version = "1.1.1"
 
 [[deps.ResumableFunctions]]
 deps = ["Logging", "MacroTools"]
-git-tree-sha1 = "50ce33a22309345c0d23ea8f8d182a0495bdadb8"
+git-tree-sha1 = "ff561071ec94fa68117ae1b64ef35ac6e80f1088"
 uuid = "c5292f4c-5179-55e1-98c5-05642aab7184"
-version = "1.0.3"
+version = "1.0.4"
 
 [[deps.Revise]]
 deps = ["CodeTracking", "FileWatching", "JuliaInterpreter", "LibGit2", "LoweredCodeUtils", "OrderedCollections", "REPL", "Requires", "UUIDs", "Unicode"]

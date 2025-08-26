@@ -2,13 +2,14 @@ using Genie.Router
 using SwagUI
 using SwaggerMarkdown
 using Genie.Renderer.Json
-using InteractiveUtils
 using QuantumSavory
 using QuantumSavory.ProtocolZoo
+using InteractiveUtils
+using REPL
 
 
 route("/") do
-  "OK"
+  Dict(:status => "OK") |> json
 end
 
 ########################################################
