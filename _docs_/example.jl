@@ -6,9 +6,21 @@ using ConcurrentSim
 
 
 # Create a network
+
+# generates a random regular graph with 4 nodes and 2 edges per node
+# ex:
+# 1 —— 2
+# |     |
+# 4 —— 3
 the_network_graph = random_regular_graph(4,2)
+
+# create a register for each node
+# nv = number of vertices
+# Register(n) creates a register with n qubits <- instantiates the nodes of the network
+# Question: can we have different nodes configurations that would require using a different constructor? How would we do that?
 nodes = [Register(rand(2:5)) for i in 1:nv(the_network_graph)]
 
+# create a network from the graph and the registers
 net = RegisterNet(the_network_graph, nodes)
 sim = get_time_tracker(net)
 
@@ -51,3 +63,9 @@ bell_pair = Z1⊗Z1+Z2⊗Z2
 @show islocked(net[1][1])
 
 @show isassigned(net[1][1])
+
+
+#=begin
+next steps:
+* create Register using Slots (by type, eg Qubit) and backgroundNoises -- there is a constructor for this taking lists of both types of objects
+=#

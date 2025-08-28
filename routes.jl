@@ -2,11 +2,6 @@ using Genie.Router
 using SwagUI
 using SwaggerMarkdown
 using Genie.Renderer.Json
-using QuantumSavory
-using QuantumSavory.ProtocolZoo
-using InteractiveUtils
-using REPL
-
 
 route("/") do
   Dict(:status => "OK") |> json
@@ -135,7 +130,7 @@ end
                                     ub:
                                       type: string
                                       description: The upper bound type
-                              description: The parameter type (can be a string or complex type object)
+                              description: "The parameter type (can be a string or complex type object)"
                             doc:
                               type: string
                               description: Documentation describing the parameter
@@ -151,154 +146,533 @@ end
   post:
     description: Parse a network graph JSON payload and return the parsed object
     requestBody:
-      required: true
       content:
         application/json:
           schema:
             type: object
             required:
-              - nodes
-              - edges
+              - name
+              - net
             properties:
-              nodes:
-                type: array
-                description: Array of network nodes
-                items:
-                  type: object
-                  properties:
-                    id:
-                      type: string
-                      description: Unique identifier for the node
-                    name:
-                      type: string
-                      description: Display name for the node
-                    position:
-                      type: array
-                      description: Geographic coordinates [longitude, latitude]
-                      items:
-                        type: number
-                    data:
+              name:
+                type: string
+                description: Name of the network
+              net:
+                type: object
+                required:
+                  - nodes
+                  - edges
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - name
+                        - position
+                        - data
+                      properties:
+                        id:
+                          type: string
+                          description: Unique identifier for the node
+                        name:
+                          type: string
+                          description: Display name for the node
+                        position:
+                          type: array
+                          items:
+                            type: number
+                          minItems: 2
+                          maxItems: 2
+                          description: "[longitude, latitude] coordinates"
+                        data:
+                          type: object
+                          properties:
+                            type:
+                              type: string
+                              description: "Type of node (e.g., city, City)"
+                            slots:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                  type:
+                                    type: string
+                                  backgroundNoise:
+                                    type: string
+                                  lastOperationTime:
+                                    type: number
+                                  assignment:
+                                    type: boolean
+                                  isLocked:
+                                    type: boolean
+                                  representationType:
+                                    type: string
+                            protocols:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                  type:
+                                    type: string
+                                  parameters:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        name:
+                                          type: string
+                                        type:
+                                          type: string
+                                        value:
+                                          oneOf:
+                                            - type: string
+                                            - type: number
+                                            - type: boolean
+                  edges:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - source
+                        - target
+                      properties:
+                        id:
+                          type: string
+                          description: Unique identifier for the edge
+                        source:
+                          type: string
+                          description: Source node ID
+                        target:
+                          type: string
+                          description: Target node ID
+                        data:
+                          type: object
+                          properties:
+                            type:
+                              type: string
+                              description: Type of connection
+                            protocols:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                    description: Protocol identifier
+                                  type:
+                                    type: string
+                                    description: Protocol type name
+                                  parameters:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        name:
+                                          type: string
+                                          description: Parameter name
+                                        type:
+                                          type: string
+                                          description: Parameter type
+                                        value:
+                                          oneOf:
+                                            - type: string
+                                            - type: number
+                                            - type: boolean
+                                          description: Parameter value
+                  protocols:
+                    type: array
+                    description: Array of floating protocols that operate at the network level
+                    items:
                       type: object
                       properties:
+                        id:
+                          type: string
+                          description: Protocol identifier
                         type:
                           type: string
-                          description: Type of the node (e.g., "City")
-                        slots:
+                          description: Protocol type name
+                        parameters:
                           type: array
-                          description: Array of quantum slots in the node
                           items:
                             type: object
                             properties:
-                              id:
+                              name:
                                 type: string
-                                description: Unique identifier for the slot
+                                description: Parameter name
                               type:
                                 type: string
-                                description: Type of quantum system (e.g., "qubit", "mubit")
-                              backgroundNoise:
-                                type: string
-                                description: Background noise model for the slot
-                              lastOperationTime:
-                                type: number
-                                description: Timestamp of last operation
-                              assignment:
-                                type: boolean
-                                description: Whether the slot is assigned
-                              isLocked:
-                                type: boolean
-                                description: Whether the slot is locked
-                              representationType:
-                                type: string
-                                description: Type of representation
-              edges:
-                type: array
-                description: Array of network connections
-                items:
-                  type: object
-                  properties:
-                    id:
-                      type: string
-                      description: Unique identifier for the edge
-                    source:
-                      type: string
-                      description: Source node ID
-                    target:
-                      type: string
-                      description: Target node ID
-                    data:
-                      type: object
-                      properties:
-                        type:
-                          type: string
-                          description: Type of connection
+                                description: Parameter type
+                              value:
+                                oneOf:
+                                  - type: string
+                                  - type: number
+                                  - type: boolean
+                                description: Parameter value
     responses:
       '200':
-        description: Network graph successfully parsed
-        content:
-          application/json:
-            schema:
-              type: object
-              description: The parsed network graph object
-              additionalProperties: true
-      '400':
-        description: Invalid JSON payload
+        description: Network created and stored; returns serializable state information
         content:
           application/json:
             schema:
               type: object
               properties:
+                name:
+                  type: string
+                  description: Name of the simulation
+                status:
+                  type: string
+                  description: Current status of the simulation
+                  enum: ["created", "prepared", "running", "unknown"]
+                node_count:
+                  type: integer
+                  description: Number of nodes in the network
+                edge_count:
+                  type: integer
+                  description: Number of edges in the network
+                protocols_launched:
+                  type: object
+                  description: Count of launched protocols by category
+                  additionalProperties:
+                    type: integer
+                  nullable: true
+                message:
+                  type: string
+                  description: Human-readable status message
+      '400':
+        description: Invalid JSON payload or missing required fields
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
                 error:
                   type: string
-                  description: Error message describing the parsing failure
+                  description: Error message describing the validation failure
+                details:
+                  type: object
+                  description: Additional error details
 """
-
 route("/parse_network_graph", method="POST") do
-  try
-    # Get the request body as JSON
-    payload = Genie.Requests.jsonpayload()
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
 
-    # Debug: log the payload type and content
-    println("Payload type: ", typeof(payload))
-    println("Payload: ", payload)
-
-    # If jsonpayload() returns nothing, try to get the raw payload and parse it
-    if payload === nothing
-      raw_payload = Genie.Requests.rawpayload()
-      println("Raw payload type: ", typeof(raw_payload))
-      println("Raw payload: ", raw_payload)
-
-      if isa(raw_payload, String)
-        try
-          payload = JSON.parse(raw_payload)
-          println("Successfully parsed raw payload")
-        catch parse_error
-          return json(Dict(:error => "Failed to parse JSON from raw payload: $(parse_error)"))
-        end
-      else
-        return json(Dict(:error => "No valid JSON payload found"))
-      end
-    end
-
-    # Validate required fields
-    if !haskey(payload, "nodes") || !haskey(payload, "edges")
-      return json(Dict(:error => "Missing required fields: 'nodes' and 'edges' must be present"))
-    end
-
-    # Validate that nodes and edges are arrays (handle both Vector and JSON3.Array types)
-    nodes_is_array = isa(payload["nodes"], Vector) || startswith(string(typeof(payload["nodes"])), "JSON3.Array")
-    edges_is_array = isa(payload["edges"], Vector) || startswith(string(typeof(payload["edges"])), "JSON3.Array")
-
-    if !nodes_is_array || !edges_is_array
-      return json(Dict(:error => "Both 'nodes' and 'edges' must be arrays. Got: nodes=$(typeof(payload["nodes"])), edges=$(typeof(payload["edges"]))"))
-    end
-
-    # Return the parsed payload directly
+  # Check if extract_payload returned an error response
+  if haskey(payload, "success") && !payload["success"]
     return json(payload)
-
-  catch e
-    # Return error if JSON parsing fails
-    return json(Dict(:error => "Invalid JSON payload: $(e)"))
   end
+
+  validation_result = validate_payload(payload)
+
+  if haskey(validation_result, "success") && !validation_result["success"]
+    return json(validation_result)
+  end
+
+  @show validation_result
+
+  g = build_graph(validation_result)
+
+  # Create registers array based on node slots data
+  registers = create_registers_from_nodes(validation_result)
+
+  @show g, registers
+
+  # Create the RegisterNet from the graph and registers
+  net = create_register_net(g, registers)
+
+  state = Cqn.State(
+    name = validation_result["data"]["name"],
+    payload = validation_result,
+    graph = g,
+    network = net,
+  )
+
+  Cqn.STATE[payload["name"]] = state
+
+  json(Cqn.serialize_state(state))
+end
+
+########################################################
+
+@swagger """
+/prepare_simulation:
+  post:
+    description: Prepare the simulation for running
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Name of the simulation
+    responses:
+      '200':
+        description: Simulation prepared and stored; returns serializable state information
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Name of the simulation
+                status:
+                  type: string
+                  description: Current status of the simulation
+                  enum: ["created", "prepared", "running", "unknown"]
+                node_count:
+                  type: integer
+                  description: Number of nodes in the network
+                edge_count:
+                  type: integer
+                  description: Number of edges in the network
+                protocols_launched:
+                  type: object
+                  description: Count of launched protocols by category
+                  additionalProperties:
+                    type: integer
+                  nullable: true
+                message:
+                  type: string
+                  description: Human-readable status message
+      '400':
+        description: Simulation not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Error message describing the validation failure
+                details:
+                  type: object
+                  description: Additional error details
+"""
+route("/prepare_simulation", method="POST") do
+  simulation_name = Genie.Requests.jsonpayload()["name"]
+
+  if !haskey(Cqn.STATE, simulation_name)
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)))
+  end
+
+  state = Cqn.STATE[simulation_name]
+
+  if state.network === nothing
+    return json(Dict(:success => false, :error => "Network not found"))
+  end
+
+  # Get the time tracker from the network
+  sim = get_network_time_tracker(state.network)
+
+  # Launch protocols from payload over nodes, edges, and floating
+  launch_counts = launch_protocols(state.payload, state.network, sim)
+
+  state.simulation = sim
+  state.protocols_launched = launch_counts
+
+  Cqn.STATE[simulation_name] = state
+
+  json(Cqn.serialize_state(state))
+end
+
+########################################################
+
+@swagger """
+/run_simulation:
+  post:
+    description: Run the simulation
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Name of the simulation
+              time_units:
+                type: number
+                description: Number of time units to run the simulation for
+    responses:
+      '200':
+        description: Simulation run successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+      '400':
+        description: Simulation not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Error message describing the issue
+"""
+route("/run_simulation", method="POST") do
+  simulation_name = Genie.Requests.jsonpayload()["name"]
+  time_units_raw = Genie.Requests.jsonpayload()["time_units"]
+
+  # Handle time_units parameter with proper type conversion
+  time_units = 10  # default value
+  if time_units_raw !== nothing
+    try
+      if isa(time_units_raw, String)
+        time_units = parse(Int, time_units_raw)
+      elseif isa(time_units_raw, Number)
+        time_units = Int(time_units_raw)
+      else
+        return json(Dict(:success => false, :error => "Invalid time_units type", :details => Dict(:received_type => string(typeof(time_units_raw)), :expected_type => "number or string")))
+      end
+    catch parse_error
+      return json(Dict(:success => false, :error => "Failed to parse time_units", :details => Dict(:value => string(time_units_raw), :parse_error => string(parse_error))))
+    end
+  end
+
+  if !haskey(Cqn.STATE, simulation_name)
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)))
+  end
+
+  state = Cqn.STATE[simulation_name]
+
+  if state.simulation === nothing
+    return json(Dict(:success => false, :error => "Simulation not found"))
+  end
+
+  run(state.simulation, time_units)
+
+  # Mark that the simulation has been run
+  state.has_run = true
+  Cqn.STATE[simulation_name] = state
+
+  json(Dict(:success => true))
+end
+
+########################################################
+
+@swagger """
+/get_state:
+  get:
+    description: Get the state of the simulation
+    parameters:
+      - name: name
+        in: query
+        required: true
+        schema:
+          type: string
+    responses:
+      '200':
+        description: Returns the current simulation state
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                state:
+                  type: object
+      '400':
+        description: Simulation not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Error message describing the issue
+"""
+route("/get_state", method="GET") do
+  simulation_name = Genie.Requests.getpayload()[:name]
+
+  state = Cqn.STATE[simulation_name]
+
+  if state === nothing
+    return json(Dict(:success => false, :error => "Simulation not found"))
+  end
+
+  json(Dict(:success => true, :state => Cqn.serialize_state(state)))
+end
+
+########################################################
+
+@swagger """
+/destroy_simulation:
+  post:
+    description: Destroy the simulation
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+    responses:
+      '200':
+        description: Simulation destroyed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                message:
+                  type: string
+                  example: Simulation destroyed
+      '400':
+        description: Simulation not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Error message describing the issue
+"""
+route("/destroy_simulation", method="POST") do
+  simulation_name = Genie.Requests.jsonpayload()["name"]
+
+  if !haskey(Cqn.STATE, simulation_name)
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)))
+  end
+
+  delete!(Cqn.STATE, simulation_name)
+  json(Dict(:success => true, :message => "Simulation destroyed"))
 end
 
 ########################################################
@@ -336,44 +710,3 @@ end
 
 ########################################################
 
-function get_background_constructor_parameters(background_type)
-  QuantumSavory.constructor_metadata(background_type)
-end
-
-function get_background_types()
-  background_types = QuantumSavory.available_background_types()
-  [
-    Dict(
-      :type => string(nameof(abt.type)),
-      :doc => string(abt.doc),
-      :parameters => get_background_constructor_parameters(abt.type)
-    ) for abt in background_types
-  ]
-end
-
-function get_slot_types()
-  slot_types = QuantumSavory.available_slot_types()
-  [Dict(:type => string(nameof(st.type)), :doc => string(st.doc)) for st in slot_types]
-end
-
-function get_protocol_types()
-  protocol_types = QuantumSavory.ProtocolZoo.available_protocol_types()
-
-  result = []
-  for pt in protocol_types
-    group = ""
-    pts = QuantumSavory.constructor_metadata(pt.type)
-    for pt in pts
-      if pt.field == :node
-        group = "node"
-        break
-      elseif pt.field == :nodeA || pt.field == :nodeB
-        group = "edge"
-        break
-      end
-    end
-    push!(result, Dict(:type => string(pt.type), :doc => string(pt.doc), :group => group, :parameters => pts))
-  end
-
-  result
-end
