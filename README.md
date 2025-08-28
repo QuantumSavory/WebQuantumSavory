@@ -1,6 +1,6 @@
 # CQN (Quantum Network API)
 
-A Julia-based web API for quantum network operations, built with the Genie web framework and QuantumSavory quantum computing library.
+A Julia-based web API for quantum network operations, built with the Genie web framework and QuantumSavory quantum computing library. This API provides endpoints for creating, preparing, and running quantum network simulations.
 
 ## Installation
 
@@ -36,17 +36,35 @@ Genie.up()
 
 The server will start on `http://localhost:8000` by default.
 
-## API Documentation
+## API Overview
 
-### Swagger UI
-Access the interactive API documentation at:
-```
-http://localhost:8000/docs
-```
+### Core Simulation Workflow
 
-The Swagger UI provides:
+1. **Create Network** (`POST /parse_network_graph`) - Upload network graph definition
+2. **Prepare Simulation** (`POST /prepare_simulation`) - Launch protocols and setup network
+3. **Run Simulation** (`POST /run_simulation`) - Execute simulation for specified time units
+4. **Monitor State** (`GET /get_state`) - Check simulation status and progress
+5. **Cleanup** (`POST /destroy_simulation`) - Remove simulation and free resources
+
+### Information Endpoints
+
+- **`GET /background_types`** - Available background noise models
+- **`GET /slot_types`** - Available quantum slot types
+- **`GET /protocol_types`** - Available protocol types with parameters
+- **`GET /status`** - Server health check
+- **`GET /docs`** - Interactive Swagger UI
+
+### Simulation States
+
+- **`created`** - Network parsed and stored
+- **`prepared`** - Protocols launched, ready to run
+- **`complete`** - Simulation executed and finished
+
+## Getting Started
+
+The best way to explore the API is through the interactive Swagger documentation at `/docs`. It provides:
 - Complete endpoint documentation
 - Request/response schemas
 - Interactive testing interface
-- Example payloads
+- Example payloads and responses
 

@@ -434,7 +434,7 @@ end
 function _determine_status(state::State)
   if state.simulation !== nothing
     # Check if simulation has been run
-    if haskey(state, :has_run) && state.has_run
+    if state.has_run
       return "complete"
     else
       return "prepared"
@@ -451,7 +451,7 @@ end
 function _get_status_message(state::State)
   if state.simulation !== nothing
     # Check if simulation has been run
-    if haskey(state, :has_run) && state.has_run
+    if state.has_run
       return "Simulation has completed"
     else
       return "Simulation is prepared and ready to run"

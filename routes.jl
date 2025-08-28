@@ -445,7 +445,7 @@ end
                 message:
                   type: string
                   description: Human-readable status message
-      '400':
+      '404':
         description: Simulation not found
         content:
           application/json:
@@ -466,7 +466,7 @@ route("/prepare_simulation", method="POST") do
   simulation_name = Genie.Requests.jsonpayload()["name"]
 
   if !haskey(Cqn.STATE, simulation_name)
-    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)))
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)), status=404)
   end
 
   state = Cqn.STATE[simulation_name]
@@ -518,7 +518,7 @@ end
                 success:
                   type: boolean
                   example: true
-      '400':
+      '404':
         description: Simulation not found
         content:
           application/json:
@@ -553,7 +553,7 @@ route("/run_simulation", method="POST") do
   end
 
   if !haskey(Cqn.STATE, simulation_name)
-    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)))
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)), status=404)
   end
 
   state = Cqn.STATE[simulation_name]
@@ -596,7 +596,7 @@ end
                   example: true
                 state:
                   type: object
-      '400':
+      '404':
         description: Simulation not found
         content:
           application/json:
@@ -613,12 +613,11 @@ end
 route("/get_state", method="GET") do
   simulation_name = Genie.Requests.getpayload()[:name]
 
-  state = Cqn.STATE[simulation_name]
-
-  if state === nothing
-    return json(Dict(:success => false, :error => "Simulation not found"))
+  if !haskey(Cqn.STATE, simulation_name)
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)), status=404)
   end
 
+  state = Cqn.STATE[simulation_name]
   json(Dict(:success => true, :state => Cqn.serialize_state(state)))
 end
 
@@ -650,7 +649,7 @@ end
                 message:
                   type: string
                   example: Simulation destroyed
-      '400':
+      '404':
         description: Simulation not found
         content:
           application/json:
@@ -668,7 +667,7 @@ route("/destroy_simulation", method="POST") do
   simulation_name = Genie.Requests.jsonpayload()["name"]
 
   if !haskey(Cqn.STATE, simulation_name)
-    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)))
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)), status=404)
   end
 
   delete!(Cqn.STATE, simulation_name)
