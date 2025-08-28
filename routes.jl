@@ -361,7 +361,18 @@ function get_protocol_types()
 
   result = []
   for pt in protocol_types
-    push!(result, Dict(:type => string(pt.type), :doc => string(pt.doc), :parameters => QuantumSavory.constructor_metadata(pt.type)))
+    group = ""
+    pts = QuantumSavory.constructor_metadata(pt.type)
+    for pt in pts
+      if pt.field == :node
+        group = "node"
+        break
+      elseif pt.field == :nodeA || pt.field == :nodeB
+        group = "edge"
+        break
+      end
+    end
+    push!(result, Dict(:type => string(pt.type), :doc => string(pt.doc), :group => group, :parameters => pts))
   end
 
   result
