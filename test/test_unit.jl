@@ -246,4 +246,16 @@
     message = Cqn._get_status_message(state)
     @test message == "No network data available"
   end
+
+  @testset "Protocol Inspection" begin
+    # Test protocol mapping in State
+    state = Cqn.State(name="test", protocol_mapping=Dict{String, Any}())
+    @test state.protocol_mapping !== nothing
+    @test isa(state.protocol_mapping, Dict{String, Any})
+
+    # Test get_protocol_state with non-existent protocol
+    result = Cqn.get_protocol_state("non_existent", state)
+    @test haskey(result, "error")
+    @test result["error"] == "Protocol with ID 'non_existent' not found"
+  end
 end

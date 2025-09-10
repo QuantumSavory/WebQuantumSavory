@@ -29,6 +29,7 @@ export up
   simulation::Union{Nothing, Simulation} = nothing
   has_run::Bool = false
   slot_mapping::Union{Nothing, Dict{String, Any}} = nothing
+  protocol_mapping::Union{Nothing, Dict{String, Any}} = nothing
 end
 
 const STATE = Dict{String, State}()
@@ -542,6 +543,43 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
   return T(; (k => v for (k, v) in kwargs)...)
 end
 
+function get_protocol_state(protocol_id::String, state::State)
+  # Check if protocol exists in mapping
+  if state.protocol_mapping === nothing || !haskey(state.protocol_mapping, protocol_id)
+    return Dict("error" => "Protocol with ID '$protocol_id' not found")
+  end
+
+  protocol = state.protocol_mapping[protocol_id]
+
+  # Get HTML and PNG representations as base64
+  html_base64 = nothing
+  png_base64 = nothing
+
+  try
+    # Generate HTML representation
+    html_buffer = IOBuffer()
+    show(html_buffer, MIME"text/html"(), protocol)
+    html_content = String(take!(html_buffer))
+    html_base64 = base64encode(html_content)
+
+    # Generate PNG representation
+    png_buffer = IOBuffer()
+    show(png_buffer, MIME"image/png"(), protocol)
+    png_content = take!(png_buffer)
+    png_base64 = base64encode(png_content)
+  catch e
+    # If rendering fails, we'll just leave them as nothing
+    @warn "Failed to render protocol $protocol_id: $e"
+  end
+
+  Dict(
+    "protocol_id" => protocol_id,
+    "protocol_type" => string(typeof(protocol)),
+    "html_base64" => html_base64,
+    "png_base64" => png_base64
+  )
+end
+
 function get_slot_state(slot_id::String, state::State)
   # Check if slot exists in mapping
   if state.slot_mapping === nothing || !haskey(state.slot_mapping, slot_id)
@@ -643,6 +681,7 @@ function serialize_state(state::State)
     "edge_count" => state.graph !== nothing ? ne(state.graph) : 0,
     "protocols_launched" => state.protocols_launched,
     "slots" => _serialize_slots(state),
+    "protocols" => _serialize_protocols(state),
     "message" => _get_status_message(state)
   )
 end
@@ -697,6 +736,26 @@ function _serialize_slots(state::State)
   )
 end
 
+function _serialize_protocols(state::State)
+  if state.protocol_mapping === nothing
+    return Dict("protocols" => [])
+  end
+
+  protocols_info = []
+
+  for (protocol_id, protocol) in state.protocol_mapping
+    # Add protocol information (avoid serializing complex quantum objects)
+    push!(protocols_info, Dict(
+      "protocol_id" => protocol_id,
+      "protocol_type" => string(typeof(protocol))
+    ))
+  end
+
+  Dict(
+    "protocols" => protocols_info
+  )
+end
+
 function _determine_status(state::State)
   if state.simulation !== nothing
     # Check if simulation has been run
@@ -731,7 +790,7 @@ function _get_status_message(state::State)
   end
 end
 
-function launch_protocols(data, net, sim)
+function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}())
   launched = Dict("nodes" => 0, "edges" => 0, "floating" => 0)
 
   # Node-attached protocols: per-node under node["data"]["protocols"]
@@ -747,6 +806,13 @@ function launch_protocols(data, net, sim)
       prot === nothing && continue
       @process prot()
       launched["nodes"] += 1
+
+      # Store protocol instance in mapping if it has an ID
+      if haskey(prot_def, "id")
+        protocol_id = string(prot_def["id"])
+        protocol_mapping[protocol_id] = prot
+      end
+
       @info "Successfully launched node protocol" node_idx=idx protocol_type=typeof(prot)
     end
   end
@@ -775,6 +841,13 @@ function launch_protocols(data, net, sim)
       prot === nothing && continue
       @process prot()
       launched["edges"] += 1
+
+      # Store protocol instance in mapping if it has an ID
+      if haskey(prot_def, "id")
+        protocol_id = string(prot_def["id"])
+        protocol_mapping[protocol_id] = prot
+      end
+
       @info "Successfully launched edge protocol" edge_id=edge["id"] protocol_type=typeof(prot)
     end
   end
@@ -795,6 +868,16 @@ function launch_protocols(data, net, sim)
     @info "Launching floating protocol" protocol_type=typeof(prot)
     @process prot()
     launched["floating"] += 1
+
+    # Store protocol metadata in mapping if it has an ID
+    if haskey(prot_def, "id")
+      protocol_id = string(prot_def["id"])
+      protocol_mapping[protocol_id] = Dict(
+        "type" => string(typeof(prot)),
+        "definition" => prot_def
+      )
+    end
+
     @info "Successfully launched floating protocol" protocol_type=typeof(prot)
   end
 

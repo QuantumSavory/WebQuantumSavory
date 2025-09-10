@@ -479,11 +479,15 @@ route("/prepare_simulation", method="POST") do
   # Get the time tracker from the network
   sim = get_network_time_tracker(state.network)
 
+  # Initialize protocol mapping
+  protocol_mapping = Dict{String, Any}()
+
   # Launch protocols from payload over nodes, edges, and floating
-  launch_counts = launch_protocols(state.payload, state.network, sim)
+  launch_counts = launch_protocols(state.payload, state.network, sim, protocol_mapping)
 
   state.simulation = sim
   state.protocols_launched = launch_counts
+  state.protocol_mapping = protocol_mapping
 
   Cqn.STATE[simulation_name] = state
 
@@ -625,22 +629,22 @@ end
 ########################################################
 
 @swagger """
-/slots/{slot_id}/state:
+/slots/{name}/{slot_id}:
   get:
     description: Get the state and entangled slots for a specific slot by ID.
     parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The name of the simulation containing the slot
       - name: slot_id
         in: path
         required: true
         schema:
           type: string
         description: The ID of the slot to inspect
-      - name: name
-        in: query
-        required: true
-        schema:
-          type: string
-        description: The name of the simulation containing the slot
     responses:
       '200':
         description: OK
@@ -682,7 +686,7 @@ end
                   type: string
                   description: Error message describing the issue
 """
-route("/slots/:slot_id/state", method="GET") do
+route("/slots/:name/:slot_id", method="GET") do
   slot_id = string(params(:slot_id))
   simulation_name = string(params(:name))
 
@@ -751,6 +755,80 @@ route("/destroy_simulation", method="POST") do
 
   delete!(Cqn.STATE, simulation_name)
   json(Dict(:success => true, :message => "Simulation destroyed"))
+end
+
+########################################################
+
+########################################################
+
+@swagger """
+/protocols/{name}/{protocol_id}:
+  get:
+    description: Get the state and visual representation for a specific protocol by ID.
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The name of the simulation containing the protocol
+      - name: protocol_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the protocol to inspect
+    responses:
+      '200':
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                protocol_id:
+                  type: string
+                  description: The ID of the inspected protocol
+                protocol_type:
+                  type: string
+                  description: The type of the protocol
+                html_base64:
+                  type: string
+                  description: HTML representation of the protocol encoded as base64
+                png_base64:
+                  type: string
+                  description: PNG representation of the protocol encoded as base64
+      '404':
+        description: Simulation or protocol not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                error:
+                  type: string
+                  description: Error message describing the issue
+"""
+route("/protocols/:name/:protocol_id", method="GET") do
+  protocol_id = string(params(:protocol_id))
+  simulation_name = string(params(:name))
+
+  if !haskey(Cqn.STATE, simulation_name)
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)), status=404)
+  end
+
+  state = Cqn.STATE[simulation_name]
+  result = Cqn.get_protocol_state(protocol_id, state)
+
+  if haskey(result, "error")
+    return json(Dict(:success => false, :error => result["error"]), status=404)
+  end
+
+  json(Dict(:success => true, result...))
 end
 
 ########################################################
