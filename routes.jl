@@ -381,7 +381,7 @@ route("/parse_network_graph", method="POST") do
   g = build_graph(validation_result)
 
   # Create registers array based on node slots data
-  registers = create_registers_from_nodes(validation_result)
+  registers, slot_mapping = create_registers_from_nodes(validation_result)
 
   @show g, registers
 
@@ -393,6 +393,7 @@ route("/parse_network_graph", method="POST") do
     payload = validation_result,
     graph = g,
     network = net,
+    slot_mapping = slot_mapping,
   )
 
   Cqn.STATE[payload["name"]] = state
@@ -619,6 +620,84 @@ route("/get_state", method="GET") do
 
   state = Cqn.STATE[simulation_name]
   json(Dict(:success => true, :state => Cqn.serialize_state(state)))
+end
+
+########################################################
+
+@swagger """
+/slots/{slot_id}/state:
+  get:
+    description: Get the state and entangled slots for a specific slot by ID.
+    parameters:
+      - name: slot_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the slot to inspect
+      - name: name
+        in: query
+        required: true
+        schema:
+          type: string
+        description: The name of the simulation containing the slot
+    responses:
+      '200':
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                slot_id:
+                  type: string
+                  description: The ID of the inspected slot
+                state:
+                  type: object
+                  description: The quantum state of the slot
+                entangled_slots:
+                  type: array
+                  items:
+                    type: string
+                  description: List of slot IDs that are entangled with this slot
+                is_locked:
+                  type: boolean
+                  description: Whether the slot is locked
+                is_assigned:
+                  type: boolean
+                  description: Whether the slot has an assigned state
+      '404':
+        description: Simulation or slot not found
+        content:
+
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                error:
+                  type: string
+                  description: Error message describing the issue
+"""
+route("/slots/:slot_id/state", method="GET") do
+  slot_id = string(params(:slot_id))
+  simulation_name = string(params(:name))
+
+  if !haskey(Cqn.STATE, simulation_name)
+    return json(Dict(:success => false, :error => "Simulation not found", :details => Dict(:name => simulation_name)), status=404)
+  end
+
+  state = Cqn.STATE[simulation_name]
+  result = Cqn.get_slot_state(slot_id, state)
+
+  if haskey(result, "error")
+    return json(Dict(:success => false, :error => result["error"]), status=404)
+  end
+
+  json(Dict(:success => true, result...))
 end
 
 ########################################################

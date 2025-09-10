@@ -117,31 +117,32 @@
 
   @testset "Register Creation" begin
       validation_result = Cqn.validate_payload(test_payload)
-      registers = Cqn.create_registers_from_nodes(validation_result)
+      registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
       @test isa(registers, Vector)
       @test length(registers) == 1  # Only first node has slots
       @test isa(registers[1], Register)
+      @test isa(slot_mapping, Dict)
   end
 
   @testset "RegisterNet Creation" begin
       validation_result = Cqn.validate_payload(test_payload)
       g = Cqn.build_graph(validation_result)
-      registers = Cqn.create_registers_from_nodes(validation_result)
+      registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
       net = Cqn.create_register_net(g, registers)
       @test isa(net, RegisterNet)
   end
 
   @testset "Type Resolution" begin
       # Test protocol type resolution
-      protocol_type = Cqn._resolve_type_from_string("QuantumSavory.ProtocolZoo.CutoffProt")
+      protocol_type = Cqn._resolve_type_from_string("QuantumSavory.ProtocolZoo.CutoffProt", :protocol)
       @test protocol_type !== nothing
 
       # Test case-insensitive resolution
-      protocol_type = Cqn._resolve_type_from_string("quantumsavory.protocolzoo.cutoffprot")
+      protocol_type = Cqn._resolve_type_from_string("quantumsavory.protocolzoo.cutoffprot", :protocol)
       @test protocol_type !== nothing
 
       # Test non-existent type
-      protocol_type = Cqn._resolve_type_from_string("NonExistentType")
+      protocol_type = Cqn._resolve_type_from_string("NonExistentType", :protocol)
       @test protocol_type === nothing
   end
 

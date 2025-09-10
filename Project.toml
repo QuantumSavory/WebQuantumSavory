@@ -4,6 +4,7 @@ authors = ["Adrian Salceanu <adrian.salceanu@gmail.com>"]
 version = "0.1.0"
 
 [deps]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 ConcurrentSim = "6ed1e86c-fcaf-46a9-97e0-2b26a2cdb499"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Genie = "c43c736e-a2d1-11e8-161f-af95117fbd1e"
@@ -20,6 +21,7 @@ SwagUI = "bf05d729-34b2-4f1f-a2f1-2452bece7ebc"
 SwaggerMarkdown = "1b6eb727-ad4b-44eb-9669-b9596a6e760f"
 
 [compat]
+Base64 = "1.11.0"
 ConcurrentSim = "1.5.0"
 Dates = "1.11.0"
 Genie = "5.33.8"

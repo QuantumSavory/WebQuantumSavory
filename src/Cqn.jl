@@ -10,6 +10,12 @@ import JSON
 using Graphs
 using ConcurrentSim
 using Logging
+using Base64
+
+include("constructors.jl")
+
+# Make sure QuantumSavory is accessible within the module
+import QuantumSavory: available_slot_types, available_background_types
 
 const up = Genie.up
 export up
@@ -22,6 +28,7 @@ export up
   protocols_launched::Union{Nothing, Dict{String, Int}} = nothing
   simulation::Union{Nothing, Simulation} = nothing
   has_run::Bool = false
+  slot_mapping::Union{Nothing, Dict{String, Any}} = nothing
 end
 
 const STATE = Dict{String, State}()
@@ -282,6 +289,7 @@ function create_registers_from_nodes(data)
 
   # Create array of Register objects based on slots data
   registers = []
+  slot_mapping = Dict{String, Any}()
 
   for node in nodes
     node_data = node["data"]
@@ -289,15 +297,42 @@ function create_registers_from_nodes(data)
 
     isempty(slots) && continue # TODO: what to do with empty slots?
 
-    # Create a Register with the number of slots
-    register_size = length(slots)
+    # Parse traits (Qubit/Qumode) and background noise for each slot
+    traits = []
+    background_noise = QuantumSavory.AbstractBackground[]
 
-    # Create the Register object
-    register = Register(register_size)
+    for slot_data in slots
+      # Parse slot type dynamically
+      slot_type_str = slot_data["type"]
+      slot_type = _resolve_type_from_string(slot_type_str, :slot)
+      if slot_type === nothing
+        error("Unknown slot type: $slot_type_str")
+      end
+      push!(traits, slot_type())
+
+      # Parse background noise type and instantiate with lastOperationTime
+      noise_type_str = slot_data["backgroundNoise"]
+      last_op_time = slot_data["lastOperationTime"]
+
+      noise_type = _resolve_type_from_string(noise_type_str, :noise)
+      if noise_type === nothing
+        error("Unknown background noise type: $noise_type_str")
+      end
+      push!(background_noise, noise_type(last_op_time))
+    end
+
+    # Create the Register object with traits and background noise
+    register = Register(traits, background_noise)
     push!(registers, register)
+
+    # Map slot IDs to actual slot objects
+    for (slot_idx, slot_data) in enumerate(slots)
+      slot_id = slot_data["id"]
+      slot_mapping[slot_id] = register[slot_idx]
+    end
   end
 
-  registers
+  (registers, slot_mapping)
 end
 
 function create_register_net(graph, registers)
@@ -310,12 +345,9 @@ function get_network_time_tracker(network)
   get_time_tracker(network)
 end
 
-function _resolve_type_from_string(type_str::AbstractString)
+function _resolve_protocol_type_from_string(type_str::AbstractString, input_lower::AbstractString)
   # Get available protocol types for whitelist
   available_types = QuantumSavory.ProtocolZoo.available_protocol_types()
-
-  # Convert input to lowercase for case-insensitive comparison
-  input_lower = lowercase(type_str)
 
   # Find matching type (case-insensitive)
   for pt in available_types
@@ -325,99 +357,282 @@ function _resolve_type_from_string(type_str::AbstractString)
     end
   end
 
-  # Also check background types and slot types
-  background_types = QuantumSavory.available_background_types()
+  @warn "Protocol type not found in whitelist" type_str=type_str
+  return nothing
+end
+
+function _resolve_noise_type_from_string(type_str::AbstractString, input_lower::AbstractString)
+  # Get available noise types for whitelist
+  background_types = available_background_types()
+
+  if input_lower == "default"
+    @warn "Using default noise type" type_str=type_str
+    return background_types[1].type
+  end
+
   for bt in background_types
-    type_name = string(bt.type)
+    type_name = string(bt.type |> nameof)
     if lowercase(type_name) == input_lower
       return bt.type
     end
   end
 
-  slot_types = QuantumSavory.available_slot_types()
+  @warn "Noise type not found in whitelist" type_str=type_str
+  return nothing
+end
+
+function _resolve_slot_type_from_string(type_str::AbstractString, input_lower::AbstractString)
+  # Get available slot types for whitelist
+  slot_types = available_slot_types()
   for st in slot_types
-    type_name = string(st.type)
+    type_name = string(st.type |> nameof)
     if lowercase(type_name) == input_lower
       return st.type
     end
   end
 
-  # Type not found in whitelist
-  @warn "Type not found in whitelist" requested_type=type_str
+  @warn "Slot type not found in whitelist" type_str=type_str
   return nothing
 end
 
-function _build_args_for_protocol(param_defs::Vector, ctx::Dict{Symbol,Any})
-  args = Any[]
-  for p in param_defs
-    name = Symbol(String(p["name"]))  # parameter name - handle JSON3.Object
-    ptype = string(p["type"]) # declared type (string) - handle JSON3.Object
-    # Prefer contextual values for well-known names
-    if name === :sim && haskey(ctx, :sim)
-      push!(args, ctx[:sim])
-      continue
-    elseif name === :net && haskey(ctx, :net)
-      push!(args, ctx[:net])
-      continue
-    elseif name === :node && haskey(ctx, :node)
-      push!(args, ctx[:node])
-      continue
-    elseif name === :nodeA && haskey(ctx, :nodeA)
-      push!(args, ctx[:nodeA])
-      continue
-    elseif name === :nodeB && haskey(ctx, :nodeB)
-      push!(args, ctx[:nodeB])
-      continue
-    end
+function _resolve_type_from_string(type_str::AbstractString, type_group::Symbol)
+  # Convert input to lowercase for case-insensitive comparison
+  input_lower = lowercase(type_str)
 
-    # fallback: attempt to coerce "value" into a Julia value
-    val = haskey(p, "value") ? p["value"] : nothing
-    # Coerce based on simple ptype hints
-    if ptype in ("Int", "Int64") && val !== nothing
-      push!(args, parse(Int, string(val)))
-    elseif ptype in ("Float64", "Float32") && val !== nothing
-      push!(args, parse(Float64, string(val)))
-    elseif ptype in ("Bool",) && val !== nothing
-      # Handle boolean conversion more robustly
-      if isa(val, Bool)
-        push!(args, val)
-      elseif isa(val, String)
-        lower_val = lowercase(val)
-        if lower_val in ("true", "1", "yes", "on")
-          push!(args, true)
-        elseif lower_val in ("false", "0", "no", "off")
-          push!(args, false)
-        else
-          @warn "Could not parse boolean value" value=val parameter_name=name
-          push!(args, val) # fallback to original value
-        end
-      elseif isa(val, Number)
-        push!(args, val != 0)
-      else
-        @warn "Unexpected type for boolean parameter" value=val value_type=typeof(val) parameter_name=name
-        push!(args, val) # fallback to original value
-      end
-    else
-      push!(args, val)
-    end
+  if type_group == :protocol
+    return _resolve_protocol_type_from_string(type_str, input_lower)
+  elseif type_group == :noise
+    return _resolve_noise_type_from_string(type_str, input_lower)
+  elseif type_group == :slot
+    return _resolve_slot_type_from_string(type_str, input_lower)
   end
-  return args
 end
+
 
 function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
   # Handle both Dict{String,Any} and JSON3.Object types
   tstr = get(prot_def, "type", nothing)
   tstr === nothing && return nothing
-  T = _resolve_type_from_string(String(tstr))
+  T = _resolve_type_from_string(String(tstr), :protocol)
   T === nothing && return nothing
 
   params = Vector{Any}(get(prot_def, "parameters", Any[]))
-  args = _build_args_for_protocol(params, ctx)
-  try
-    return T(args...)
-  catch
-    return nothing
+
+  # Keyword name mappings for exceptions
+  keyword_mappings = Dict(
+    "log" => "_log"
+  )
+
+  # Build keyword arguments from all parameters
+  kwargs = Dict{Symbol, Any}()
+
+  # Add sim, net, and node(s) as keyword arguments
+  kwargs[:sim] = ctx[:sim]
+  kwargs[:net] = ctx[:net]
+
+  if haskey(ctx, :node)
+    kwargs[:node] = ctx[:node]
+  elseif haskey(ctx, :nodeA) && haskey(ctx, :nodeB)
+    kwargs[:nodeA] = ctx[:nodeA]
+    kwargs[:nodeB] = ctx[:nodeB]
   end
+
+  # Add remaining parameters as keyword arguments
+  for p in params
+    original_name = String(p["name"])
+    name = Symbol(original_name)
+    value = get(p, "value", nothing)
+
+    # Skip sim, net, node parameters as they're already handled above
+    if name in [:sim, :net, :node, :nodeA, :nodeB]
+      continue
+    end
+
+    # Skip parameters without values
+    if value === nothing
+      @warn "Parameter has no value, skipping" parameter_name=name
+      continue
+    end
+
+    # Apply keyword name mapping if it exists
+    if haskey(keyword_mappings, original_name)
+      name = Symbol(keyword_mappings[original_name])
+    end
+
+    # Convert value based on type
+    ptype = string(p["type"])
+
+    # Try to convert the value, fall back gracefully if it fails
+    try
+      if ptype in ("Int", "Int64") && value !== nothing
+        try
+          kwargs[name] = parse(Int, string(value))
+        catch
+          @warn "Cannot convert to Int, skipping parameter" parameter_name=name value=value
+        end
+      elseif ptype in ("Float64", "Float32") && value !== nothing
+        try
+          kwargs[name] = parse(Float64, string(value))
+        catch
+          @warn "Cannot convert to Float64, skipping parameter" parameter_name=name value=value
+        end
+      elseif ptype in ("Bool",) && value !== nothing
+        # Handle Bool conversion from various types
+        if isa(value, Bool)
+          kwargs[name] = value
+        elseif isa(value, String)
+          lower_val = lowercase(value)
+          if lower_val in ("true", "1", "yes", "on")
+            kwargs[name] = true
+          elseif lower_val in ("false", "0", "no", "off")
+            kwargs[name] = false
+          else
+            @warn "Invalid Bool value, skipping parameter" parameter_name=name value=value
+            # Skip this parameter - don't add to kwargs
+          end
+        elseif isa(value, Number)
+          kwargs[name] = value != 0
+        else
+          @warn "Cannot convert to Bool, skipping parameter" parameter_name=name value=value value_type=typeof(value)
+          # Skip this parameter - don't add to kwargs
+        end
+      elseif occursin(r"Union\{.*Nothing.*\}", ptype) && value !== nothing
+        # Handle Union types that include Nothing (optional parameters)
+        if isa(value, String) && lowercase(value) == "nothing"
+          kwargs[name] = nothing
+        elseif occursin(r"Float\d+", ptype)
+          try
+            kwargs[name] = parse(Float64, string(value))
+          catch
+            @warn "Cannot convert Union Float64, skipping parameter" parameter_name=name value=value
+          end
+        elseif occursin(r"Int\d*", ptype)
+          try
+            kwargs[name] = parse(Int, string(value))
+          catch
+            @warn "Cannot convert Union Int, skipping parameter" parameter_name=name value=value
+          end
+        elseif occursin(r"String", ptype)
+          kwargs[name] = string(value)
+        else
+          @warn "Cannot convert Union type, skipping parameter" parameter_name=name parameter_type=ptype value=value
+        end
+      else
+        # For complex types, try eval with value::type pattern
+        eval_expr = "$(value)::$(ptype)"
+        try
+          @info "Attempting eval" parameter_name=name eval_expr=eval_expr
+          kwargs[name] = eval(Meta.parse(eval_expr))
+          @info "Eval successful" parameter_name=name
+        catch eval_error
+          @warn "Eval failed, skipping parameter" parameter_name=name eval_expr=eval_expr eval_error=eval_error
+          # If eval fails, skip the parameter entirely - let constructor use default
+          # Don't add to kwargs
+        end
+      end
+    catch e
+      @warn "Failed to convert parameter" parameter_name=name parameter_type=ptype value=value error=e
+      # Don't set the parameter - let the constructor use its default value
+    end
+  end
+
+  # Instantiate with all keyword arguments
+  @info "Instantiating protocol" protocol_type=T kwargs=kwargs
+  # Convert kwargs dict to keyword arguments
+  return T(; (k => v for (k, v) in kwargs)...)
+end
+
+function get_slot_state(slot_id::String, state::State)
+  # Check if slot exists in mapping
+  if state.slot_mapping === nothing || !haskey(state.slot_mapping, slot_id)
+    return Dict("error" => "Slot with ID '$slot_id' not found")
+  end
+
+  slot = state.slot_mapping[slot_id]
+
+  # Get the state of the slot
+  slot_state = QuantumSavory.stateof(slot)
+
+  # Get entangled slots with detailed information
+  entangled_slots = []
+  entangled_slot_details = []
+
+  if !isnothing(slot_state)
+    entangled_slot_refs = QuantumSavory.slots(slot_state)
+    for slot_ref in entangled_slot_refs
+      # Find the slot ID for this slot reference
+      parent_reg = QuantumSavory.parent(slot_ref)
+      slot_idx = QuantumSavory.parentindex(slot_ref)
+
+      # Find the slot ID by searching through the mapping
+      slot_id_found = nothing
+      for (id, mapped_slot) in state.slot_mapping
+        if mapped_slot === slot_ref
+          slot_id_found = id
+          push!(entangled_slots, id)
+          break
+        end
+      end
+
+      # Add detailed information about the entangled slot
+      push!(entangled_slot_details, Dict(
+        "slot_id" => slot_id_found,
+        "parent_reg_index" => QuantumSavory.parentindex(parent_reg),
+        "slot_index" => slot_idx,
+        "parent_reg" => string(typeof(parent_reg))
+      ))
+    end
+  end
+
+  # Get HTML and PNG representations as base64
+  html_base64 = nothing
+  png_base64 = nothing
+
+  if !isnothing(slot_state)
+    try
+      # Generate HTML representation
+      html_buffer = IOBuffer()
+      show(html_buffer, MIME"text/html"(), slot_state)
+      html_content = String(take!(html_buffer))
+      html_base64 = base64encode(html_content)
+
+      # Generate PNG representation
+      png_buffer = IOBuffer()
+      show(png_buffer, MIME"image/png"(), slot_state)
+      png_content = take!(png_buffer)
+      png_base64 = base64encode(png_content)
+    catch e
+      # If rendering fails, we'll just leave them as nothing
+      @warn "Failed to render state for slot $slot_id: $e"
+    end
+  end
+
+  # Get access times if available
+  access_time = nothing
+  if state.network !== nothing
+    # Find the register and slot index for this slot
+    for (reg_idx, reg) in enumerate(state.network.registers)
+      for slot_idx in 1:nsubsystems(reg)
+        reg_slot = reg[slot_idx]
+        if reg_slot === slot
+          access_time = reg.accesstimes[slot_idx]
+          break
+        end
+      end
+    end
+  end
+
+  Dict(
+    "slot_id" => slot_id,
+    "state_type" => slot_state !== nothing ? string(typeof(slot_state)) : nothing,
+    "is_locked" => QuantumSavory.islocked(slot),
+    "is_assigned" => QuantumSavory.isassigned(slot),
+    "access_time" => access_time,
+    "entangled_slots" => entangled_slots,
+    "entangled_slot_details" => entangled_slot_details,
+    "html_base64" => html_base64,
+    "png_base64" => png_base64
+  )
 end
 
 function serialize_state(state::State)
@@ -427,7 +642,58 @@ function serialize_state(state::State)
     "node_count" => state.graph !== nothing ? nv(state.graph) : 0,
     "edge_count" => state.graph !== nothing ? ne(state.graph) : 0,
     "protocols_launched" => state.protocols_launched,
+    "slots" => _serialize_slots(state),
     "message" => _get_status_message(state)
+  )
+end
+
+function _serialize_slots(state::State)
+  if state.slot_mapping === nothing
+    return Dict("slots" => [], "entanglements" => [])
+  end
+
+  slots_info = []
+  entanglements = []
+
+  for (slot_id, slot) in state.slot_mapping
+    # Get slot state and entangled slots
+    slot_state = QuantumSavory.stateof(slot)
+    entangled_slot_ids = []
+
+    if !isnothing(slot_state)
+      entangled_slot_refs = QuantumSavory.slots(slot_state)
+      for slot_ref in entangled_slot_refs
+        # Find the slot ID for this slot reference
+        for (id, mapped_slot) in state.slot_mapping
+          if mapped_slot === slot_ref
+            push!(entangled_slot_ids, id)
+            break
+          end
+        end
+      end
+    end
+
+    # Add slot information (avoid serializing complex quantum objects)
+    push!(slots_info, Dict(
+      "slot_id" => slot_id,
+      "state_type" => slot_state !== nothing ? string(typeof(slot_state)) : nothing,
+      "is_locked" => QuantumSavory.islocked(slot),
+      "is_assigned" => QuantumSavory.isassigned(slot),
+      "entangled_slots" => entangled_slot_ids
+    ))
+
+    # Add entanglement information (only add each entanglement once)
+    for entangled_id in entangled_slot_ids
+      entanglement_pair = sort([slot_id, entangled_id])
+      if entanglement_pair ∉ entanglements
+        push!(entanglements, entanglement_pair)
+      end
+    end
+  end
+
+  Dict(
+    "slots" => slots_info,
+    "entanglements" => entanglements
   )
 end
 
@@ -481,6 +747,7 @@ function launch_protocols(data, net, sim)
       prot === nothing && continue
       @process prot()
       launched["nodes"] += 1
+      @info "Successfully launched node protocol" node_idx=idx protocol_type=typeof(prot)
     end
   end
 
@@ -488,9 +755,11 @@ function launch_protocols(data, net, sim)
   # Build id->index mapping once
   id_to_idx = Dict(String(n["id"]) => i for (i, n) in enumerate(nodes))
   edges = data["graph_info"]["edges"]
+  @info "Processing edge protocols" edge_count=length(edges)
   for edge in edges
     edge_data = get(edge, "data", Dict{String,Any}())
     edge_prots = Vector{Any}(get(edge_data, "protocols", Any[]))
+    @info "Edge protocols found" edge_id=edge["id"] protocol_count=length(edge_prots)
     isempty(edge_prots) && continue
 
     # Resolve node indices from edge endpoints
@@ -506,6 +775,7 @@ function launch_protocols(data, net, sim)
       prot === nothing && continue
       @process prot()
       launched["edges"] += 1
+      @info "Successfully launched edge protocol" edge_id=edge["id"] protocol_type=typeof(prot)
     end
   end
 
@@ -521,13 +791,11 @@ function launch_protocols(data, net, sim)
   for prot_def in floating_prots
     ctx = Dict{Symbol,Any}(:sim => sim, :net => net)
     prot = _instantiate_protocol(prot_def, ctx)
-    if prot === nothing
-      @warn "Failed to instantiate floating protocol" protocol_def=prot_def
-      continue
-    end
+    prot === nothing && continue
     @info "Launching floating protocol" protocol_type=typeof(prot)
     @process prot()
     launched["floating"] += 1
+    @info "Successfully launched floating protocol" protocol_type=typeof(prot)
   end
 
   @info "Protocol launch summary" launched=launched

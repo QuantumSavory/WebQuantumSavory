@@ -7,5 +7,6 @@ function mock_graph(filename = "_docs_/ui_data.json")
 end
 
 function mock_registers(filename = "_docs_/ui_data.json")
-    mock_payload(filename) |> validate_payload |> create_registers_from_nodes
+    registers, slot_mapping = mock_payload(filename) |> validate_payload |> create_registers_from_nodes
+    (registers, slot_mapping)
 end
