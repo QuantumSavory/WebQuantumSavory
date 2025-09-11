@@ -11,6 +11,7 @@ using Graphs
 using ConcurrentSim
 using Logging
 using Base64
+import CairoMakie
 
 include("constructors.jl")
 include("errors.jl")
