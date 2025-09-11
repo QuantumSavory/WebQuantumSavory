@@ -13,9 +13,7 @@ using Logging
 using Base64
 
 include("constructors.jl")
-
-# Make sure QuantumSavory is accessible within the module
-import QuantumSavory: available_slot_types, available_background_types
+include("errors.jl")
 
 const up = Genie.up
 export up
@@ -87,18 +85,10 @@ function extract_payload(payload = nothing, raw_payload = nothing)
       try
         payload = JSON.parse(raw_payload)
       catch parse_error
-        return (Dict(
-          "success" => false,
-          "error" => "Failed to parse JSON from raw payload",
-          "details" => Dict("parse_error" => string(parse_error))
-        ))
+        throw(validation_error("Failed to parse JSON from raw payload", Dict{String, Any}("parse_error" => string(parse_error))))
       end
     else
-      return (Dict(
-        "success" => false,
-        "error" => "No valid JSON payload found",
-        "details" => Dict("raw_payload_type" => string(typeof(raw_payload)))
-      ))
+      throw(validation_error("No valid JSON payload found", Dict{String, Any}("raw_payload_type" => string(typeof(raw_payload)))))
     end
   end
 
@@ -109,27 +99,18 @@ function validate_payload(payload)
   try
     # Validate top-level structure
     if !haskey(payload, "name")
-      return (Dict(
-        "success" => false,
-        "error" => "Missing required field: 'name' must be present"
-      ))
+      throw(validation_error("Missing required field: 'name' must be present"))
     end
 
     if !haskey(payload, "net")
-      return (Dict(
-        "success" => false,
-        "error" => "Missing required field: 'net' must be present"
-      ))
+      throw(validation_error("Missing required field: 'net' must be present"))
     end
 
     net = payload["net"]
 
     # Validate net structure
     if !haskey(net, "nodes") || !haskey(net, "edges")
-      return (Dict(
-        "success" => false,
-        "error" => "Missing required fields in 'net': 'nodes' and 'edges' must be present"
-      ))
+      throw(validation_error("Missing required fields in 'net': 'nodes' and 'edges' must be present"))
     end
 
     nodes = net["nodes"]
@@ -137,19 +118,11 @@ function validate_payload(payload)
 
     # Validate that nodes and edges are arrays
     if !isa(nodes, Vector) && !startswith(string(typeof(nodes)), "JSON3.Array")
-      return (Dict(
-        "success" => false,
-        "error" => "Field 'nodes' must be an array",
-        "details" => Dict("nodes_type" => string(typeof(nodes)))
-      ))
+      throw(validation_error("Field 'nodes' must be an array", Dict{String, Any}("nodes_type" => string(typeof(nodes)))))
     end
 
     if !isa(edges, Vector) && !startswith(string(typeof(edges)), "JSON3.Array")
-      return (Dict(
-        "success" => false,
-        "error" => "Field 'edges' must be an array",
-        "details" => Dict("edges_type" => string(typeof(edges)))
-      ))
+      throw(validation_error("Field 'edges' must be an array", Dict{String, Any}("edges_type" => string(typeof(edges)))))
     end
 
     # Validate each node structure
@@ -157,40 +130,25 @@ function validate_payload(payload)
     for (i, node) in enumerate(nodes)
       # Check required node fields
       if !haskey(node, "id")
-        return (Dict(
-          "success" => false,
-          "error" => "Node $i missing required field: 'id'"
-        ))
+        throw(validation_error("Node $i missing required field: 'id'"))
       end
 
       if !haskey(node, "name")
-        return (Dict(
-          "success" => false,
-          "error" => "Node $i missing required field: 'name'"
-        ))
+        throw(validation_error("Node $i missing required field: 'name'"))
       end
 
       if !haskey(node, "position")
-        return (Dict(
-          "success" => false,
-          "error" => "Node $i missing required field: 'position'"
-        ))
+        throw(validation_error("Node $i missing required field: 'position'"))
       end
 
       if !haskey(node, "data")
-        return (Dict(
-          "success" => false,
-          "error" => "Node $i missing required field: 'data'"
-        ))
+        throw(validation_error("Node $i missing required field: 'data'"))
       end
 
       # Check for duplicate node IDs
       node_id = string(node["id"])
       if node_id in node_ids
-        return (Dict(
-          "success" => false,
-          "error" => "Duplicate node ID: '$node_id'"
-        ))
+        throw(validation_error("Duplicate node ID: '$node_id'"))
       end
       push!(node_ids, node_id)
     end
@@ -200,24 +158,15 @@ function validate_payload(payload)
     for (i, edge) in enumerate(edges)
       # Check required edge fields
       if !haskey(edge, "id")
-        return (Dict(
-          "success" => false,
-          "error" => "Edge $i missing required field: 'id'"
-        ))
+        throw(validation_error("Edge $i missing required field: 'id'"))
       end
 
       if !haskey(edge, "source")
-        return (Dict(
-          "success" => false,
-          "error" => "Edge $i missing required field: 'source'"
-        ))
+        throw(validation_error("Edge $i missing required field: 'source'"))
       end
 
       if !haskey(edge, "target")
-        return (Dict(
-          "success" => false,
-          "error" => "Edge $i missing required field: 'target'"
-        ))
+        throw(validation_error("Edge $i missing required field: 'target'"))
       end
 
       # Validate source and target reference existing nodes
@@ -225,17 +174,11 @@ function validate_payload(payload)
       target = string(edge["target"])
 
       if !(source in node_ids)
-        return (Dict(
-          "success" => false,
-          "error" => "Edge $i references non-existent source node: '$source'"
-        ))
+        throw(validation_error("Edge $i references non-existent source node: '$source'"))
       end
 
       if !(target in node_ids)
-        return (Dict(
-          "success" => false,
-          "error" => "Edge $i references non-existent target node: '$target'"
-        ))
+        throw(validation_error("Edge $i references non-existent target node: '$target'"))
       end
 
       push!(edge_connections, Dict("source" => source, "target" => target))
@@ -259,12 +202,12 @@ function validate_payload(payload)
     return response
 
   catch e
-    # Return error if JSON parsing fails
-    return (Dict(
-      "success" => false,
-      "error" => "Unexpected error during parsing",
-      "details" => Dict("exception" => string(e))
-    ))
+    # Re-throw validation errors, wrap unexpected errors
+    if isa(e, APIError)
+      rethrow(e)
+    else
+      throw(server_error("Unexpected error during parsing", Dict{String, Any}("exception" => string(e))))
+    end
   end
 end
 
@@ -364,7 +307,7 @@ end
 
 function _resolve_noise_type_from_string(type_str::AbstractString, input_lower::AbstractString)
   # Get available noise types for whitelist
-  background_types = available_background_types()
+  background_types = QuantumSavory.available_background_types()
 
   if input_lower == "default"
     @warn "Using default noise type" type_str=type_str
@@ -384,7 +327,7 @@ end
 
 function _resolve_slot_type_from_string(type_str::AbstractString, input_lower::AbstractString)
   # Get available slot types for whitelist
-  slot_types = available_slot_types()
+  slot_types = QuantumSavory.available_slot_types()
   for st in slot_types
     type_name = string(st.type |> nameof)
     if lowercase(type_name) == input_lower
@@ -546,7 +489,7 @@ end
 function get_protocol_state(protocol_id::String, state::State)
   # Check if protocol exists in mapping
   if state.protocol_mapping === nothing || !haskey(state.protocol_mapping, protocol_id)
-    return Dict("error" => "Protocol with ID '$protocol_id' not found")
+    throw(not_found_error("Protocol", protocol_id))
   end
 
   protocol = state.protocol_mapping[protocol_id]
@@ -555,21 +498,24 @@ function get_protocol_state(protocol_id::String, state::State)
   html_base64 = nothing
   png_base64 = nothing
 
+  # Generate HTML representation
   try
-    # Generate HTML representation
     html_buffer = IOBuffer()
     show(html_buffer, MIME"text/html"(), protocol)
     html_content = String(take!(html_buffer))
     html_base64 = base64encode(html_content)
+  catch e
+    @warn "Failed to render HTML for protocol $protocol_id: $e"
+  end
 
-    # Generate PNG representation
+  # Generate PNG representation
+  try
     png_buffer = IOBuffer()
     show(png_buffer, MIME"image/png"(), protocol)
     png_content = take!(png_buffer)
     png_base64 = base64encode(png_content)
   catch e
-    # If rendering fails, we'll just leave them as nothing
-    @warn "Failed to render protocol $protocol_id: $e"
+    @warn "Failed to render PNG for protocol $protocol_id: $e"
   end
 
   Dict(
@@ -583,7 +529,7 @@ end
 function get_slot_state(slot_id::String, state::State)
   # Check if slot exists in mapping
   if state.slot_mapping === nothing || !haskey(state.slot_mapping, slot_id)
-    return Dict("error" => "Slot with ID '$slot_id' not found")
+    throw(not_found_error("Slot", slot_id))
   end
 
   slot = state.slot_mapping[slot_id]
@@ -627,21 +573,24 @@ function get_slot_state(slot_id::String, state::State)
   png_base64 = nothing
 
   if !isnothing(slot_state)
+    # Generate HTML representation
     try
-      # Generate HTML representation
       html_buffer = IOBuffer()
       show(html_buffer, MIME"text/html"(), slot_state)
       html_content = String(take!(html_buffer))
       html_base64 = base64encode(html_content)
+    catch e
+      @warn "Failed to render HTML state for slot $slot_id: $e"
+    end
 
-      # Generate PNG representation
+    # Generate PNG representation
+    try
       png_buffer = IOBuffer()
       show(png_buffer, MIME"image/png"(), slot_state)
       png_content = take!(png_buffer)
       png_base64 = base64encode(png_content)
     catch e
-      # If rendering fails, we'll just leave them as nothing
-      @warn "Failed to render state for slot $slot_id: $e"
+      @warn "Failed to render PNG state for slot $slot_id: $e"
     end
   end
 
@@ -764,9 +713,8 @@ function _determine_status(state::State)
     else
       return "prepared"
     end
-  elseif state.network !== nothing
-    return "prepared"
-  elseif state.graph !== nothing
+  elseif state.graph !== nothing || state.network !== nothing
+    # Graph (and possibly network) exist, but no simulation yet
     return "created"
   else
     return "unknown"
@@ -777,16 +725,83 @@ function _get_status_message(state::State)
   if state.simulation !== nothing
     # Check if simulation has been run
     if state.has_run
-      return "Simulation has completed"
+      return "Simulation has run"
     else
       return "Simulation is prepared and ready to run"
     end
-  elseif state.network !== nothing
-    return "Simulation is prepared and ready to run"
-  elseif state.graph !== nothing
+  elseif state.graph !== nothing || state.network !== nothing
     return "Network has been created"
   else
     return "No network data available"
+  end
+end
+
+function cleanup_state!(state::State)
+  """Clean up quantum resources associated with a simulation state"""
+  try
+    # Clean up quantum objects in the network
+    if state.network !== nothing
+      @info "Cleaning up quantum network" state_name=state.name
+
+      # Clear quantum states in all slots
+      for (reg_idx, reg) in enumerate(state.network.registers)
+        for slot_idx in 1:nsubsystems(reg)
+          slot = reg[slot_idx]
+          try
+            if QuantumSavory.isassigned(slot)
+              # Clear the quantum state
+              QuantumSavory.clear!(slot)
+            end
+            # Unlock the slot if it's locked
+            if QuantumSavory.islocked(slot)
+              QuantumSavory.unlock!(slot)
+            end
+          catch e
+            @warn "Failed to cleanup slot" reg_idx=reg_idx slot_idx=slot_idx error=e
+          end
+        end
+      end
+
+      # Clear the network reference
+      state.network = nothing
+    end
+
+    # Clean up simulation
+    if state.simulation !== nothing
+      @info "Cleaning up simulation" state_name=state.name
+      # Note: ConcurrentSim doesn't have explicit cleanup, but we clear the reference
+      state.simulation = nothing
+    end
+
+    # Clear mappings
+    if state.slot_mapping !== nothing
+      @info "Clearing slot mapping" state_name=state.name slot_count=length(state.slot_mapping)
+      state.slot_mapping = nothing
+    end
+
+    if state.protocol_mapping !== nothing
+      @info "Clearing protocol mapping" state_name=state.name protocol_count=length(state.protocol_mapping)
+      state.protocol_mapping = nothing
+    end
+
+    # Clear graph
+    if state.graph !== nothing
+      @info "Clearing graph" state_name=state.name
+      state.graph = nothing
+    end
+
+    # Clear payload (it can be large)
+    if state.payload !== nothing
+      @info "Clearing payload" state_name=state.name
+      state.payload = nothing
+    end
+
+    @info "Successfully cleaned up state" state_name=state.name
+    return true
+
+  catch e
+    @error "Failed to cleanup state" state_name=state.name error=e
+    return false
   end
 end
 
@@ -883,6 +898,18 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
 
   @info "Protocol launch summary" launched=launched
   return launched
+end
+
+function destroy_simulation(simulation_name)
+  state = STATE[simulation_name]
+
+    # Perform cleanup before deletion
+    cleanup_success = cleanup_state!(state)
+
+    # Remove from global state
+    delete!(STATE, simulation_name)
+
+  return cleanup_success
 end
 
 include("mocks.jl")

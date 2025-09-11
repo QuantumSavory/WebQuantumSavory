@@ -12,7 +12,7 @@ This directory contains comprehensive tests for the CQN codebase.
 
 ## Test Data
 
-The tests use the sample payload from `mock/payload.json` which contains a sample quantum network configuration with:
+The tests use the sample payload from `mock/payload2.json` which contains a sample quantum network configuration with:
 - 2 nodes (cities) with different slot configurations
 - 1 edge connecting the nodes
 - Various protocol definitions
