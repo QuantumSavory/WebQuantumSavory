@@ -27,6 +27,45 @@ end
 
 ########################################################
 
+
+@swagger """
+/simulations:
+  get:
+    description: List all existing simulations with their current status.
+    responses:
+      '200':
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                simulations:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      status:
+                        type: string
+                        enum: [created, prepared, complete, unknown]
+"""
+route("/simulations", method="GET") do
+    sims = [
+      Dict(
+        :name => state.name,
+        :status => Cqn._determine_status(state)
+      ) for (_, state) in Cqn.STATE
+    ]
+
+    json(Dict(:success => true, :simulations => sims))
+end
+
+########################################################
+
 @swagger """
 /background_types:
   get:
@@ -854,6 +893,10 @@ end
 route("/status") do
   Dict(:status => "OK") |> json
 end
+
+########################################################
+
+
 
 ########################################################
 
