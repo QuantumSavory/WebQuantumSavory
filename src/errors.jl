@@ -5,7 +5,7 @@ struct APIError <: Exception
   message::String
   status_code::Int
   error_code::String
-  details::Union{Nothing, Dict{String, Any}}
+  details::Union{Nothing,Dict{String,Any}}
 end
 
 APIError(message::String, status_code::Int) = APIError(message, status_code, "", nothing)
@@ -37,15 +37,15 @@ function not_found_error(resource::String, identifier::String)
   APIError("$resource not found", 404, "NOT_FOUND", Dict("resource" => resource, "identifier" => identifier))
 end
 
-function validation_error(message::String, details::Union{Nothing, Dict{String, Any}} = nothing)
+function validation_error(message::String, details::Union{Nothing,Dict{String,Any}}=nothing)
   APIError(message, 400, "VALIDATION_ERROR", details)
 end
 
-function server_error(message::String, details::Union{Nothing, Dict{String, Any}} = nothing)
+function server_error(message::String, details::Union{Nothing,Dict{String,Any}}=nothing)
   APIError(message, 500, "SERVER_ERROR", details)
 end
 
-function bad_request_error(message::String, details::Union{Nothing, Dict{String, Any}} = nothing)
+function bad_request_error(message::String, details::Union{Nothing,Dict{String,Any}}=nothing)
   APIError(message, 400, "BAD_REQUEST", details)
 end
 
@@ -55,11 +55,11 @@ function safe_route_handler(handler_func::Function, route_name::String)
     return handler_func()
   catch e
     if isa(e, APIError)
-      @error "API Error in $route_name" error=e.message status_code=e.status_code error_code=e.error_code
+      @error "API Error in $route_name" error = e.message status_code = e.status_code error_code = e.error_code stacktrace = stacktrace(catch_backtrace())
       return json(create_error_response(e), status=e.status_code)
     else
-      @error "Unexpected error in $route_name" error=e
-      error_response = server_error("Internal server error", Dict{String, Any}("route" => route_name, "exception_type" => string(typeof(e))))
+      @error "Unexpected error in $route_name" error = e stacktrace = stacktrace(catch_backtrace())
+      error_response = server_error("Internal server error", Dict{String,Any}("route" => route_name, "exception_type" => string(typeof(e))))
       return json(create_error_response(error_response), status=500)
     end
   end

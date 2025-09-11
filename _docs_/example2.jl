@@ -24,6 +24,7 @@ for s in sizes
     # in principle we can have different representations -- this is something we have not discussed together yet, so just set this as the default (which is the case for the current constructor anyway)
 
     #!!! don't use the representation -- just use the constructor without representation for Register
+    #!!! add the representation in. it's an instance of QuantumOpticsRepr() without arguments
 
     # representation = QuantumOpticsRepr # Representation to use for the qubits
     # repr = [representation() for _ in 1:s]

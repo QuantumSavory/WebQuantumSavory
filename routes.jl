@@ -513,7 +513,7 @@ end
                   description: Additional error details
 """
 route("/prepare_simulation", method="POST") do
-    simulation_name = Genie.Requests.jsonpayload()["name"]
+    simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
     if !haskey(Cqn.STATE, simulation_name)
       throw(not_found_error("Simulation", simulation_name))
@@ -587,8 +587,9 @@ end
                   description: Error message describing the issue
 """
 route("/run_simulation", method="POST") do
-    simulation_name = Genie.Requests.jsonpayload()["name"]
-    time_units_raw = Genie.Requests.jsonpayload()["time_units"]
+    payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+    simulation_name = payload["name"]
+    time_units_raw = payload["time_units"]
 
     # Handle time_units parameter with proper type conversion
     time_units = 10  # default value
