@@ -705,34 +705,44 @@ function _serialize_protocols(state::State)
   )
 end
 
+const STATUS_COMPLETE = "complete"
+const STATUS_PREPARED = "prepared"
+const STATUS_CREATED = "created"
+const STATUS_UNKNOWN = "unknown"
+
 function _determine_status(state::State)
   if state.simulation !== nothing
     # Check if simulation has been run
     if state.has_run
-      return "complete"
+      return STATUS_COMPLETE
     else
-      return "prepared"
+      return STATUS_PREPARED
     end
   elseif state.graph !== nothing || state.network !== nothing
     # Graph (and possibly network) exist, but no simulation yet
-    return "created"
+    return STATUS_CREATED
   else
-    return "unknown"
+    return STATUS_UNKNOWN
   end
 end
+
+const STATUS_MESSAGE_COMPLETE = "Simulation has run"
+const STATUS_MESSAGE_PREPARED = "Simulation is prepared and ready to run"
+const STATUS_MESSAGE_CREATED = "Network has been created"
+const STATUS_MESSAGE_UNKNOWN = "No network data available"
 
 function _get_status_message(state::State)
   if state.simulation !== nothing
     # Check if simulation has been run
     if state.has_run
-      return "Simulation has run"
+      return STATUS_MESSAGE_COMPLETE
     else
-      return "Simulation is prepared and ready to run"
+      return STATUS_MESSAGE_PREPARED
     end
   elseif state.graph !== nothing || state.network !== nothing
-    return "Network has been created"
+    return STATUS_MESSAGE_CREATED
   else
-    return "No network data available"
+    return STATUS_MESSAGE_UNKNOWN
   end
 end
 

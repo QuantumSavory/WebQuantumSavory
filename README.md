@@ -51,8 +51,11 @@ The server will start on `http://localhost:8000` by default.
 - **`GET /background_types`** - Available background noise models
 - **`GET /slot_types`** - Available quantum slot types
 - **`GET /protocol_types`** - Available protocol types with parameters
+- **`GET /protocols/:name/:protocol_id`** - Details for a protocol instance in a simulation
+- **`GET /slots/:name/:slot_id`** - Details for a slot in a simulation
 - **`GET /status`** - Server health check
 - **`GET /docs`** - Interactive Swagger UI
+- **`GET /`** - Basic root endpoint (OK status)
 
 ### Simulation States
 

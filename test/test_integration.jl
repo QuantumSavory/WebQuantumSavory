@@ -3,6 +3,9 @@
   using JSON
   using Test
 
+  include("../src/Cqn.jl")
+  using .Cqn
+
   # Test server configuration
   TEST_BASE_URL = "http://localhost:8000"
   TEST_SIMULATION_NAME = "test_integration_sim"
@@ -115,6 +118,7 @@
       payload["name"] = TEST_SIMULATION_NAME
 
       response = make_request("POST", "/parse_network_graph", body=payload)
+
       @test response.status == 200
       data = parse_response(response)
 
@@ -128,271 +132,273 @@
 
       # Check values
       @test data["name"] == TEST_SIMULATION_NAME
-      @test data["status"] == "prepared"
+      @test data["status"] == Cqn.STATUS_CREATED
       @test data["node_count"] == 2
       @test data["edge_count"] == 1
       @test data["protocols_launched"] === nothing
-      @test data["message"] == "Simulation is prepared and ready to run"
+      @test data["message"] == Cqn.STATUS_MESSAGE_CREATED
   end
 
-  # @testset "Parse Network Graph - Validation Errors" begin
-  #     # Test missing name field
-  #     invalid_payload = deepcopy(test_payload)
-  #     delete!(invalid_payload, "name")
+  @testset "Parse Network Graph - Validation Errors" begin
+      # Test missing name field
+      invalid_payload = deepcopy(test_payload)
+      delete!(invalid_payload, "name")
 
-  #     response = make_request("POST", "/parse_network_graph", body=invalid_payload)
-  #     @test response.status == 400
-  #     data = parse_response(response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Missing required field: 'name' must be present"
+      response = make_request("POST", "/parse_network_graph", body=invalid_payload)
+      @test response.status == 400
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Missing required field: 'name' must be present"
 
-  #     # Test missing net field
-  #     invalid_payload = deepcopy(test_payload)
-  #     delete!(invalid_payload, "net")
+      # Test missing net field
+      invalid_payload = deepcopy(test_payload)
+      delete!(invalid_payload, "net")
 
-  #     response = make_request("POST", "/parse_network_graph", body=invalid_payload)
-  #     @test response.status == 400
-  #     data = parse_response(response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Missing required field: 'net' must be present"
+      response = make_request("POST", "/parse_network_graph", body=invalid_payload)
+      @test response.status == 400
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Missing required field: 'net' must be present"
 
-  #     # Test missing nodes field
-  #     invalid_payload = deepcopy(test_payload)
-  #     delete!(invalid_payload["net"], "nodes")
+      # Test missing nodes field
+      invalid_payload = deepcopy(test_payload)
+      delete!(invalid_payload["net"], "nodes")
 
-  #     response = make_request("POST", "/parse_network_graph", body=invalid_payload)
-  #     @test response.status == 400
-  #     data = parse_response(response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Missing required fields in 'net': 'nodes' and 'edges' must be present"
+      response = make_request("POST", "/parse_network_graph", body=invalid_payload)
+      @test response.status == 400
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Missing required fields in 'net': 'nodes' and 'edges' must be present"
 
-  #     # Test missing edges field
-  #     invalid_payload = deepcopy(test_payload)
-  #     delete!(invalid_payload["net"], "edges")
+      # Test missing edges field
+      invalid_payload = deepcopy(test_payload)
+      delete!(invalid_payload["net"], "edges")
 
-  #     response = make_request("POST", "/parse_network_graph", body=invalid_payload)
-  #     @test response.status == 400
-  #     data = parse_response(response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Missing required fields in 'net': 'nodes' and 'edges' must be present"
-  # end
+      response = make_request("POST", "/parse_network_graph", body=invalid_payload)
+      @test response.status == 400
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Missing required fields in 'net': 'nodes' and 'edges' must be present"
+  end
 
-  # @testset "Prepare Simulation - Success" begin
-  #           # First create a network
-  #     payload = deepcopy(test_payload)
-  #     payload["name"] = TEST_SIMULATION_NAME
+  @testset "Prepare Simulation - Success" begin
+            # First create a network
+      payload = deepcopy(test_payload)
+      payload["name"] = TEST_SIMULATION_NAME
 
-  #     create_response = make_request("POST", "/parse_network_graph", body=payload)
-  #     @test create_response.status == 200
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
 
-  #     # Then prepare the simulation
-  #     prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => TEST_SIMULATION_NAME))
-  #     @test prepare_response.status == 200
+      # Then prepare the simulation
+      prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => TEST_SIMULATION_NAME))
+      @test prepare_response.status == 200
 
-  #     data = parse_response(prepare_response)
-  #     @test haskey(data, "name")
-  #     @test haskey(data, "status")
-  #     @test haskey(data, "node_count")
-  #     @test haskey(data, "edge_count")
-  #     @test haskey(data, "protocols_launched")
-  #     @test haskey(data, "message")
+      data = parse_response(prepare_response)
+      @test haskey(data, "name")
+      @test haskey(data, "status")
+      @test haskey(data, "node_count")
+      @test haskey(data, "edge_count")
+      @test haskey(data, "protocols_launched")
+      @test haskey(data, "message")
 
-  #     @test data["name"] == TEST_SIMULATION_NAME
-  #     @test data["status"] == "prepared"
-  #     @test data["node_count"] == 2
-  #     @test data["edge_count"] == 1
-  #     @test data["protocols_launched"] !== nothing
-  #     @test data["message"] == "Simulation is prepared and ready to run"
-  # end
+      @test data["name"] == TEST_SIMULATION_NAME
+      @test data["status"] == Cqn.STATUS_PREPARED
+      @test data["node_count"] == 2
+      @test data["edge_count"] == 1
+      @test data["protocols_launched"] !== nothing
+      @test data["message"] == Cqn.STATUS_MESSAGE_PREPARED
+  end
 
-  # @testset "Prepare Simulation - Error Cases" begin
-  #     # Test preparing non-existent simulation
-  #     response = make_request("POST", "/prepare_simulation", body=Dict("name" => "nonexistent_sim"))
-  #     @test response.status == 404
-  #     data = parse_response(response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Simulation not found"
-  # end
+  @testset "Prepare Simulation - Error Cases" begin
+      # Test preparing non-existent simulation
+      response = make_request("POST", "/prepare_simulation", body=Dict("name" => "nonexistent_sim"))
+      @test response.status == 404
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Simulation not found"
+  end
 
-  # @testset "Run Simulation - Success" begin
-  #           # First create and prepare a network
-  #     payload = deepcopy(test_payload)
-  #     payload["name"] = TEST_SIMULATION_NAME
+  @testset "Run Simulation - Success" begin
+            # First create and prepare a network
+      payload = deepcopy(test_payload)
+      payload["name"] = TEST_SIMULATION_NAME
 
-  #     create_response = make_request("POST", "/parse_network_graph", body=payload)
-  #     @test create_response.status == 200
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
 
-  #     prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => TEST_SIMULATION_NAME))
-  #     @test prepare_response.status == 200
+      prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => TEST_SIMULATION_NAME))
+      @test prepare_response.status == 200
 
-  #     # Then run the simulation
-  #     run_response = make_request("POST", "/run_simulation", body=Dict("name" => TEST_SIMULATION_NAME, "time_units" => 5))
-  #     @test run_response.status == 200
+      # Then run the simulation
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => TEST_SIMULATION_NAME, "time_units" => 5))
+      @test run_response.status == 200
 
-  #     data = parse_response(run_response)
-  #     @test data["success"] == true
-  # end
+      data = parse_response(run_response)
+      @test data["success"] == true
+  end
 
-  # @testset "Run Simulation - Error Cases" begin
-  #     # Test running non-existent simulation
-  #     response = make_request("POST", "/run_simulation", body=Dict("name" => "nonexistent_sim", "time_units" => 5))
-  #     @test response.status == 404
-  #     data = parse_response(response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Simulation not found"
+  @testset "Run Simulation - Error Cases" begin
+      # Test running non-existent simulation
+      response = make_request("POST", "/run_simulation", body=Dict("name" => "nonexistent_sim", "time_units" => 5))
+      @test response.status == 404
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Simulation not found"
 
-  #           # Test running unprepared simulation
-  #     payload = deepcopy(test_payload)
-  #     payload["name"] = "unprepared_sim"
+            # Test running unprepared simulation
+      payload = deepcopy(test_payload)
+      payload["name"] = "unprepared_sim"
 
-  #     create_response = make_request("POST", "/parse_network_graph", body=payload)
-  #     @test create_response.status == 200
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
 
-  #     run_response = make_request("POST", "/run_simulation", body=Dict("name" => "unprepared_sim", "time_units" => 5))
-  #     @test run_response.status == 400
-  #     data = parse_response(run_response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Simulation not prepared"
-  # end
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => "unprepared_sim", "time_units" => 5))
+      @test run_response.status == 400
+      data = parse_response(run_response)
+      @test data["success"] == false
+      @test data["error"] == "Simulation not prepared"
+  end
 
-  # @testset "Get State - Success" begin
-  #           # First create a network
-  #     payload = deepcopy(test_payload)
-  #     payload["name"] = TEST_SIMULATION_NAME
+  @testset "Get State - Success" begin
+            # First create a network
+      payload = deepcopy(test_payload)
+      payload["name"] = TEST_SIMULATION_NAME
 
-  #     create_response = make_request("POST", "/parse_network_graph", body=payload)
-  #     @test create_response.status == 200
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
 
-  #     # Then get the state
-  #     state_response = make_request("GET", "/get_state", query=Dict("name" => TEST_SIMULATION_NAME))
-  #     @test state_response.status == 200
+      # Then get the state
+      state_response = make_request("GET", "/get_state", query=Dict("name" => TEST_SIMULATION_NAME))
+      @test state_response.status == 200
 
-  #     data = parse_response(state_response)
-  #     @test data["success"] == true
-  #     @test haskey(data, "state")
+      data = parse_response(state_response)
+      @test data["success"] == true
+      @test haskey(data, "state")
 
-  #     state = data["state"]
-  #     @test haskey(state, "name")
-  #     @test haskey(state, "status")
-  #     @test haskey(state, "node_count")
-  #     @test haskey(state, "edge_count")
-  #     @test haskey(state, "protocols_launched")
-  #     @test haskey(state, "message")
+      state = data["state"]
+      @test haskey(state, "name")
+      @test haskey(state, "status")
+      @test haskey(state, "node_count")
+      @test haskey(state, "edge_count")
+      @test haskey(state, "protocols_launched")
+      @test haskey(state, "message")
 
-  #     @test state["name"] == TEST_SIMULATION_NAME
-  #     @test state["status"] == "prepared"
-  #     @test state["node_count"] == 2
-  #     @test state["edge_count"] == 1
-  # end
+      @test state["name"] == TEST_SIMULATION_NAME
+      @test state["status"] == Cqn.STATUS_CREATED
+      @test state["node_count"] == 2
+      @test state["edge_count"] == 1
+      @test state["protocols_launched"] === nothing
+      @test state["message"] == Cqn.STATUS_MESSAGE_CREATED
+  end
 
-  # @testset "Get State - Error Cases" begin
-  #     # Test getting non-existent simulation state
-  #     response = make_request("GET", "/get_state", query=Dict("name" => "nonexistent_sim"))
-  #     @test response.status == 404
-  #     data = parse_response(response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Simulation not found"
-  #     @test haskey(data, "details")
-  #     @test data["details"]["resource"] == "Simulation"
-  #     @test data["details"]["identifier"] == "nonexistent_sim"
-  # end
+  @testset "Get State - Error Cases" begin
+      # Test getting non-existent simulation state
+      response = make_request("GET", "/get_state", query=Dict("name" => "nonexistent_sim"))
+      @test response.status == 404
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Simulation not found"
+      @test haskey(data, "details")
+      @test data["details"]["resource"] == "Simulation"
+      @test data["details"]["identifier"] == "nonexistent_sim"
+  end
 
-  # @testset "Destroy Simulation - Success" begin
-  #   # First create a network
-  #     payload = deepcopy(test_payload)
-  #     payload["name"] = TEST_SIMULATION_NAME
+  @testset "Destroy Simulation - Success" begin
+    # First create a network
+      payload = deepcopy(test_payload)
+      payload["name"] = TEST_SIMULATION_NAME
 
-  #     create_response = make_request("POST", "/parse_network_graph", body=payload)
-  #     @test create_response.status == 200
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
 
-  #     # Then destroy the simulation
-  #     destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => TEST_SIMULATION_NAME))
-  #     @test destroy_response.status == 200
-  #     data = parse_response(destroy_response)
-  #     @test data["success"] == true
-  #     @test contains(data["message"], "Simulation destroyed")
+      # Then destroy the simulation
+      destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => TEST_SIMULATION_NAME))
+      @test destroy_response.status == 200
+      data = parse_response(destroy_response)
+      @test data["success"] == true
+      @test contains(data["message"], "Simulation destroyed")
 
-  #     # Verify it's actually destroyed by trying to get its state
-  #     state_response = make_request("GET", "/get_state", query=Dict("name" => TEST_SIMULATION_NAME))
-  #     @test state_response.status == 404
-  #     state_data = parse_response(state_response)
-  #     @test state_data["success"] == false
-  #     @test state_data["error"] == "Simulation not found"
-  # end
+      # Verify it's actually destroyed by trying to get its state
+      state_response = make_request("GET", "/get_state", query=Dict("name" => TEST_SIMULATION_NAME))
+      @test state_response.status == 404
+      state_data = parse_response(state_response)
+      @test state_data["success"] == false
+      @test state_data["error"] == "Simulation not found"
+  end
 
-  # @testset "Destroy Simulation - Error Cases" begin
-  #     # Test destroying non-existent simulation
-  #     response = make_request("POST", "/destroy_simulation", body=Dict("name" => "nonexistent_sim"))
-  #     @test response.status == 404
-  #     data = parse_response(response)
-  #     @test data["success"] == false
-  #     @test data["error"] == "Simulation not found"
-  # end
+  @testset "Destroy Simulation - Error Cases" begin
+      # Test destroying non-existent simulation
+      response = make_request("POST", "/destroy_simulation", body=Dict("name" => "nonexistent_sim"))
+      @test response.status == 404
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Simulation not found"
+  end
 
-  # @testset "Complete Workflow" begin
-  #     workflow_name = "workflow_test_sim"
+  @testset "Complete Workflow" begin
+      workflow_name = "workflow_test_sim"
 
-  #       # 1. Create network
-  #     payload = deepcopy(test_payload)
-  #     payload["name"] = workflow_name
+        # 1. Create network
+      payload = deepcopy(test_payload)
+      payload["name"] = workflow_name
 
-  #     create_response = make_request("POST", "/parse_network_graph", body=payload)
-  #     @test create_response.status == 200
-  #     create_data = parse_response(create_response)
-  #     @test create_data["status"] == "prepared"  # Fixed: should be "prepared" not "created"
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
+      create_data = parse_response(create_response)
+      @test create_data["status"] == Cqn.STATUS_CREATED
 
-  #     # 2. Prepare simulation
-  #     prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => workflow_name))
-  #     @test prepare_response.status == 200
-  #     prepare_data = parse_response(prepare_response)
-  #     @test prepare_data["status"] == "prepared"
+      # 2. Prepare simulation
+      prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => workflow_name))
+      @test prepare_response.status == 200
+      prepare_data = parse_response(prepare_response)
+      @test prepare_data["status"] == Cqn.STATUS_PREPARED
 
-  #     # 3. Run simulation
-  #     run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_name, "time_units" => 10))
-  #     @test run_response.status == 200
-  #     run_data = parse_response(run_response)
-  #     @test run_data["success"] == true
+      # 3. Run simulation
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_name, "time_units" => 10))
+      @test run_response.status == 200
+      run_data = parse_response(run_response)
+      @test run_data["success"] == true
 
-  #     # 4. Get final state
-  #     state_response = make_request("GET", "/get_state", query=Dict("name" => workflow_name))
-  #     @test state_response.status == 200
-  #     state_data = parse_response(state_response)
-  #     @test state_data["success"] == true
+      # 4. Get final state
+      state_response = make_request("GET", "/get_state", query=Dict("name" => workflow_name))
+      @test state_response.status == 200
+      state_data = parse_response(state_response)
+      @test state_data["success"] == true
 
-  #     # 5. Clean up
-  #     destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => workflow_name))
-  #     @test destroy_response.status == 200
-  #     destroy_data = parse_response(destroy_response)
-  #     @test destroy_data["success"] == true
+      # 5. Clean up
+      destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => workflow_name))
+      @test destroy_response.status == 200
+      destroy_data = parse_response(destroy_response)
+      @test destroy_data["success"] == true
 
-  #     # Verify cleanup
-  #     verify_response = make_request("GET", "/get_state", query=Dict("name" => workflow_name))
-  #     @test verify_response.status == 404
-  # end
+      # Verify cleanup
+      verify_response = make_request("GET", "/get_state", query=Dict("name" => workflow_name))
+      @test verify_response.status == 404
+  end
 
-  # @testset "API Documentation" begin
-  #     # Test that the Swagger docs endpoint is accessible
-  #     response = make_request("GET", "/docs")
-  #     @test response.status == 200
-  #     # The response should contain HTML content
-  #     body = String(response.body)
-  #     @test contains(body, "html") || contains(body, "swagger") || contains(body, "api")
-  # end
+  @testset "API Documentation" begin
+      # Test that the Swagger docs endpoint is accessible
+      response = make_request("GET", "/docs")
+      @test response.status == 200
+      # The response should contain HTML content
+      body = String(response.body)
+      @test contains(body, "html") || contains(body, "swagger") || contains(body, "api")
+  end
 
-  # # Cleanup after all tests
-  # @testset "Final Cleanup" begin
-  #     # Clean up any remaining test simulations
-  #     test_names = [TEST_SIMULATION_NAME, "unprepared_sim", "workflow_test_sim"]
+  # Cleanup after all tests
+  @testset "Final Cleanup" begin
+      # Clean up any remaining test simulations
+      test_names = [TEST_SIMULATION_NAME, "unprepared_sim", "workflow_test_sim"]
 
-  #     for name in test_names
-  #       try
-  #         make_request("POST", "/destroy_simulation", body=Dict("name" => name))
-  #       catch
-  #         # Ignore errors during cleanup
-  #       end
-  #     end
+      for name in test_names
+        try
+          make_request("POST", "/destroy_simulation", body=Dict("name" => name))
+        catch
+          # Ignore errors during cleanup
+        end
+      end
 
-  #     true
-  # end
+      true
+  end
 
 end

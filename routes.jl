@@ -393,7 +393,7 @@ route("/parse_network_graph", method="POST") do
     net = create_register_net(g, registers)
 
     simulation_name = validation_result["data"]["name"]
-    if get(Cqn.STATE, simulation_name, false)
+    if haskey(Cqn.STATE, simulation_name)
       @warn "Simulation already exists, destroying it" simulation_name=simulation_name
       Cqn.destroy_simulation(simulation_name)
     end
