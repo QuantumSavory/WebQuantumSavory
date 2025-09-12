@@ -15,6 +15,7 @@ import CairoMakie
 
 include("constructors.jl")
 include("errors.jl")
+include("Sandbox.jl")
 
 const up = Genie.up
 export up

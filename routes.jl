@@ -793,7 +793,7 @@ end
                   description: Error message describing the issue
 """
 route("/destroy_simulation", method="POST") do
-    simulation_name = Genie.Requests.jsonpayload()["name"]
+    simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
     if !haskey(Cqn.STATE, simulation_name)
       throw(not_found_error("Simulation", simulation_name))
@@ -923,6 +923,106 @@ end
 """
 route("/known_functions") do
   Dict(:known_functions => Cqn.known_functions()) |> json
+end
+
+########################################################
+
+@swagger """
+/test_code:
+  post:
+    summary: Test Julia code in a sandboxed environment
+    description: |
+      Execute Julia code in an isolated module and return the results.
+      Useful for testing function definitions and expressions.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code:
+                type: string
+                description: Julia code to execute
+                example: "function add(a, b)\nreturn a + b\nend"
+            required:
+              - code
+    responses:
+      '200':
+        description: Code executed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                message:
+                  type: string
+                  example: "Code executed successfully"
+                results:
+                  type: object
+                  description: Functions and variables defined in the code
+                  properties:
+                    functions:
+                      type: array
+                      items:
+                        type: string
+                      description: Names of functions created
+                      example: ["add", "multiply"]
+                    variables:
+                      type: object
+                      description: Variables and constants defined
+                      example: {"PI": 3.14159}
+      '400':
+        description: Code execution failed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Detailed error message
+                  example: "UndefVarError: `unknown_function` not defined"
+                error_type:
+                  type: string
+                  description: Type of error that occurred
+                  example: "UndefVarError"
+"""
+route("/test_code", method="POST") do
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+
+  if !haskey(payload, "code")
+    return json(Dict(:success => false, :error => "Missing 'code' field"))
+  end
+
+  code_string = payload["code"]
+
+  # Use Sandbox module to test the code
+  success, results, error = Sandbox.test_code(code_string)
+
+  if success
+    json(Dict(
+      :success => true,
+      :message => "Code executed successfully",
+      :results => results
+    ))
+  else
+    # Extract detailed error information
+    error_type = string(typeof(error))
+    error_message = string(error)
+
+    json(Dict(
+      :success => false,
+      :error => error_message,
+      :error_type => error_type
+    ))
+  end
 end
 
 ########################################################
