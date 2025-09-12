@@ -57,6 +57,32 @@ function get_slot_types()
   [Dict("type" => string(nameof(st.type)), "doc" => string(st.doc)) for st in slot_types]
 end
 
+function parse_pt_type(parameters::AbstractVector)
+  result = []
+
+  for p in parameters
+    s = string(p.type)
+
+    if !startswith(s, "Union{")
+      push!(result, p)
+      continue
+    end
+
+    m = match(r"^Union\{(.*)\}$", s)
+    if m === nothing
+      push!(result, p)
+      continue
+    end
+
+    inner = m.captures[1]
+    parts = split(inner, ",")
+
+    push!(result, (field = p.field, type = [strip(pp) for pp in parts], doc = p.doc))
+  end
+
+  result
+end
+
 function get_protocol_types()
   protocol_types = QuantumSavory.ProtocolZoo.available_protocol_types()
 
@@ -73,7 +99,7 @@ function get_protocol_types()
       group = "floating"
     end
 
-    push!(result, Dict("type" => string(pt.type), "doc" => string(pt.doc), "group" => group, "parameters" => pts))
+    push!(result, Dict("type" => string(pt.type), "doc" => string(pt.doc), "group" => group, "parameters" => pts |> parse_pt_type))
   end
 
   result
@@ -255,15 +281,13 @@ function create_registers_from_nodes(data)
       end
       push!(traits, slot_type())
 
-      # Parse background noise type and instantiate with lastOperationTime
       noise_type_str = slot_data["backgroundNoise"]
-      last_op_time = slot_data["lastOperationTime"]
-
       noise_type = _resolve_type_from_string(noise_type_str, :noise)
+      noise_argument = rand(1.0:100.0) # TODO: these must come from the UI, not randomly generated
       if noise_type === nothing
         error("Unknown background noise type: $noise_type_str")
       end
-      push!(background_noise, noise_type(last_op_time))
+      push!(background_noise, noise_type(noise_argument))
     end
 
     # Create the Register object with traits and background noise
@@ -921,6 +945,10 @@ function destroy_simulation(simulation_name)
     delete!(STATE, simulation_name)
 
   return cleanup_success
+end
+
+function known_functions()
+  [string(f) for f in [min, max, abs, identity]]
 end
 
 include("mocks.jl")

@@ -54,6 +54,7 @@ The server will start on `http://localhost:8000` by default.
 - **`GET /protocols/:name/:protocol_id`** - Details for a protocol instance in a simulation
 - **`GET /slots/:name/:slot_id`** - Details for a slot in a simulation
 - **`GET /simulations`** - List existing simulations with `name` and `status`
+- **`GET /known_functions`** - List of supported Julia functions usable as argument values
 - **`GET /status`** - Server health check
 - **`GET /docs`** - Interactive Swagger UI
 - **`GET /`** - Basic root endpoint (OK status)

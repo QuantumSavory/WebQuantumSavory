@@ -897,7 +897,33 @@ end
 
 ########################################################
 
-
+@swagger """
+/known_functions:
+  get:
+    summary: List known Julia functions usable as argument values
+    description: Returns the whitelist of supported Julia functions that can be referenced in request payloads as argument values.
+    responses:
+      '200':
+        description: Successful response with the list of known functions
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                known_functions:
+                  type: array
+                  items:
+                    type: string
+                  description: Array of function names
+            examples:
+              default:
+                summary: Example response
+                value:
+                  known_functions: ["min", "max", "abs", "identity"]
+"""
+route("/known_functions") do
+  Dict(:known_functions => Cqn.known_functions()) |> json
+end
 
 ########################################################
 
