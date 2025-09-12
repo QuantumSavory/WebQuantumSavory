@@ -967,7 +967,7 @@ version = "0.2.0"
 
 [[deps.Genie]]
 deps = ["ArgParse", "Base64", "Dates", "Distributed", "DotEnv", "EzXML", "FilePathsBase", "HTTP", "HttpCommon", "Inflector", "JSON3", "JuliaFormatter", "Logging", "LoggingExtras", "LoweredCodeUtils", "MIMEs", "Markdown", "Millboard", "Nettle", "OrderedCollections", "Pkg", "REPL", "Random", "Reexport", "Revise", "SHA", "Serialization", "Sockets", "UUIDs", "Unicode", "XML2_jll", "YAML"]
-path = "/Users/adrian/.julia/dev/Genie"
+git-tree-sha1 = "93be4f017ad7625b9dc31229db4b4bffec5118f3"
 uuid = "c43c736e-a2d1-11e8-161f-af95117fbd1e"
 version = "5.33.12"
 
