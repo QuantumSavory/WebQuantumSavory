@@ -919,7 +919,7 @@ end
               default:
                 summary: Example response
                 value:
-                  known_functions: ["min", "max", "abs", "identity"]
+                  known_functions: ["min", "maximum", "abs", "identity"]
 """
 route("/known_functions") do
   Dict(:known_functions => Cqn.known_functions()) |> json

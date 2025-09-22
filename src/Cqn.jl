@@ -15,6 +15,7 @@ import CairoMakie
 
 include("constructors.jl")
 include("errors.jl")
+include("types.jl")
 include("Sandbox.jl")
 
 const up = Genie.up
@@ -107,10 +108,21 @@ function get_protocol_types()
 end
 
 function extract_payload(payload = nothing, raw_payload = nothing)
+  request_headers = Dict(lowercase(header) => lowercase(value) for (header, value) in Genie.Requests.getheaders())
+  required_headers = ["content-type", "accept"]
+  for header in required_headers
+    if !haskey(request_headers, header) || request_headers[header] != "application/json"
+      @warn "Header $header must be application/json" header=header header_value=request_headers[header]
+      throw(validation_error("Header $header must be application/json", Dict{String, Any}("header" => header, "header_value" => request_headers[header])))
+    end
+  end
+
   # If jsonpayload() returns nothing, try to get the raw payload and parse it
   if payload === nothing
+    @warn "No payload found, trying to parse raw payload"
     if isa(raw_payload, String)
       try
+        @warn "Parsing raw payload"
         payload = JSON.parse(raw_payload)
       catch parse_error
         throw(validation_error("Failed to parse JSON from raw payload", Dict{String, Any}("parse_error" => string(parse_error))))
@@ -282,17 +294,16 @@ function create_registers_from_nodes(data)
       end
       push!(traits, slot_type())
 
-      noise_type_str = slot_data["backgroundNoise"]
-      noise_type = _resolve_type_from_string(noise_type_str, :noise)
-      noise_argument = rand(1.0:100.0) # TODO: these must come from the UI, not randomly generated
-      if noise_type === nothing
-        error("Unknown background noise type: $noise_type_str")
+      # Instantiate background noise (supports string or object with parameters)
+      noise_def = get(slot_data, "backgroundNoise", nothing)
+      if noise_def !== nothing
+        @info "Instantiating background noise" noise_def=noise_def
+        push!(background_noise, _instantiate_noise(noise_def))
       end
-      push!(background_noise, noise_type(noise_argument))
     end
 
-    # Create the Register object with traits and background noise
-    register = Register(traits, background_noise)
+    reprs = [QuantumOpticsRepr() for _ in 1:length(traits)]
+    register = Register(traits, reprs, background_noise)
     push!(registers, register)
 
     # Map slot IDs to actual slot objects
@@ -315,7 +326,9 @@ function get_network_time_tracker(network)
   get_time_tracker(network)
 end
 
-function _resolve_protocol_type_from_string(type_str::AbstractString, input_lower::AbstractString)
+function _resolve_protocol_type_from_string(type_str::AbstractString)
+  input_lower = lowercase(type_str)
+
   # Get available protocol types for whitelist
   available_types = QuantumSavory.ProtocolZoo.available_protocol_types()
 
@@ -331,7 +344,105 @@ function _resolve_protocol_type_from_string(type_str::AbstractString, input_lowe
   return nothing
 end
 
-function _resolve_noise_type_from_string(type_str::AbstractString, input_lower::AbstractString)
+# Instantiate a background noise from either a String name or an object
+function _instantiate_noise(noise_def)
+  # Object form: { type: String, parameters: [ { name, value } ] }
+  if isa(noise_def, Dict) || startswith(string(typeof(noise_def)), "JSON3.Object")
+    tstr = get(noise_def, "type", nothing)
+    tstr === nothing && error("Noise object missing 'type'")
+    T = _resolve_type_from_string(String(tstr), :noise)
+    T === nothing && error("Unknown background noise type: $(tstr)")
+
+    # Fetch constructor metadata to know parameter expected types
+    md = QuantumSavory.constructor_metadata(T)
+    # Build map from field name -> type string
+    param_types = Dict{String, String}()
+    for p in md
+      fname = String(p.field)
+      ftype = string(p.type)
+      param_types[fname] = ftype
+    end
+
+    raw_params = Vector{Any}(get(noise_def, "parameters", Any[]))
+    kwargs = Dict{Symbol, Any}()
+
+    for p in raw_params
+      # Each p is expected to be an object with name and value
+      original_name = String(get(p, "name", ""))
+      isempty(original_name) && continue
+      name = Symbol(original_name)
+      value = get(p, "value", nothing)
+      if value === nothing
+        @warn "Noise parameter has no value, skipping" parameter_name=name
+        continue
+      end
+
+      ptype = get(param_types, original_name, "Any")
+
+      # Convert value similarly to protocol parameter handling
+      try
+        if ptype in ("Int", "Int64")
+          kwargs[name] = parse(Int, string(value))
+        elseif ptype in ("Float64", "Float32")
+          kwargs[name] = parse(Float64, string(value))
+        elseif ptype in ("Bool",)
+          if isa(value, Bool)
+            kwargs[name] = value
+          elseif isa(value, String)
+            lower_val = lowercase(value)
+            if lower_val in ("true", "1", "yes", "on")
+              kwargs[name] = true
+            elseif lower_val in ("false", "0", "no", "off")
+              kwargs[name] = false
+            else
+              @warn "Invalid Bool value for noise parameter, skipping" parameter_name=name value=value
+            end
+          elseif isa(value, Number)
+            kwargs[name] = value != 0
+          else
+            @warn "Cannot convert to Bool, skipping noise parameter" parameter_name=name value=value value_type=typeof(value)
+          end
+        elseif occursin(r"Union\{.*Nothing.*\}", ptype)
+          if isa(value, String) && lowercase(value) == "nothing"
+            kwargs[name] = nothing
+          elseif occursin(r"Float\d+", ptype)
+            kwargs[name] = parse(Float64, string(value))
+          elseif occursin(r"Int\d*", ptype)
+            kwargs[name] = parse(Int, string(value))
+          elseif occursin(r"String", ptype)
+            kwargs[name] = string(value)
+          else
+            @warn "Cannot convert Union type for noise parameter, skipping" parameter_name=name parameter_type=ptype value=value
+          end
+        else
+          # For complex types, try eval with value::type
+          eval_expr = "$(value)::$(ptype)"
+          try
+            @info "Attempting eval for noise parameter" parameter_name=name eval_expr=eval_expr
+            kwargs[name] = eval(Meta.parse(eval_expr))
+          catch eval_error
+            @warn "Eval failed for noise parameter, skipping" parameter_name=name eval_expr=eval_expr eval_error=eval_error
+          end
+        end
+      catch e
+        @warn "Failed to convert noise parameter" parameter_name=name parameter_type=ptype value=value error=e
+      end
+    end
+
+    # Instantiate noise with keyword arguments; fall back to no-arg if empty
+    if isempty(kwargs)
+      return T()
+    else
+      return T(; (k => v for (k, v) in kwargs)...)
+    end
+  end
+
+  error("Unsupported backgroundNoise definition (expected object or nothing): $(typeof(noise_def))")
+end
+
+function _resolve_noise_type_from_string(type_str::AbstractString)
+  input_lower = lowercase(type_str)
+
   # Get available noise types for whitelist
   background_types = QuantumSavory.available_background_types()
 
@@ -351,12 +462,12 @@ function _resolve_noise_type_from_string(type_str::AbstractString, input_lower::
   return nothing
 end
 
-function _resolve_slot_type_from_string(type_str::AbstractString, input_lower::AbstractString)
+function _resolve_slot_type_from_string(type_str::AbstractString)
   # Get available slot types for whitelist
   slot_types = QuantumSavory.available_slot_types()
   for st in slot_types
     type_name = string(st.type |> nameof)
-    if lowercase(type_name) == input_lower
+    if lowercase(type_name) == lowercase(type_str)
       return st.type
     end
   end
@@ -366,15 +477,14 @@ function _resolve_slot_type_from_string(type_str::AbstractString, input_lower::A
 end
 
 function _resolve_type_from_string(type_str::AbstractString, type_group::Symbol)
-  # Convert input to lowercase for case-insensitive comparison
-  input_lower = lowercase(type_str)
+  @info "Resolving type from string" type_str=type_str type_group=type_group
 
-  if type_group == :protocol
-    return _resolve_protocol_type_from_string(type_str, input_lower)
+  return if type_group == :protocol
+    _resolve_protocol_type_from_string(type_str)
   elseif type_group == :noise
-    return _resolve_noise_type_from_string(type_str, input_lower)
+    _resolve_noise_type_from_string(type_str)
   elseif type_group == :slot
-    return _resolve_slot_type_from_string(type_str, input_lower)
+    _resolve_slot_type_from_string(type_str)
   end
 end
 
@@ -430,11 +540,55 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
     end
 
     # Convert value based on type
-    ptype = string(p["type"])
+    p_raw_type = get(p, "type", nothing)
+    ptype = p_raw_type === nothing ? "Any" : string(p_raw_type)
+
+    # Normalize union representation possibly coming as an array from metadata
+    function_type_requested = false
+    lambda_type_requested = false
+    if isa(p_raw_type, AbstractVector)
+      for t in p_raw_type
+        ts = string(t)
+        function_type_requested |= ts == "Function"
+        lambda_type_requested |= ts == "Lambda"
+      end
+    else
+      function_type_requested = ptype == "Function"
+      lambda_type_requested = ptype == "Lambda"
+    end
 
     # Try to convert the value, fall back gracefully if it fails
     try
-      if ptype in ("Int", "Int64") && value !== nothing
+      # Handle function-like parameters first
+      if function_type_requested || lambda_type_requested
+        if isa(value, Function)
+          kwargs[name] = value
+          continue
+        elseif isa(value, String)
+          # Try to resolve by name first (works for both Function and Lambda cases),
+          # then fall back to creating a lambda from code.
+          resolved = resolve_function_reference(value)
+          if resolved === nothing && lambda_type_requested
+            try
+              resolved = create_lambda(value)
+            catch e
+              @warn "Failed to create lambda from string" parameter_name=name value=value error=e
+            end
+          end
+          if resolved === nothing && function_type_requested
+            @warn "Could not resolve function by name" parameter_name=name value=value
+          elseif resolved === nothing && lambda_type_requested
+            @warn "Could not create lambda from value" parameter_name=name value=value
+          else
+            kwargs[name] = resolved
+            continue
+          end
+        else
+          @warn "Function/Lambda parameter has unsupported value type; skipping" parameter_name=name value_type=typeof(value)
+          continue
+        end
+
+      elseif ptype in ("Int", "Int64") && value !== nothing
         try
           kwargs[name] = parse(Int, string(value))
         catch
@@ -949,7 +1103,7 @@ function destroy_simulation(simulation_name)
 end
 
 function known_functions()
-  [string(f) for f in [min, max, abs, identity]]
+  [string(f) for f in [min, maximum, abs, identity]]
 end
 
 include("mocks.jl")
