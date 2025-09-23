@@ -386,7 +386,7 @@ end
                 status:
                   type: string
                   description: Current status of the simulation
-                  enum: ["created", "prepared", "running", "unknown"]
+                  enum: ["created", "prepared", "complete", "unknown"]
                 node_count:
                   type: integer
                   description: Number of nodes in the network
@@ -479,7 +479,7 @@ end
                 status:
                   type: string
                   description: Current status of the simulation
-                  enum: ["created", "prepared", "running", "unknown"]
+                  enum: ["created", "prepared", "complete", "unknown"]
                 node_count:
                   type: integer
                   description: Number of nodes in the network

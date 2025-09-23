@@ -63,23 +63,37 @@ function parse_pt_type(parameters::AbstractVector)
   result = []
 
   for p in parameters
-    s = string(p.type)
+    t = getfield(p, :type)
 
-    if !startswith(s, "Union{")
-      push!(result, p)
-      continue
+    # Prefer metadata-driven union detection to avoid string parsing
+    try
+      if t isa Type && Base.isuniontype(t)
+        utypes = Base.uniontypes(t)
+        push!(result, (field = p.field, type = [string(ut) for ut in utypes], doc = p.doc))
+        continue
+      end
+    catch
+      # Fall back to string-based check only if metadata access fails
     end
 
-    m = match(r"^Union\{(.*)\}$", s)
-    if m === nothing
-      push!(result, p)
-      continue
+    # Fallback: legacy string detection for unions if type metadata wasn't a Type
+    try
+      s = string(t)
+      if startswith(s, "Union{")
+        m = match(r"^Union\{(.*)\}$", s)
+        if m !== nothing
+          inner = m.captures[1]
+          parts = split(inner, ",")
+          push!(result, (field = p.field, type = [strip(pp) for pp in parts], doc = p.doc))
+          continue
+        end
+      end
+    catch
+      # Ignore and fall through to pushing original param
     end
 
-    inner = m.captures[1]
-    parts = split(inner, ",")
-
-    push!(result, (field = p.field, type = [strip(pp) for pp in parts], doc = p.doc))
+    # Non-union or unrecognized type format: pass through
+    push!(result, p)
   end
 
   result
@@ -940,19 +954,17 @@ const STATUS_MESSAGE_PREPARED = "Simulation is prepared and ready to run"
 const STATUS_MESSAGE_CREATED = "Network has been created"
 const STATUS_MESSAGE_UNKNOWN = "No network data available"
 
+# Single source of truth for status -> message mapping
+const STATUS_TO_MESSAGE = Dict(
+  STATUS_COMPLETE => STATUS_MESSAGE_COMPLETE,
+  STATUS_PREPARED => STATUS_MESSAGE_PREPARED,
+  STATUS_CREATED => STATUS_MESSAGE_CREATED,
+  STATUS_UNKNOWN => STATUS_MESSAGE_UNKNOWN,
+)
+
 function _get_status_message(state::State)
-  if state.simulation !== nothing
-    # Check if simulation has been run
-    if state.has_run
-      return STATUS_MESSAGE_COMPLETE
-    else
-      return STATUS_MESSAGE_PREPARED
-    end
-  elseif state.graph !== nothing || state.network !== nothing
-    return STATUS_MESSAGE_CREATED
-  else
-    return STATUS_MESSAGE_UNKNOWN
-  end
+  status = _determine_status(state)
+  return get(STATUS_TO_MESSAGE, status, STATUS_MESSAGE_UNKNOWN)
 end
 
 function cleanup_state!(state::State)
@@ -1103,13 +1115,10 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
     @process prot()
     launched["floating"] += 1
 
-    # Store protocol metadata in mapping if it has an ID
+    # Store protocol instance in mapping if it has an ID (consistent with nodes/edges)
     if haskey(prot_def, "id")
       protocol_id = string(prot_def["id"])
-      protocol_mapping[protocol_id] = Dict(
-        "type" => string(typeof(prot)),
-        "definition" => prot_def
-      )
+      protocol_mapping[protocol_id] = prot
     end
 
     @info "Successfully launched floating protocol" protocol_type=typeof(prot)

@@ -13,7 +13,8 @@
   # Check if server is available
   function is_server_available()
     try
-      response = HTTP.get("$TEST_BASE_URL/status", timeout=5.0)
+      # Avoid exceptions on non-200 and rely on status code
+      response = HTTP.get("$TEST_BASE_URL/status"; status_exception=false)
       return response.status == 200
     catch
       return false
@@ -23,7 +24,7 @@
   # Fail fast if server is not available
   if !is_server_available()
     @error "Server not available at $TEST_BASE_URL. Integration tests require a running server."
-    @test false "Server not available at $TEST_BASE_URL"
+    @test false
     return
   end
 
