@@ -20,6 +20,123 @@ include("Sandbox.jl")
 
 const up = Genie.up
 export up
+# Simple caches to avoid repeated scans/logs during type resolution
+const _PROTOCOL_TYPES_CACHE = Ref(Dict{String, Any}())
+const _NOISE_TYPES_CACHE = Ref(Dict{String, Any}())
+const _SLOT_TYPES_CACHE = Ref(Dict{String, Any}())
+
+function _ensure_protocol_types_cache!()
+  if isempty(_PROTOCOL_TYPES_CACHE[])
+    mapping = Dict{String, Any}()
+    for pt in QuantumSavory.ProtocolZoo.available_protocol_types()
+      mapping[lowercase(string(pt.type))] = pt.type
+    end
+    _PROTOCOL_TYPES_CACHE[] = mapping
+  end
+end
+
+function _ensure_noise_types_cache!()
+  if isempty(_NOISE_TYPES_CACHE[])
+    mapping = Dict{String, Any}()
+    for bt in QuantumSavory.available_background_types()
+      mapping[lowercase(string(bt.type |> nameof))] = bt.type
+    end
+    _NOISE_TYPES_CACHE[] = mapping
+  end
+end
+
+function _ensure_slot_types_cache!()
+  if isempty(_SLOT_TYPES_CACHE[])
+    mapping = Dict{String, Any}()
+    for st in QuantumSavory.available_slot_types()
+      mapping[lowercase(string(st.type |> nameof))] = st.type
+    end
+    _SLOT_TYPES_CACHE[] = mapping
+  end
+end
+
+"""Convert a raw parameter value to a target primitive or simple Union type.
+
+Supported target strings: "Int", "Int64", "Float64", "Float32", "Bool",
+Union types that include Nothing and one of the above primitives or String.
+
+Returns a Pair{Bool,Any} where first indicates success. On failure, returns
+(false, nothing) and callers should skip setting the parameter.
+"""
+function _convert_parameter_value(ptype::AbstractString, value)
+  # Normalize ptype string
+  ts = String(ptype)
+
+  # Direct primitives
+  try
+    if ts in ("Int", "Int64")
+      if isa(value, Integer)
+        return true => Int(value)
+      elseif isa(value, AbstractFloat)
+        if isinteger(value)
+          return true => Int(trunc(value))
+        else
+          return false => nothing
+        end
+      else
+        return true => parse(Int, string(value))
+      end
+    elseif ts in ("Float64", "Float32")
+      if isa(value, Number)
+        return true => Float64(value)
+      else
+        return true => parse(Float64, string(value))
+      end
+    elseif ts == "Bool"
+      if isa(value, Bool)
+        return true => value
+      elseif isa(value, String)
+        lv = lowercase(value)
+        if lv in ("true", "1", "yes", "on")
+          return true => true
+        elseif lv in ("false", "0", "no", "off")
+          return true => false
+        else
+          return false => nothing
+        end
+      elseif isa(value, Number)
+        return true => (value != 0)
+      else
+        return false => nothing
+      end
+    end
+  catch
+    return false => nothing
+  end
+
+  # Union types with Nothing and a simple member
+  try
+    if occursin(r"Union\{.*Nothing.*\}", ts)
+      if isa(value, String) && lowercase(value) == "nothing"
+        return true => nothing
+      end
+      if occursin(r"Float\d+", ts)
+        return true => parse(Float64, string(value))
+      elseif occursin(r"Int\d*", ts)
+        return true => parse(Int, string(value))
+      elseif occursin(r"String", ts)
+        return true => string(value)
+      elseif occursin(r"Bool", ts)
+        # Delegate to Bool path by recursion
+        ok, v = _convert_parameter_value("Bool", value)
+        return ok => v
+      end
+      # Unsupported union member: let caller handle
+      return false => nothing
+    end
+  catch
+    return false => nothing
+  end
+
+  # No conversion performed
+  return false => nothing
+end
+
 
 @kwdef mutable struct State
   name::String
@@ -30,6 +147,7 @@ export up
   simulation::Union{Nothing, Simulation} = nothing
   has_run::Bool = false
   slot_mapping::Union{Nothing, Dict{String, Any}} = nothing
+  slot_reverse_mapping::Union{Nothing, IdDict{Any, String}} = nothing
   protocol_mapping::Union{Nothing, Dict{String, Any}} = nothing
 end
 
@@ -42,6 +160,9 @@ end
 function get_background_constructor_parameters(background_type)
   QuantumSavory.constructor_metadata(background_type)
 end
+"""Coerce any AbstractVector implementation (e.g., JSON3.Array) to a plain Vector."""
+_to_vector(x) = isa(x, AbstractVector) ? collect(x) : x
+
 
 function get_background_types()
   background_types = QuantumSavory.available_background_types()
@@ -192,14 +313,18 @@ function validate_payload(payload)
     nodes = net["nodes"]
     edges = net["edges"]
 
-    # Validate that nodes and edges are arrays
-    if !isa(nodes, Vector) && !startswith(string(typeof(nodes)), "JSON3.Array")
+    # Validate that nodes and edges are arrays, accepting any AbstractVector
+    if !isa(nodes, AbstractVector)
       throw(validation_error("Field 'nodes' must be an array", Dict{String, Any}("nodes_type" => string(typeof(nodes)))))
     end
 
-    if !isa(edges, Vector) && !startswith(string(typeof(edges)), "JSON3.Array")
+    if !isa(edges, AbstractVector)
       throw(validation_error("Field 'edges' must be an array", Dict{String, Any}("edges_type" => string(typeof(edges)))))
     end
+
+    # Normalize to plain Vectors to avoid type cracks downstream
+    nodes = _to_vector(nodes)
+    edges = _to_vector(edges)
 
     # Validate each node structure
     node_ids = Set{String}()
@@ -310,6 +435,7 @@ function create_registers_from_nodes(data)
   # Create array of Register objects based on slots data
   registers = []
   slot_mapping = Dict{String, Any}()
+  slot_reverse = IdDict{Any, String}()
 
   for node in nodes
     node_data = node["data"]
@@ -345,11 +471,13 @@ function create_registers_from_nodes(data)
     # Map slot IDs to actual slot objects
     for (slot_idx, slot_data) in enumerate(slots)
       slot_id = slot_data["id"]
-      slot_mapping[slot_id] = register[slot_idx]
+      slot_obj = register[slot_idx]
+      slot_mapping[slot_id] = slot_obj
+      slot_reverse[slot_obj] = slot_id
     end
   end
 
-  (registers, slot_mapping)
+  (registers, slot_mapping, slot_reverse)
 end
 
 function create_register_net(graph, registers)
@@ -364,20 +492,12 @@ end
 
 function _resolve_protocol_type_from_string(type_str::AbstractString)
   input_lower = lowercase(type_str)
-
-  # Get available protocol types for whitelist
-  available_types = QuantumSavory.ProtocolZoo.available_protocol_types()
-
-  # Find matching type (case-insensitive)
-  for pt in available_types
-    type_name = string(pt.type)
-    if lowercase(type_name) == input_lower
-      return pt.type
-    end
+  _ensure_protocol_types_cache!()
+  T = get(_PROTOCOL_TYPES_CACHE[], input_lower, nothing)
+  if T === nothing
+    @warn "Protocol type not found in whitelist" type_str=type_str
   end
-
-  @warn "Protocol type not found in whitelist" type_str=type_str
-  return nothing
+  return T
 end
 
 # Instantiate a background noise from either a String name or an object
@@ -422,53 +542,20 @@ function _instantiate_noise(noise_def)
 
       ptype = get(param_types, original_name, "Any")
 
-      # Convert value similarly to protocol parameter handling
+      # Convert value using shared utility; if unsupported, try eval as last resort
+      ok, converted = _convert_parameter_value(ptype, value)
+      if ok
+        kwargs[name] = converted
+        continue
+      end
+
+      # For complex types, try eval with value::type
+      eval_expr = "$(value)::$(ptype)"
       try
-        if ptype in ("Int", "Int64")
-          kwargs[name] = parse(Int, string(value))
-        elseif ptype in ("Float64", "Float32")
-          kwargs[name] = parse(Float64, string(value))
-        elseif ptype in ("Bool",)
-          if isa(value, Bool)
-            kwargs[name] = value
-          elseif isa(value, String)
-            lower_val = lowercase(value)
-            if lower_val in ("true", "1", "yes", "on")
-              kwargs[name] = true
-            elseif lower_val in ("false", "0", "no", "off")
-              kwargs[name] = false
-            else
-              @warn "Invalid Bool value for noise parameter, skipping" parameter_name=name value=value
-            end
-          elseif isa(value, Number)
-            kwargs[name] = value != 0
-          else
-            @warn "Cannot convert to Bool, skipping noise parameter" parameter_name=name value=value value_type=typeof(value)
-          end
-        elseif occursin(r"Union\{.*Nothing.*\}", ptype)
-          if isa(value, String) && lowercase(value) == "nothing"
-            kwargs[name] = nothing
-          elseif occursin(r"Float\d+", ptype)
-            kwargs[name] = parse(Float64, string(value))
-          elseif occursin(r"Int\d*", ptype)
-            kwargs[name] = parse(Int, string(value))
-          elseif occursin(r"String", ptype)
-            kwargs[name] = string(value)
-          else
-            @warn "Cannot convert Union type for noise parameter, skipping" parameter_name=name parameter_type=ptype value=value
-          end
-        else
-          # For complex types, try eval with value::type
-          eval_expr = "$(value)::$(ptype)"
-          try
-            @info "Attempting eval for noise parameter" parameter_name=name eval_expr=eval_expr
-            kwargs[name] = eval(Meta.parse(eval_expr))
-          catch eval_error
-            @warn "Eval failed for noise parameter, skipping" parameter_name=name eval_expr=eval_expr eval_error=eval_error
-          end
-        end
-      catch e
-        @warn "Failed to convert noise parameter" parameter_name=name parameter_type=ptype value=value error=e
+        @info "Attempting eval for noise parameter" parameter_name=name eval_expr=eval_expr
+        kwargs[name] = eval(Meta.parse(eval_expr))
+      catch eval_error
+        @warn "Eval failed for noise parameter, skipping" parameter_name=name eval_expr=eval_expr eval_error=eval_error
       end
     end
 
@@ -485,43 +572,34 @@ end
 
 function _resolve_noise_type_from_string(type_str::AbstractString)
   input_lower = lowercase(type_str)
-
-  # Get available noise types for whitelist
-  background_types = QuantumSavory.available_background_types()
+  _ensure_noise_types_cache!()
 
   if input_lower == "default"
-    @warn "Using default noise type" type_str=type_str
-    return background_types[1].type
-  end
-
-  for bt in background_types
-    type_name = string(bt.type |> nameof)
-    if lowercase(type_name) == input_lower
-      return bt.type
+    # Choose first available background type deterministically
+    for (_, T) in _NOISE_TYPES_CACHE[]
+      return T
     end
   end
 
-  @warn "Noise type not found in whitelist" type_str=type_str
-  return nothing
+  T = get(_NOISE_TYPES_CACHE[], input_lower, nothing)
+  if T === nothing
+    @warn "Noise type not found in whitelist" type_str=type_str
+  end
+  return T
 end
 
 function _resolve_slot_type_from_string(type_str::AbstractString)
-  # Get available slot types for whitelist
-  slot_types = QuantumSavory.available_slot_types()
-  for st in slot_types
-    type_name = string(st.type |> nameof)
-    if lowercase(type_name) == lowercase(type_str)
-      return st.type
-    end
+  input_lower = lowercase(type_str)
+  _ensure_slot_types_cache!()
+  T = get(_SLOT_TYPES_CACHE[], input_lower, nothing)
+  if T === nothing
+    @warn "Slot type not found in whitelist" type_str=type_str
   end
-
-  @warn "Slot type not found in whitelist" type_str=type_str
-  return nothing
+  return T
 end
 
 function _resolve_type_from_string(type_str::AbstractString, type_group::Symbol)
-  @info "Resolving type from string" type_str=type_str type_group=type_group
-
+  # Reduce log noise; warn only on misses at leaf resolvers
   return if type_group == :protocol
     _resolve_protocol_type_from_string(type_str)
   elseif type_group == :noise
@@ -631,60 +709,12 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
           continue
         end
 
-      elseif ptype in ("Int", "Int64") && value !== nothing
-        try
-          kwargs[name] = parse(Int, string(value))
-        catch
-          @warn "Cannot convert to Int, skipping parameter" parameter_name=name value=value
-        end
-      elseif ptype in ("Float64", "Float32") && value !== nothing
-        try
-          kwargs[name] = parse(Float64, string(value))
-        catch
-          @warn "Cannot convert to Float64, skipping parameter" parameter_name=name value=value
-        end
-      elseif ptype in ("Bool",) && value !== nothing
-        # Handle Bool conversion from various types
-        if isa(value, Bool)
-          kwargs[name] = value
-        elseif isa(value, String)
-          lower_val = lowercase(value)
-          if lower_val in ("true", "1", "yes", "on")
-            kwargs[name] = true
-          elseif lower_val in ("false", "0", "no", "off")
-            kwargs[name] = false
-          else
-            @warn "Invalid Bool value, skipping parameter" parameter_name=name value=value
-            # Skip this parameter - don't add to kwargs
-          end
-        elseif isa(value, Number)
-          kwargs[name] = value != 0
-        else
-          @warn "Cannot convert to Bool, skipping parameter" parameter_name=name value=value value_type=typeof(value)
-          # Skip this parameter - don't add to kwargs
-        end
-      elseif occursin(r"Union\{.*Nothing.*\}", ptype) && value !== nothing
-        # Handle Union types that include Nothing (optional parameters)
-        if isa(value, String) && lowercase(value) == "nothing"
-          kwargs[name] = nothing
-        elseif occursin(r"Float\d+", ptype)
-          try
-            kwargs[name] = parse(Float64, string(value))
-          catch
-            @warn "Cannot convert Union Float64, skipping parameter" parameter_name=name value=value
-          end
-        elseif occursin(r"Int\d*", ptype)
-          try
-            kwargs[name] = parse(Int, string(value))
-          catch
-            @warn "Cannot convert Union Int, skipping parameter" parameter_name=name value=value
-          end
-        elseif occursin(r"String", ptype)
-          kwargs[name] = string(value)
-        else
-          @warn "Cannot convert Union type, skipping parameter" parameter_name=name parameter_type=ptype value=value
-        end
       else
+        ok, converted = _convert_parameter_value(ptype, value)
+        if ok
+          kwargs[name] = converted
+          continue
+        end
         # For complex types, try eval with value::type pattern
         eval_expr = "$(value)::$(ptype)"
         try
@@ -766,22 +796,25 @@ function get_slot_state(slot_id::String, state::State)
 
   if !isnothing(slot_state)
     entangled_slot_refs = QuantumSavory.slots(slot_state)
-    for slot_ref in entangled_slot_refs
-      # Find the slot ID for this slot reference
-      parent_reg = QuantumSavory.parent(slot_ref)
-      slot_idx = QuantumSavory.parentindex(slot_ref)
-
-      # Find the slot ID by searching through the mapping
-      slot_id_found = nothing
+    # Ensure reverse mapping exists locally
+    local_reverse = state.slot_reverse_mapping === nothing ? IdDict{Any,String}() : state.slot_reverse_mapping
+    if state.slot_reverse_mapping === nothing && state.slot_mapping !== nothing
       for (id, mapped_slot) in state.slot_mapping
-        if mapped_slot === slot_ref
-          slot_id_found = id
-          push!(entangled_slots, id)
-          break
-        end
+        local_reverse[mapped_slot] = id
+      end
+      state.slot_reverse_mapping = local_reverse
+    end
+
+    for slot_ref in entangled_slot_refs
+      # Find the slot ID via reverse mapping
+      slot_id_found = get(local_reverse, slot_ref, nothing)
+      if slot_id_found !== nothing
+        push!(entangled_slots, slot_id_found)
       end
 
       # Add detailed information about the entangled slot
+      parent_reg = QuantumSavory.parent(slot_ref)
+      slot_idx = QuantumSavory.parentindex(slot_ref)
       push!(entangled_slot_details, Dict(
         "slot_id" => slot_id_found,
         "parent_reg_index" => QuantumSavory.parentindex(parent_reg),
@@ -866,6 +899,15 @@ function _serialize_slots(state::State)
   slots_info = []
   entanglements = []
 
+  # Build or reuse reverse mapping for O(1) lookups
+  local_reverse = state.slot_reverse_mapping === nothing ? IdDict{Any,String}() : state.slot_reverse_mapping
+  if state.slot_reverse_mapping === nothing
+    for (sid, s) in state.slot_mapping
+      local_reverse[s] = sid
+    end
+    state.slot_reverse_mapping = local_reverse
+  end
+
   for (slot_id, slot) in state.slot_mapping
     # Get slot state and entangled slots
     slot_state = QuantumSavory.stateof(slot)
@@ -874,13 +916,8 @@ function _serialize_slots(state::State)
     if !isnothing(slot_state)
       entangled_slot_refs = QuantumSavory.slots(slot_state)
       for slot_ref in entangled_slot_refs
-        # Find the slot ID for this slot reference
-        for (id, mapped_slot) in state.slot_mapping
-          if mapped_slot === slot_ref
-            push!(entangled_slot_ids, id)
-            break
-          end
-        end
+        id_found = get(local_reverse, slot_ref, nothing)
+        id_found === nothing || push!(entangled_slot_ids, id_found)
       end
     end
 
@@ -1008,6 +1045,11 @@ function cleanup_state!(state::State)
     if state.slot_mapping !== nothing
       @info "Clearing slot mapping" state_name=state.name slot_count=length(state.slot_mapping)
       state.slot_mapping = nothing
+    end
+
+    if state.slot_reverse_mapping !== nothing
+      @info "Clearing slot reverse mapping" state_name=state.name slot_count=length(state.slot_reverse_mapping)
+      state.slot_reverse_mapping = nothing
     end
 
     if state.protocol_mapping !== nothing

@@ -22,7 +22,7 @@ function route(f::Function, args...; name=nothing, kwargs...)
 end
 
 route("/") do
-  Dict(:status => "OK") |> json
+  Genie.Router.serve_static_file("index.html")
 end
 
 ########################################################
@@ -426,7 +426,7 @@ route("/parse_network_graph", method="POST") do
     g = build_graph(validation_result)
 
     # Create registers array based on node slots data
-    registers, slot_mapping = create_registers_from_nodes(validation_result)
+    registers, slot_mapping, slot_reverse_mapping = create_registers_from_nodes(validation_result)
 
     # Create the RegisterNet from the graph and registers
     net = create_register_net(g, registers)
@@ -443,6 +443,7 @@ route("/parse_network_graph", method="POST") do
       graph = g,
       network = net,
       slot_mapping = slot_mapping,
+      slot_reverse_mapping = slot_reverse_mapping,
     )
 
     Cqn.STATE[simulation_name] = state

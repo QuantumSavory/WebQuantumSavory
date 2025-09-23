@@ -137,7 +137,7 @@
 
   @testset "Register Creation" begin
       validation_result = Cqn.validate_payload(test_payload)
-      registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
+      registers, slot_mapping, slot_reverse_mapping = Cqn.create_registers_from_nodes(validation_result)
       @test isa(registers, Vector)
       @test length(registers) == 1  # Only first node has slots
       @test isa(registers[1], Register)
@@ -147,7 +147,7 @@
   @testset "RegisterNet Creation" begin
       validation_result = Cqn.validate_payload(test_payload)
       g = Cqn.build_graph(validation_result)
-      registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
+      registers, slot_mapping, slot_reverse_mapping = Cqn.create_registers_from_nodes(validation_result)
       net = Cqn.create_register_net(g, registers)
       @test isa(net, RegisterNet)
   end
@@ -199,7 +199,7 @@
       # Create a proper simulation context
       validation_result = Cqn.validate_payload(test_payload)
       g = Cqn.build_graph(validation_result)
-      registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
+      registers, slot_mapping, slot_reverse_mapping = Cqn.create_registers_from_nodes(validation_result)
       net = Cqn.create_register_net(g, registers)
       sim = Cqn.get_network_time_tracker(net)
 
@@ -334,7 +334,7 @@
   @testset "Slot State Inspection" begin
     # Create a test state with slot mapping
     validation_result = Cqn.validate_payload(test_payload)
-    registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
+    registers, slot_mapping, slot_reverse_mapping = Cqn.create_registers_from_nodes(validation_result)
     state = Cqn.State(name="test", slot_mapping=slot_mapping)
 
     # Test get_slot_state with existing slot
@@ -371,7 +371,7 @@
     # Create a test state with various components
     validation_result = Cqn.validate_payload(test_payload)
     g = Cqn.build_graph(validation_result)
-    registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
+    registers, slot_mapping, slot_reverse_mapping = Cqn.create_registers_from_nodes(validation_result)
     net = Cqn.create_register_net(g, registers)
 
     state = Cqn.State(
@@ -398,7 +398,7 @@
   @testset "Slot Serialization" begin
     # Create a test state with slot mapping
     validation_result = Cqn.validate_payload(test_payload)
-    registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
+    registers, slot_mapping, slot_reverse_mapping = Cqn.create_registers_from_nodes(validation_result)
     state = Cqn.State(name="test", slot_mapping=slot_mapping)
 
     # Test slot serialization
@@ -467,6 +467,40 @@
     # Test non-existent types
     @test Cqn._resolve_noise_type_from_string("NonExistent") === nothing
     @test Cqn._resolve_slot_type_from_string("NonExistent") === nothing
+  end
+
+  @testset "Parameter Conversion Utility" begin
+    # Int conversions
+    ok, v = Cqn._convert_parameter_value("Int", "42")
+    @test ok && v == 42
+    ok, v = Cqn._convert_parameter_value("Int64", 7.0)
+    @test ok && v == 7
+
+    # Float conversions
+    ok, v = Cqn._convert_parameter_value("Float64", "3.14")
+    @test ok && v ≈ 3.14
+    ok, v = Cqn._convert_parameter_value("Float32", 2)
+    @test ok && v == 2.0
+
+    # Bool conversions
+    ok, v = Cqn._convert_parameter_value("Bool", "true")
+    @test ok && v === true
+    ok, v = Cqn._convert_parameter_value("Bool", "off")
+    @test ok && v === false
+    ok, v = Cqn._convert_parameter_value("Bool", 0)
+    @test ok && v === false
+    ok, v = Cqn._convert_parameter_value("Bool", :nope)
+    @test !ok
+
+    # Union with Nothing
+    ok, v = Cqn._convert_parameter_value("Union{Nothing, Int64}", "nothing")
+    @test ok && v === nothing
+    ok, v = Cqn._convert_parameter_value("Union{Nothing, Float64}", "2.5")
+    @test ok && v == 2.5
+    ok, v = Cqn._convert_parameter_value("Union{Nothing, String}", 123)
+    @test ok && v == "123"
+    ok, v = Cqn._convert_parameter_value("Union{Nothing, Bool}", "yes")
+    @test ok && v === true
   end
 
   @testset "Extract Payload Error Handling" begin
