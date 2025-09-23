@@ -58,7 +58,7 @@ The server will start on `http://localhost:8000` by default.
 - **`POST /test_code`** - Test Julia code in a sandboxed environment
 - **`GET /status`** - Server health check
 - **`GET /docs`** - Interactive Swagger UI
-- **`GET /`** - Basic root endpoint (OK status)
+- **`GET /`** - Serves the app UI (public/index.html)
 
 ### Simulation States
 
@@ -74,3 +74,29 @@ The best way to explore the API is through the interactive Swagger documentation
 - Interactive testing interface
 - Example payloads and responses
 
+## Running Tests
+
+This project includes unit tests and integration tests.
+
+- Unit tests validate core logic and helpers without requiring a running server.
+- Integration tests exercise the HTTP API and require the server to be running at `http://localhost:8000`.
+
+### Run Unit Tests
+
+```bash
+cd test
+julia --project runtests.jl test_unit
+```
+
+### Run Integration Tests
+
+1. Start the server (in a separate terminal):
+   ```bash
+   ./bin/server
+   ```
+
+2. In another terminal, run:
+   ```bash
+   cd test
+   julia --project runtests.jl test_integration
+   ```
