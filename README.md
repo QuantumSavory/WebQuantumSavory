@@ -15,11 +15,6 @@ A Julia-based web API for quantum network operations, built with the Genie web f
    julia --project=. -e 'using Pkg; Pkg.instantiate()'
    ```
 
-3. **Start the Julia REPL**:
-   ```bash
-   ./bin/repl
-   ```
-
 ## Running the Server
 
 ### Option 1: Using the provided script
@@ -27,14 +22,11 @@ A Julia-based web API for quantum network operations, built with the Genie web f
 ./bin/server
 ```
 
-### Option 2: From Julia REPL
-```julia
-using Genie
-Genie.loadapp()
-Genie.up()
-```
-
 The server will start on `http://localhost:8000` by default.
+
+## UI Access
+
+The user interface is available at `http://localhost:8000`.
 
 ## API Overview
 
@@ -58,7 +50,6 @@ The server will start on `http://localhost:8000` by default.
 - **`POST /test_code`** - Test Julia code in a sandboxed environment
 - **`GET /status`** - Server health check
 - **`GET /docs`** - Interactive Swagger UI
-- **`GET /`** - Serves the app UI (public/index.html)
 
 ### Simulation States
 
