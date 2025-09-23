@@ -20,10 +20,10 @@
     end
   end
 
-  # Skip all tests if server is not available
+  # Fail fast if server is not available
   if !is_server_available()
-    @warn "Server not available at $TEST_BASE_URL. Skipping integration tests."
-    @test true  # Dummy test to avoid test failure
+    @error "Server not available at $TEST_BASE_URL. Integration tests require a running server."
+    @test false "Server not available at $TEST_BASE_URL"
     return
   end
 

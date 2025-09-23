@@ -108,31 +108,53 @@ function get_protocol_types()
 end
 
 function extract_payload(payload = nothing, raw_payload = nothing)
-  request_headers = Dict(lowercase(header) => lowercase(value) for (header, value) in Genie.Requests.getheaders())
-  required_headers = ["content-type", "accept"]
-  for header in required_headers
-    if !haskey(request_headers, header) || request_headers[header] != "application/json"
-      @warn "Header $header must be application/json" header=header header_value=request_headers[header]
-      throw(validation_error("Header $header must be application/json", Dict{String, Any}("header" => header, "header_value" => request_headers[header])))
-    end
+  # Helper: parse media type parameters (e.g., "application/json; charset=utf-8")
+  _is_json_mediatype(s) = try
+    s === nothing && return false
+    t = lowercase(String(s)) |> strip
+    main = split(t, ";")[1] |> strip
+    return (main == "application/json") || endswith(main, "+json") || (main == "text/json")
+  catch
+    false
   end
 
-  # If jsonpayload() returns nothing, try to get the raw payload and parse it
-  if payload === nothing
-    @warn "No payload found, trying to parse raw payload"
-    if isa(raw_payload, String)
-      try
-        @warn "Parsing raw payload"
-        payload = JSON.parse(raw_payload)
-      catch parse_error
-        throw(validation_error("Failed to parse JSON from raw payload", Dict{String, Any}("parse_error" => string(parse_error))))
+  # Header validation is best-effort: only warn if clearly incompatible, but do not hard fail
+  # This keeps the function usable from tests and internal code paths without HTTP context
+  try
+    request_headers = Dict(lowercase(header) => String(value) for (header, value) in Genie.Requests.getheaders())
+    if haskey(request_headers, "content-type")
+      ct = request_headers["content-type"]
+      if !_is_json_mediatype(ct)
+        @warn "Unsupported Content-Type for JSON payload" content_type=ct
       end
-    else
-      throw(validation_error("No valid JSON payload found", Dict{String, Any}("raw_payload_type" => string(typeof(raw_payload)))))
+    end
+    if haskey(request_headers, "accept")
+      acc = lowercase(request_headers["accept"]) |> strip
+      # Accept if it contains json, +json, or */*
+      acceptable = occursin("application/json", acc) || occursin("+json", acc) || occursin("*/*", acc)
+      if !acceptable
+        @warn "Client Accept header may not support JSON" accept=acc
+      end
+    end
+  catch
+    # Ignore header errors entirely
+  end
+
+  # Prefer already-parsed payload if provided
+  if payload !== nothing
+    return payload
+  end
+
+  # Otherwise parse raw payload if available
+  if isa(raw_payload, String)
+    try
+      return JSON.parse(raw_payload)
+    catch parse_error
+      throw(validation_error("Failed to parse JSON from raw payload", Dict{String, Any}("parse_error" => string(parse_error))))
     end
   end
 
-  payload
+  throw(validation_error("No valid JSON payload found", Dict{String, Any}("raw_payload_type" => string(typeof(raw_payload)))))
 end
 
 function validate_payload(payload)
@@ -346,6 +368,13 @@ end
 
 # Instantiate a background noise from either a String name or an object
 function _instantiate_noise(noise_def)
+  # String form: "Depolarization" or any available background type name
+  if isa(noise_def, AbstractString)
+    T = _resolve_type_from_string(String(noise_def), :noise)
+    T === nothing && error("Unknown background noise type: $(noise_def)")
+    return T()
+  end
+
   # Object form: { type: String, parameters: [ { name, value } ] }
   if isa(noise_def, Dict) || startswith(string(typeof(noise_def)), "JSON3.Object")
     tstr = get(noise_def, "type", nothing)

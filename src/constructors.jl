@@ -16,3 +16,14 @@ function QuantumSavory.AmplitudeDamping(; τ::Float64 = rand())
   @warn "AmplitudeDamping constructor with keyword arguments" τ=τ
   QuantumSavory.AmplitudeDamping(τ)
 end
+
+function QuantumSavory.Depolarization(; τ::Float64 = rand())
+  @warn "Depolarization constructor with keyword arguments" τ=τ
+  QuantumSavory.Depolarization(τ)
+end
+
+function QuantumSavory.T1Decay(; t1::Float64 = rand())
+  @warn "T1Decay constructor with keyword arguments" t1=t1
+  QuantumSavory.T1Decay(t1)
+end
+

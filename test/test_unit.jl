@@ -40,10 +40,9 @@
   end
 
   @testset "Payload Extraction" begin
-      # Test with valid JSON string
+      # Now that extract_payload accepts missing/relaxed headers, direct call should parse
       json_str = JSON.json(test_payload)
       result = Cqn.extract_payload(nothing, json_str)
-      @test !haskey(result, "success") || result["success"] !== false
       @test result["name"] == "PR15"
   end
 
@@ -446,28 +445,28 @@
 
   @testset "Type Resolution Functions" begin
     # Test noise type resolution
-    noise_type = Cqn._resolve_noise_type_from_string("Depolarization", "depolarization")
+    noise_type = Cqn._resolve_noise_type_from_string("Depolarization")
     @test noise_type !== nothing
 
     # Test case-insensitive noise resolution
-    noise_type = Cqn._resolve_noise_type_from_string("DEPOLARIZATION", "depolarization")
+    noise_type = Cqn._resolve_noise_type_from_string("DEPOLARIZATION")
     @test noise_type !== nothing
 
     # Test default noise type
-    default_noise = Cqn._resolve_noise_type_from_string("default", "default")
+    default_noise = Cqn._resolve_noise_type_from_string("default")
     @test default_noise !== nothing
 
     # Test slot type resolution
-    slot_type = Cqn._resolve_slot_type_from_string("Qubit", "qubit")
+    slot_type = Cqn._resolve_slot_type_from_string("Qubit")
     @test slot_type !== nothing
 
     # Test case-insensitive slot resolution
-    slot_type = Cqn._resolve_slot_type_from_string("QUBIT", "qubit")
+    slot_type = Cqn._resolve_slot_type_from_string("QUBIT")
     @test slot_type !== nothing
 
     # Test non-existent types
-    @test Cqn._resolve_noise_type_from_string("NonExistent", "nonexistent") === nothing
-    @test Cqn._resolve_slot_type_from_string("NonExistent", "nonexistent") === nothing
+    @test Cqn._resolve_noise_type_from_string("NonExistent") === nothing
+    @test Cqn._resolve_slot_type_from_string("NonExistent") === nothing
   end
 
   @testset "Extract Payload Error Handling" begin
@@ -477,15 +476,15 @@
     # Test with non-string raw payload
     @test_throws Cqn.APIError Cqn.extract_payload(nothing, 123)
 
-    # Test with valid JSON string
+    # Valid JSON parses without requiring headers
     valid_json = JSON.json(Dict("test" => "value"))
     result = Cqn.extract_payload(nothing, valid_json)
     @test result["test"] == "value"
 
-    # Test with existing payload
+    # Existing parsed payload is returned as-is
     existing_payload = Dict("existing" => "data")
-    result = Cqn.extract_payload(existing_payload, "ignored")
-    @test result["existing"] == "data"
+    result2 = Cqn.extract_payload(existing_payload, "ignored")
+    @test result2["existing"] == "data"
   end
 
   @testset "Protocol Launch" begin

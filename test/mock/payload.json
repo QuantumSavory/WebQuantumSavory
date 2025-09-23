@@ -15,7 +15,12 @@
                         {
                             "id": "slot1",
                             "type": "qubit",
-                            "backgroundNoise": "Depolarization",
+                            "backgroundNoise": {
+                                "type": "Depolarization",
+                                "parameters": [
+                                    { "name": "τ", "value": 0.2 }
+                                ]
+                            },
                             "lastOperationTime": 0.123,
                             "assignment": true,
                             "isLocked": false,
@@ -24,7 +29,12 @@
                         {
                             "id": "slot2",
                             "type": "qubit",
-                            "backgroundNoise": "T1Decay",
+                            "backgroundNoise": {
+                                "type": "T1Decay",
+                                "parameters": [
+                                    { "name": "t1", "value": 5.0 }
+                                ]
+                            },
                             "lastOperationTime": 2.123,
                             "assignment": false,
                             "isLocked": true,
