@@ -72,8 +72,9 @@
   @testset "Root Endpoint" begin
       response = make_request("GET", "/")
       @test response.status == 200
-      data = parse_response(response)
-      @test data["status"] == "OK"
+      body = String(response.body)
+      # Root now serves the app UI (public/index.html). Check for HTML markers.
+      @test contains(lowercase(body), "<!doctype") || contains(lowercase(body), "<html") || contains(lowercase(body), "<head")
   end
 
   @testset "Background Types Endpoint" begin
