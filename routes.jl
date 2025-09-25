@@ -593,19 +593,23 @@ route("/run_simulation", method="POST") do
     time_units_raw = payload["time_units"]
 
     # Handle time_units parameter with proper type conversion
-    time_units = 10  # default value
+    time_units = 10.0  # default value
     if time_units_raw !== nothing
-      try
-        if isa(time_units_raw, String)
-          time_units = parse(Int, time_units_raw)
-        elseif isa(time_units_raw, Number)
-          time_units = Int(time_units_raw)
-        else
-          throw(bad_request_error("Invalid time_units type", Dict("received_type" => string(typeof(time_units_raw)), "expected_type" => "number or string")))
+        try
+            if isa(time_units_raw, String)
+                time_units = parse(Float64, time_units_raw)
+            elseif isa(time_units_raw, Number)
+                time_units = Float64(time_units_raw)
+            else
+                throw(validation_error("time_units must be a number or string", Dict("received_type" => string(typeof(time_units_raw)))))
+            end
+        catch e
+            if isa(e, APIError)
+                rethrow(e)
+            else
+                throw(validation_error("Invalid time_units value: $(time_units_raw)", Dict("error" => string(e))))
+            end
         end
-      catch parse_error
-        throw(bad_request_error("Failed to parse time_units", Dict("value" => string(time_units_raw), "parse_error" => string(parse_error))))
-      end
     end
 
     if !haskey(Cqn.STATE, simulation_name)

@@ -45,7 +45,7 @@ function server_error(message::String, details::Union{Nothing,Dict{String,Any}}=
   APIError(message, 500, "SERVER_ERROR", details)
 end
 
-function bad_request_error(message::String, details::Union{Nothing,Dict{String,Any}}=nothing)
+function bad_request_error(message::String, details::Union{Nothing,Dict}=nothing)
   APIError(message, 400, "BAD_REQUEST", details)
 end
 
