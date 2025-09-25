@@ -622,7 +622,15 @@ route("/run_simulation", method="POST") do
       throw(validation_error("Simulation not prepared"))
     end
 
-    run(state.simulation, time_units)
+    try
+      run(state.simulation, time_units)
+    catch e
+      if isa(e, APIError)
+        rethrow(e)
+      else
+        throw(server_error("Error running simulation", Dict("error" => string(e))))
+      end
+    end
 
     # Mark that the simulation has been run
     state.has_run = true

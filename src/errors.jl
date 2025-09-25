@@ -37,11 +37,11 @@ function not_found_error(resource::String, identifier::String)
   APIError("$resource not found", 404, "NOT_FOUND", Dict("resource" => resource, "identifier" => identifier))
 end
 
-function validation_error(message::String, details::Union{Nothing,Dict{String,Any}}=nothing)
+function validation_error(message::String, details::Union{Nothing,Dict}=nothing)
   APIError(message, 400, "VALIDATION_ERROR", details)
 end
 
-function server_error(message::String, details::Union{Nothing,Dict{String,Any}}=nothing)
+function server_error(message::String, details::Union{Nothing,Dict}=nothing)
   APIError(message, 500, "SERVER_ERROR", details)
 end
 
