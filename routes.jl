@@ -628,7 +628,9 @@ route("/run_simulation", method="POST") do
       if isa(e, APIError)
         rethrow(e)
       else
-        throw(server_error("Error running simulation", Dict("error" => string(e))))
+        @error stacktrace(catch_backtrace())
+        @show e
+        throw(server_error("Error running simulation: $e", Dict("error" => string(e))))
       end
     end
 
