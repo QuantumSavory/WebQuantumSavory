@@ -9,6 +9,7 @@ sessions/*
 Manifest.toml
 test/Manifest.toml
 .env
+.CondaPkg/
 
 # Vagrant
 .vagrant

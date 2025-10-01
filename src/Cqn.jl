@@ -458,7 +458,7 @@ function create_registers_from_nodes(data)
 
       # Instantiate background noise (supports string or object with parameters)
       noise_def = get(slot_data, "backgroundNoise", nothing)
-      if noise_def !== nothing
+      if noise_def !== nothing && String(noise_def) != "default"
         @info "Instantiating background noise" noise_def=noise_def
         push!(background_noise, _instantiate_noise(noise_def))
       end
@@ -504,6 +504,10 @@ end
 function _instantiate_noise(noise_def)
   # String form: "Depolarization" or any available background type name
   if isa(noise_def, AbstractString)
+    if String(noise_def) == "default"
+      return nothing # this now means no noise
+    end
+
     T = _resolve_type_from_string(String(noise_def), :noise)
     T === nothing && error("Unknown background noise type: $(noise_def)")
     return T()
@@ -575,10 +579,12 @@ function _resolve_noise_type_from_string(type_str::AbstractString)
   _ensure_noise_types_cache!()
 
   if input_lower == "default"
+    return nothing # this now means no noise
+
     # Choose first available background type deterministically
-    for (_, T) in _NOISE_TYPES_CACHE[]
-      return T
-    end
+    # for (_, T) in _NOISE_TYPES_CACHE[]
+    #   return T
+    # end
   end
 
   T = get(_NOISE_TYPES_CACHE[], input_lower, nothing)
