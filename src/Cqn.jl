@@ -1206,6 +1206,54 @@ function known_functions()
   [string(f) for f in [min, maximum, abs, identity]]
 end
 
+function parse_network_graph(data)
+  g = build_graph(data)
+
+  # Create registers array based on node slots data
+  registers, slot_mapping, slot_reverse_mapping = create_registers_from_nodes(data)
+
+  # Create the RegisterNet from the graph and registers
+  net = create_register_net(g, registers)
+
+  simulation_name = data["data"]["name"]
+  if haskey(Cqn.STATE, simulation_name)
+    @warn "Simulation already exists, destroying it" simulation_name=simulation_name
+    Cqn.destroy_simulation(simulation_name)
+  end
+
+  state = Cqn.State(
+    name = simulation_name,
+    payload = data,
+    graph = g,
+    network = net,
+    slot_mapping = slot_mapping,
+    slot_reverse_mapping = slot_reverse_mapping,
+  )
+
+  Cqn.STATE[simulation_name] = state
+
+  return state
+end
+
+function prepare_simulation(state::State, simulation_name::String)
+  # Get the time tracker from the network
+  sim = get_network_time_tracker(state.network)
+
+  # Initialize protocol mapping
+  protocol_mapping = Dict{String, Any}()
+
+  # Launch protocols from payload over nodes, edges, and floating
+  launch_counts = launch_protocols(state.payload, state.network, sim, protocol_mapping)
+
+  state.simulation = sim
+  state.protocols_launched = launch_counts
+  state.protocol_mapping = protocol_mapping
+
+  Cqn.STATE[simulation_name] = state
+
+  return state
+end
+
 include("mocks.jl")
 
 end
