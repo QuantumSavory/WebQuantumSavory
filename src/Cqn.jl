@@ -458,9 +458,17 @@ function create_registers_from_nodes(data)
 
       # Instantiate background noise (supports string or object with parameters)
       noise_def = get(slot_data, "backgroundNoise", nothing)
-      if noise_def !== nothing && String(noise_def) != "default"
-        @info "Instantiating background noise" noise_def=noise_def
-        push!(background_noise, _instantiate_noise(noise_def))
+      if noise_def !== nothing
+        # Only treat explicit string "default" as no-noise; avoid String(x) on non-strings
+        if isa(noise_def, AbstractString)
+          if String(noise_def) != "default"
+            nb = _instantiate_noise(noise_def)
+            nb === nothing || push!(background_noise, nb)
+          end
+        else
+          nb = _instantiate_noise(noise_def)
+          nb === nothing || push!(background_noise, nb)
+        end
       end
     end
 
@@ -517,6 +525,12 @@ function _instantiate_noise(noise_def)
   if isa(noise_def, Dict) || startswith(string(typeof(noise_def)), "JSON3.Object")
     tstr = get(noise_def, "type", nothing)
     tstr === nothing && error("Noise object missing 'type'")
+    
+    # Handle "default" type as no noise
+    if String(tstr) == "default"
+      return nothing
+    end
+    
     T = _resolve_type_from_string(String(tstr), :noise)
     T === nothing && error("Unknown background noise type: $(tstr)")
 
