@@ -487,7 +487,11 @@ end
 route("/parse_network_graph", method="POST") do
     payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
     validation_result = validate_payload(payload)
-    state = Cqn.parse_network_graph(validation_result)
+    state = try 
+      Cqn.parse_network_graph(validation_result)
+    catch ex 
+      throw(validation_error("Invalid graph - data can not be correctly parsed. Details: $ex"))
+    end
 
     json(Cqn.serialize_state(state))
 end
@@ -639,6 +643,30 @@ end
 
 ########################################################
 
+function _parse_time_input(time_units_raw)
+  # Handle time_units parameter with proper type conversion
+  time_units = 10.0  # default value
+  if time_units_raw !== nothing
+      try
+          if isa(time_units_raw, String)
+              time_units = parse(Float64, time_units_raw)
+          elseif isa(time_units_raw, Number)
+              time_units = Float64(time_units_raw)
+          else
+              throw(validation_error("time_units must be a number or string", Dict("received_type" => string(typeof(time_units_raw)))))
+          end
+      catch e
+          if isa(e, APIError)
+              rethrow(e)
+          else
+              throw(validation_error("Invalid time_units value: $(time_units_raw)", Dict("error" => string(e))))
+          end
+      end
+  end
+
+  time_units
+end
+
 @swagger """
 /run_simulation:
   post:
@@ -683,27 +711,7 @@ end
 route("/run_simulation", method="POST") do
     payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
     simulation_name = payload["name"]
-    time_units_raw = payload["time_units"]
-
-    # Handle time_units parameter with proper type conversion
-    time_units = 10.0  # default value
-    if time_units_raw !== nothing
-        try
-            if isa(time_units_raw, String)
-                time_units = parse(Float64, time_units_raw)
-            elseif isa(time_units_raw, Number)
-                time_units = Float64(time_units_raw)
-            else
-                throw(validation_error("time_units must be a number or string", Dict("received_type" => string(typeof(time_units_raw)))))
-            end
-        catch e
-            if isa(e, APIError)
-                rethrow(e)
-            else
-                throw(validation_error("Invalid time_units value: $(time_units_raw)", Dict("error" => string(e))))
-            end
-        end
-    end
+    time_units = _parse_time_input(payload["time_units"])
 
     if !haskey(Cqn.STATE, simulation_name)
       throw(not_found_error("Simulation", simulation_name))
@@ -716,7 +724,9 @@ route("/run_simulation", method="POST") do
     end
 
     try
-      run(state.simulation, time_units)
+      state.simulation_time = time_units
+      @async run(state.simulation, time_units) |> errormonitor
+      @info "Simulation running" simulation_name=simulation_name
     catch e
       if isa(e, APIError)
         rethrow(e)
