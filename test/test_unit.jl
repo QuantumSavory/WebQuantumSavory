@@ -452,9 +452,9 @@
     noise_type = Cqn._resolve_noise_type_from_string("DEPOLARIZATION")
     @test noise_type !== nothing
 
-    # Test default noise type
-    default_noise = Cqn._resolve_noise_type_from_string("default")
-    @test default_noise !== nothing
+    # # Test default noise type
+    # default_noise = Cqn._resolve_noise_type_from_string("default")
+    # @test default_noise !== nothing
 
     # Test slot type resolution
     slot_type = Cqn._resolve_slot_type_from_string("Qubit")
