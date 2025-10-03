@@ -51,7 +51,7 @@ end
                         type: string
                       status:
                         type: string
-                        enum: [created, prepared, complete, unknown]
+                        enum: ["created", "prepared", "complete", "unknown"]
 """
 route("/simulations", method="GET") do
     sims = [
