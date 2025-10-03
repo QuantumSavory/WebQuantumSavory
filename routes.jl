@@ -2,6 +2,8 @@ using Genie.Router
 using SwagUI
 using SwaggerMarkdown
 using Genie.Renderer.Json
+using Pkg
+using TOML
 
 """Safe route wrappers: use `sroute(args...) do ... end` or `@sroute args... do ... end`"""
 function _derive_route_name(args...; kwargs...)
@@ -1262,6 +1264,74 @@ route("/test_code", method="POST") do
       :error_type => error_type
     ))
   end
+end
+
+########################################################
+
+@swagger """
+/platform_info:
+  get:
+    description: Get platform and application version information.
+    responses:
+      '200':
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                versions:
+                  type: object
+                  properties:
+                    julia:
+                      type: string
+                      description: Julia version string
+                      example: "1.10.4"
+                    quantumsavory:
+                      type: string
+                      nullable: true
+                      description: Installed QuantumSavory version or null if not found
+                      example: "0.3.1"
+                    app:
+                      type: string
+                      nullable: true
+                      description: Application version from Project.toml
+                      example: "1.0.0"
+"""
+route("/platform_info") do
+  julia_version = string(VERSION)
+
+  quantumsavory_version = try
+    deps = Pkg.dependencies()
+    found = nothing
+    for (_, pkg) in deps
+      if pkg.name == "QuantumSavory"
+        found = string(pkg.version)
+        break
+      end
+    end
+
+    found
+  catch
+    nothing
+  end
+
+  app_version = try
+    proj = TOML.parsefile(joinpath(@__DIR__, "Project.toml"))
+    get(proj, "version", nothing)
+  catch
+    nothing
+  end
+
+  json(
+    Dict(
+      :versions => Dict(
+        :julia => julia_version,
+        :quantumsavory => quantumsavory_version,
+        :app => app_version,
+      )
+    )
+  )
 end
 
 ########################################################
