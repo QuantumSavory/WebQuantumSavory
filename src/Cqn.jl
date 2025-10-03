@@ -149,6 +149,8 @@ end
   slot_mapping::Union{Nothing, Dict{String, Any}} = nothing
   slot_reverse_mapping::Union{Nothing, IdDict{Any, String}} = nothing
   protocol_mapping::Union{Nothing, Dict{String, Any}} = nothing
+  simulation_time::Union{Nothing, Float64} = nothing
+  simulation_progress::Union{Nothing, Float64} = nothing
 end
 
 const STATE = Dict{String, State}()
@@ -989,6 +991,8 @@ const STATUS_COMPLETE = "complete"
 const STATUS_PREPARED = "prepared"
 const STATUS_CREATED = "created"
 const STATUS_UNKNOWN = "unknown"
+const STATUS_RUNNING = "running"
+const STATUS_NOT_STARTED = "not_started"
 
 function _determine_status(state::State)
   if state.simulation !== nothing
@@ -1004,6 +1008,17 @@ function _determine_status(state::State)
   else
     return STATUS_UNKNOWN
   end
+end
+
+function simulation_status(state::State)
+  if state.simulation_time === nothing
+    return STATUS_NOT_STARTED
+  end
+  if state.simulation_time - QuantumSavory.now(state.simulation) > 0
+    return STATUS_RUNNING
+  end
+
+  return STATUS_COMPLETE
 end
 
 const STATUS_MESSAGE_COMPLETE = "Simulation has run"
