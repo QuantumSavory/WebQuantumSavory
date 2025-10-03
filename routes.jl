@@ -399,6 +399,71 @@ end
                   additionalProperties:
                     type: integer
                   nullable: true
+                slots:
+                  type: object
+                  description: Information about quantum slots and their entanglements
+                  properties:
+                    slots:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          slot_id:
+                            type: string
+                            description: Unique identifier for the slot
+                          state_type:
+                            type: string
+                            nullable: true
+                            description: Type of quantum state in the slot
+                          is_locked:
+                            type: boolean
+                            description: Whether the slot is locked
+                          is_assigned:
+                            type: boolean
+                            description: Whether the slot has an assigned state
+                          entangled_slots:
+                            type: array
+                            items:
+                              type: string
+                            description: List of slot IDs that are entangled with this slot
+                    entanglements:
+                      type: array
+                      items:
+                        type: array
+                        items:
+                          type: string
+                        description: Pairs of entangled slot IDs
+                protocols:
+                  type: object
+                  description: Information about launched protocols
+                  properties:
+                    protocols:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          protocol_id:
+                            type: string
+                            description: Unique identifier for the protocol
+                          protocol_type:
+                            type: string
+                            description: Type of the protocol
+                simulation:
+                  type: object
+                  description: Simulation execution information
+                  properties:
+                    simulation_time:
+                      type: number
+                      nullable: true
+                      description: Total time units for the simulation
+                    simulation_progress:
+                      type: number
+                      nullable: true
+                      description: Current simulation time progress
+                    simulation_running:
+                      type: string
+                      enum: ["running", "complete", "not_started"]
+                      description: Current simulation execution status
                 message:
                   type: string
                   description: Human-readable status message
@@ -469,6 +534,71 @@ end
                   additionalProperties:
                     type: integer
                   nullable: true
+                slots:
+                  type: object
+                  description: Information about quantum slots and their entanglements
+                  properties:
+                    slots:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          slot_id:
+                            type: string
+                            description: Unique identifier for the slot
+                          state_type:
+                            type: string
+                            nullable: true
+                            description: Type of quantum state in the slot
+                          is_locked:
+                            type: boolean
+                            description: Whether the slot is locked
+                          is_assigned:
+                            type: boolean
+                            description: Whether the slot has an assigned state
+                          entangled_slots:
+                            type: array
+                            items:
+                              type: string
+                            description: List of slot IDs that are entangled with this slot
+                    entanglements:
+                      type: array
+                      items:
+                        type: array
+                        items:
+                          type: string
+                        description: Pairs of entangled slot IDs
+                protocols:
+                  type: object
+                  description: Information about launched protocols
+                  properties:
+                    protocols:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          protocol_id:
+                            type: string
+                            description: Unique identifier for the protocol
+                          protocol_type:
+                            type: string
+                            description: Type of the protocol
+                simulation:
+                  type: object
+                  description: Simulation execution information
+                  properties:
+                    simulation_time:
+                      type: number
+                      nullable: true
+                      description: Total time units for the simulation
+                    simulation_progress:
+                      type: number
+                      nullable: true
+                      description: Current simulation time progress
+                    simulation_running:
+                      type: string
+                      enum: ["running", "complete", "not_started"]
+                      description: Current simulation execution status
                 message:
                   type: string
                   description: Human-readable status message
@@ -629,6 +759,95 @@ end
                   example: true
                 state:
                   type: object
+                  description: Complete simulation state information
+                  properties:
+                    name:
+                      type: string
+                      description: Name of the simulation
+                    status:
+                      type: string
+                      description: Current status of the simulation
+                      enum: ["created", "prepared", "complete", "unknown"]
+                    node_count:
+                      type: integer
+                      description: Number of nodes in the network
+                    edge_count:
+                      type: integer
+                      description: Number of edges in the network
+                    protocols_launched:
+                      type: object
+                      description: Count of launched protocols by category
+                      additionalProperties:
+                        type: integer
+                      nullable: true
+                    slots:
+                      type: object
+                      description: Information about quantum slots and their entanglements
+                      properties:
+                        slots:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              slot_id:
+                                type: string
+                                description: Unique identifier for the slot
+                              state_type:
+                                type: string
+                                nullable: true
+                                description: Type of quantum state in the slot
+                              is_locked:
+                                type: boolean
+                                description: Whether the slot is locked
+                              is_assigned:
+                                type: boolean
+                                description: Whether the slot has an assigned state
+                              entangled_slots:
+                                type: array
+                                items:
+                                  type: string
+                                description: List of slot IDs that are entangled with this slot
+                        entanglements:
+                          type: array
+                          items:
+                            type: array
+                            items:
+                              type: string
+                            description: Pairs of entangled slot IDs
+                    protocols:
+                      type: object
+                      description: Information about launched protocols
+                      properties:
+                        protocols:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              protocol_id:
+                                type: string
+                                description: Unique identifier for the protocol
+                              protocol_type:
+                                type: string
+                                description: Type of the protocol
+                    simulation:
+                      type: object
+                      description: Simulation execution information
+                      properties:
+                        simulation_time:
+                          type: number
+                          nullable: true
+                          description: Total time units for the simulation
+                        simulation_progress:
+                          type: number
+                          nullable: true
+                          description: Current simulation time progress
+                        simulation_running:
+                          type: string
+                          enum: ["running", "complete", "not_started"]
+                          description: Current simulation execution status
+                    message:
+                      type: string
+                      description: Human-readable status message
       '404':
         description: Simulation not found
         content:
@@ -686,20 +905,52 @@ end
                 slot_id:
                   type: string
                   description: The ID of the inspected slot
-                state:
-                  type: object
-                  description: The quantum state of the slot
-                entangled_slots:
-                  type: array
-                  items:
-                    type: string
-                  description: List of slot IDs that are entangled with this slot
+                state_type:
+                  type: string
+                  nullable: true
+                  description: Type of quantum state in the slot
                 is_locked:
                   type: boolean
                   description: Whether the slot is locked
                 is_assigned:
                   type: boolean
                   description: Whether the slot has an assigned state
+                access_time:
+                  type: number
+                  nullable: true
+                  description: Last access time for the slot
+                entangled_slots:
+                  type: array
+                  items:
+                    type: string
+                  description: List of slot IDs that are entangled with this slot
+                entangled_slot_details:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      slot_id:
+                        type: string
+                        nullable: true
+                        description: ID of the entangled slot
+                      parent_reg_index:
+                        type: integer
+                        description: Index of the parent register
+                      slot_index:
+                        type: integer
+                        description: Index of the slot within the register
+                      parent_reg:
+                        type: string
+                        description: Type of the parent register
+                  description: Detailed information about entangled slots
+                html_base64:
+                  type: string
+                  nullable: true
+                  description: HTML representation of the slot state encoded as base64
+                png_base64:
+                  type: string
+                  nullable: true
+                  description: PNG representation of the slot state encoded as base64
       '404':
         description: Simulation or slot not found
         content:

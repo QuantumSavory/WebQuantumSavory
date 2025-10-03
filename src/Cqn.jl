@@ -188,6 +188,12 @@ function parse_pt_type(parameters::AbstractVector)
   for p in parameters
     t = getfield(p, :type)
 
+    # Special case for SymbolicUtils.Symbolic
+    if startswith(string(t), "SymbolicUtils.Symbolic{")
+      push!(result, (field = p.field, type = "SymbolicUtils.Symbolic", doc = p.doc))
+      continue
+    end
+
     # Prefer metadata-driven union detection to avoid string parsing
     try
       if t isa Type && Base.isuniontype(t)
@@ -909,7 +915,12 @@ function serialize_state(state::State)
     "protocols_launched" => state.protocols_launched,
     "slots" => _serialize_slots(state),
     "protocols" => _serialize_protocols(state),
-    "message" => _get_status_message(state)
+    "message" => _get_status_message(state), 
+    "simulation" => Dict(
+      "simulation_time" => state.simulation_time,
+      "simulation_progress" => state.simulation_time !== nothing ? QuantumSavory.now(state.simulation) : nothing,
+      "simulation_running" => simulation_status(state)
+    )
   )
 end
 
