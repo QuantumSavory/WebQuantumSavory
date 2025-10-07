@@ -17,6 +17,8 @@ import CairoMakie
 include("errors.jl")
 include("types.jl")
 include("Sandbox.jl")
+include("Logger.jl")
+using .Logger: @log_event
 
 const up = Genie.up
 export up
@@ -151,6 +153,7 @@ end
   protocol_mapping::Union{Nothing, Dict{String, Any}} = nothing
   simulation_time::Union{Nothing, Float64} = nothing
   simulation_progress::Union{Nothing, Float64} = nothing
+  log_events::Vector{Any} = Any[]
 end
 
 const STATE = Dict{String, State}()
