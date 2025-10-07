@@ -726,9 +726,7 @@ route("/run_simulation", method="POST") do
     end
 
     try
-      state.simulation_time = time_units
-      @async run(state.simulation, time_units) |> errormonitor
-      @info "Simulation running" simulation_name=simulation_name
+      state = Cqn.run_simulation(state, simulation_name, time_units)
     catch e
       if isa(e, APIError)
         rethrow(e)
@@ -1332,6 +1330,95 @@ route("/platform_info") do
       )
     )
   )
+end
+
+########################################################
+
+@swagger """
+/logs/{name}:
+  get:
+    description: Get and optionally purge log events from a simulation
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The name of the simulation
+      - name: purge
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: true
+        description: Whether to purge the logs after reading them
+    responses:
+      '200':
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                logs:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      level:
+                        type: string
+                        description: Log level (Debug, Info, Warn, Error)
+                      message:
+                        type: string
+                        description: Log message
+                      module:
+                        type: string
+                        description: Module that generated the log
+                      group:
+                        type: string
+                        nullable: true
+                        description: Optional group identifier
+                      id:
+                        type: string
+                        nullable: true
+                        description: Optional ID identifier
+                count:
+                  type: integer
+                  description: Number of log events returned
+      '404':
+        description: Simulation not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Error message describing the issue
+"""
+route("/logs/:name", method="GET") do
+    simulation_name = string(params(:name))
+
+
+    if !haskey(Cqn.STATE, simulation_name)
+      throw(not_found_error("Simulation", simulation_name))
+    end
+    
+    purge_raw = Genie.Requests.getpayload(:purge, "true")
+    purge = purge_raw isa Bool ? purge_raw : (lowercase(string(purge_raw)) in ("true", "1", "yes", "on"))
+    
+    logs = Cqn.get_logs(simulation_name, purge)
+    
+    json(Dict(
+      :success => true,
+      :logs => logs,
+      :count => length(logs)
+    ))
 end
 
 ########################################################

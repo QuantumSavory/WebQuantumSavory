@@ -1283,6 +1283,33 @@ function prepare_simulation(state::State, simulation_name::String)
   return state
 end
 
+function run_simulation(state::State, simulation_name::String, time_units::Float64)
+  state.simulation_time = time_units
+  @log_event state Logging.Info "Simulation started" simulation_name=simulation_name time_units=time_units
+  
+  # Start the simulation asynchronously with logging
+  @async begin
+    Logging.with_logger(Logger.make_logger(state)) do
+      run(state.simulation, time_units) |> errormonitor
+    end
+  end
+  
+  @info "Simulation running" simulation_name=simulation_name
+
+  return state
+end
+
+function get_logs(simulation_name::String, purge::Bool = true) 
+  state = STATE[simulation_name]
+  logs = copy(state.log_events)
+  
+  if purge
+    empty!(state.log_events)
+  end
+  
+  return logs
+end
+
 include("mocks.jl")
 
 end
