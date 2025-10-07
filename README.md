@@ -48,6 +48,8 @@ The user interface is available at `http://localhost:8000`.
 - **`GET /simulations`** - List existing simulations with `name` and `status`
 - **`GET /known_functions`** - List of supported Julia functions usable as argument values
 - **`POST /test_code`** - Test Julia code in a sandboxed environment
+- **`GET /platform_info`** - Versions: Julia, QuantumSavory (if installed), and app version
+- **`GET /logs/:name`** - Fetch log events for a simulation; supports `purge` query (default `true`). Example: `/logs/my-sim?purge=false`
 - **`GET /status`** - Server health check
 - **`GET /docs`** - Interactive Swagger UI
 
