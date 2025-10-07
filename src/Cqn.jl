@@ -1304,7 +1304,11 @@ function get_logs(simulation_name::String, purge::Bool = true)
   logs = copy(state.log_events)
   
   if purge
-    empty!(state.log_events)
+    # Rebind to the tail to drop only the copied prefix; preserves concurrently appended logs
+    local n = length(logs)
+    if n > 0
+      state.log_events = state.log_events[(n+1):end]
+    end
   end
   
   return logs
