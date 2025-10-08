@@ -431,10 +431,72 @@
       end
   end
 
+  @testset "Logs Endpoint - Success" begin
+      # First create a simulation to have logs
+      logs_test_name = "logs_test_sim"
+      payload = deepcopy(test_payload)
+      payload["name"] = logs_test_name
+
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
+
+      # Test getting logs with default purge=true
+      logs_response = make_request("GET", "/logs/$logs_test_name")
+      @test logs_response.status == 200
+      logs_data = parse_response(logs_response)
+      @test logs_data["success"] == true
+      @test haskey(logs_data, "logs")
+      @test haskey(logs_data, "count")
+      @test isa(logs_data["logs"], Vector)
+      @test isa(logs_data["count"], Int)
+      @test logs_data["count"] == length(logs_data["logs"])
+
+      # Test getting logs with purge=false
+      logs_response_no_purge = make_request("GET", "/logs/$logs_test_name", query=Dict("purge" => "false"))
+      @test logs_response_no_purge.status == 200
+      logs_data_no_purge = parse_response(logs_response_no_purge)
+      @test logs_data_no_purge["success"] == true
+      @test haskey(logs_data_no_purge, "logs")
+      @test haskey(logs_data_no_purge, "count")
+
+      # Test getting logs with purge=true explicitly
+      logs_response_purge = make_request("GET", "/logs/$logs_test_name", query=Dict("purge" => "true"))
+      @test logs_response_purge.status == 200
+      logs_data_purge = parse_response(logs_response_purge)
+      @test logs_data_purge["success"] == true
+      @test haskey(logs_data_purge, "logs")
+      @test haskey(logs_data_purge, "count")
+
+      # Test various purge parameter values
+      purge_values = ["1", "yes", "on", "0", "no", "off"]
+      for purge_val in purge_values
+          purge_response = make_request("GET", "/logs/$logs_test_name", query=Dict("purge" => purge_val))
+          @test purge_response.status == 200
+          purge_data = parse_response(purge_response)
+          @test purge_data["success"] == true
+      end
+
+      # Clean up
+      destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => logs_test_name))
+      @test destroy_response.status == 200
+  end
+
+  @testset "Logs Endpoint - Error Cases" begin
+      # Test getting logs for non-existent simulation
+      response = make_request("GET", "/logs/nonexistent_sim")
+      @test response.status == 404
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Simulation not found"
+      @test haskey(data, "details")
+      @test data["details"]["resource"] == "Simulation"
+      @test data["details"]["identifier"] == "nonexistent_sim"
+  end
+
   # Cleanup after all tests
   @testset "Final Cleanup" begin
       # Clean up any remaining test simulations
-      test_names = [TEST_SIMULATION_NAME, "unprepared_sim", "workflow_test_sim"]
+      test_names = [TEST_SIMULATION_NAME, "unprepared_sim", "workflow_test_sim", "logs_test_sim"]
 
       for name in test_names
         try

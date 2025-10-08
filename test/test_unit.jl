@@ -568,4 +568,57 @@
     @test launch_counts["edges"] >= 0
     @test launch_counts["floating"] == 0  # We removed floating protocols
   end
+
+  @testset "Log Management" begin
+    # Create a test state with log events
+    test_logs = [
+      Dict("timestamp" => "2023-01-01T00:00:00", "level" => "info", "message" => "Test log 1"),
+      Dict("timestamp" => "2023-01-01T00:00:01", "level" => "warn", "message" => "Test log 2"),
+      Dict("timestamp" => "2023-01-01T00:00:02", "level" => "error", "message" => "Test log 3")
+    ]
+    
+    state = Cqn.State(name="test_logs", log_events=test_logs)
+    
+    # Store the state in STATE for testing
+    original_state = get(Cqn.STATE, "test_logs", nothing)
+    Cqn.STATE["test_logs"] = state
+    
+    try
+      # Test get_logs with purge=true (default)
+      logs = Cqn.get_logs("test_logs", true)
+      @test length(logs) == 3
+      @test logs[1]["message"] == "Test log 1"
+      @test logs[2]["message"] == "Test log 2"
+      @test logs[3]["message"] == "Test log 3"
+      
+      # After purge=true, logs should be cleared from state
+      @test length(state.log_events) == 0
+      
+      # Add more logs
+      push!(state.log_events, Dict("timestamp" => "2023-01-01T00:00:03", "level" => "info", "message" => "Test log 4"))
+      push!(state.log_events, Dict("timestamp" => "2023-01-01T00:00:04", "level" => "debug", "message" => "Test log 5"))
+      
+      # Test get_logs with purge=false
+      logs_no_purge = Cqn.get_logs("test_logs", false)
+      @test length(logs_no_purge) == 2
+      @test logs_no_purge[1]["message"] == "Test log 4"
+      @test logs_no_purge[2]["message"] == "Test log 5"
+      
+      # After purge=false, logs should still be in state
+      @test length(state.log_events) == 2
+      
+      # Test get_logs with default purge=true
+      logs_default = Cqn.get_logs("test_logs")
+      @test length(logs_default) == 2
+      @test length(state.log_events) == 0  # Should be purged by default
+      
+    finally
+      # Clean up
+      if original_state !== nothing
+        Cqn.STATE["test_logs"] = original_state
+      else
+        delete!(Cqn.STATE, "test_logs")
+      end
+    end
+  end
 end
