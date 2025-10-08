@@ -56,14 +56,14 @@ end
                         enum: ["created", "prepared", "complete", "unknown"]
 """
 route("/simulations", method="GET") do
-    sims = [
-      Dict(
-        :name => state.name,
-        :status => Cqn._determine_status(state)
-      ) for (_, state) in Cqn.STATE
-    ]
+  sims = [
+    Dict(
+      :name => state.name,
+      :status => Cqn._determine_status(state)
+    ) for (_, state) in Cqn.STATE
+  ]
 
-    json(Dict(:success => true, :simulations => sims))
+  json(Dict(:success => true, :simulations => sims))
 end
 
 ########################################################
@@ -487,15 +487,15 @@ end
                   description: Additional error details
 """
 route("/parse_network_graph", method="POST") do
-    payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
-    validation_result = validate_payload(payload)
-    state = try 
-      Cqn.parse_network_graph(validation_result)
-    catch ex 
-      throw(validation_error("Invalid graph - data can not be correctly parsed. Details: $ex"))
-    end
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  validation_result = validate_payload(payload)
+  state = try
+    Cqn.parse_network_graph(validation_result)
+  catch ex
+    throw(validation_error("Invalid graph - data can not be correctly parsed. Details: $ex"))
+  end
 
-    json(Cqn.serialize_state(state))
+  json(Cqn.serialize_state(state))
 end
 
 ########################################################
@@ -626,21 +626,21 @@ end
                   description: Additional error details
 """
 route("/prepare_simulation", method="POST") do
-    simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
+  simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
-    if !haskey(Cqn.STATE, simulation_name)
-      throw(not_found_error("Simulation", simulation_name))
-    end
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
 
-    state = Cqn.STATE[simulation_name]
+  state = Cqn.STATE[simulation_name]
 
-    if state.network === nothing
-      throw(validation_error("Network not found in simulation $simulation_name"))
-    end
+  if state.network === nothing
+    throw(validation_error("Network not found in simulation $simulation_name"))
+  end
 
-    state = Cqn.prepare_simulation(state, simulation_name)
+  state = Cqn.prepare_simulation(state, simulation_name)
 
-    json(Cqn.serialize_state(state))
+  json(Cqn.serialize_state(state))
 end
 
 ########################################################
@@ -649,21 +649,21 @@ function _parse_time_input(time_units_raw)
   # Handle time_units parameter with proper type conversion
   time_units = 10.0  # default value
   if time_units_raw !== nothing
-      try
-          if isa(time_units_raw, String)
-              time_units = parse(Float64, time_units_raw)
-          elseif isa(time_units_raw, Number)
-              time_units = Float64(time_units_raw)
-          else
-              throw(validation_error("time_units must be a number or string", Dict("received_type" => string(typeof(time_units_raw)))))
-          end
-      catch e
-          if isa(e, APIError)
-              rethrow(e)
-          else
-              throw(validation_error("Invalid time_units value: $(time_units_raw)", Dict("error" => string(e))))
-          end
+    try
+      if isa(time_units_raw, String)
+        time_units = parse(Float64, time_units_raw)
+      elseif isa(time_units_raw, Number)
+        time_units = Float64(time_units_raw)
+      else
+        throw(validation_error("time_units must be a number or string", Dict("received_type" => string(typeof(time_units_raw)))))
       end
+    catch e
+      if isa(e, APIError)
+        rethrow(e)
+      else
+        throw(validation_error("Invalid time_units value: $(time_units_raw)", Dict("error" => string(e))))
+      end
+    end
   end
 
   time_units
@@ -711,37 +711,37 @@ end
                   description: Error message describing the issue
 """
 route("/run_simulation", method="POST") do
-    payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
-    simulation_name = payload["name"]
-    time_units = _parse_time_input(payload["time_units"])
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  simulation_name = payload["name"]
+  time_units = _parse_time_input(payload["time_units"])
 
-    if !haskey(Cqn.STATE, simulation_name)
-      throw(not_found_error("Simulation", simulation_name))
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
+
+  state = Cqn.STATE[simulation_name]
+
+  if state.simulation === nothing
+    throw(validation_error("Simulation not prepared"))
+  end
+
+  try
+    state = Cqn.run_simulation(state, simulation_name, time_units)
+  catch e
+    if isa(e, APIError)
+      rethrow(e)
+    else
+      @error stacktrace(catch_backtrace())
+      @show e
+      throw(server_error("Error running simulation: $e", Dict("error" => string(e))))
     end
+  end
 
-    state = Cqn.STATE[simulation_name]
+  # Mark that the simulation has been run
+  state.has_run = true
+  Cqn.STATE[simulation_name] = state
 
-    if state.simulation === nothing
-      throw(validation_error("Simulation not prepared"))
-    end
-
-    try
-      state = Cqn.run_simulation(state, simulation_name, time_units)
-    catch e
-      if isa(e, APIError)
-        rethrow(e)
-      else
-        @error stacktrace(catch_backtrace())
-        @show e
-        throw(server_error("Error running simulation: $e", Dict("error" => string(e))))
-      end
-    end
-
-    # Mark that the simulation has been run
-    state.has_run = true
-    Cqn.STATE[simulation_name] = state
-
-    json(Dict(:success => true))
+  json(Dict(:success => true))
 end
 
 ########################################################
@@ -873,14 +873,14 @@ end
                   description: Error message describing the issue
 """
 route("/get_state", method="GET") do
-    simulation_name = Genie.Requests.getpayload()[:name]
+  simulation_name = Genie.Requests.getpayload()[:name]
 
-    if !haskey(Cqn.STATE, simulation_name)
-      throw(not_found_error("Simulation", simulation_name))
-    end
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
 
-    state = Cqn.STATE[simulation_name]
-    json(Dict(:success => true, :state => Cqn.serialize_state(state)))
+  state = Cqn.STATE[simulation_name]
+  json(Dict(:success => true, :state => Cqn.serialize_state(state)))
 end
 
 ########################################################
@@ -976,17 +976,17 @@ end
                   description: Error message describing the issue
 """
 route("/slots/:name/:slot_id", method="GET") do
-    slot_id = string(params(:slot_id))
-    simulation_name = string(params(:name))
+  slot_id = string(params(:slot_id))
+  simulation_name = string(params(:name))
 
-    if !haskey(Cqn.STATE, simulation_name)
-      throw(not_found_error("Simulation", simulation_name))
-    end
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
 
-    state = Cqn.STATE[simulation_name]
-    result = Cqn.get_slot_state(slot_id, state)
+  state = Cqn.STATE[simulation_name]
+  result = Cqn.get_slot_state(slot_id, state)
 
-    json(Dict(:success => true, result...))
+  json(Dict(:success => true, result...))
 end
 
 ########################################################
@@ -1032,17 +1032,17 @@ end
                   description: Error message describing the issue
 """
 route("/destroy_simulation", method="POST") do
-    simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
+  simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
-    if !haskey(Cqn.STATE, simulation_name)
-      throw(not_found_error("Simulation", simulation_name))
-    end
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
 
-    if Cqn.destroy_simulation(simulation_name)
-      json(Dict(:success => true, :message => "Simulation destroyed and resources cleaned up"))
-    else
-      json(Dict(:success => true, :message => "Simulation destroyed (cleanup had warnings)", :warning => "Some resources may not have been fully cleaned up"))
-    end
+  if Cqn.destroy_simulation(simulation_name)
+    json(Dict(:success => true, :message => "Simulation destroyed and resources cleaned up"))
+  else
+    json(Dict(:success => true, :message => "Simulation destroyed (cleanup had warnings)", :warning => "Some resources may not have been fully cleaned up"))
+  end
 end
 
 ########################################################
@@ -1100,17 +1100,17 @@ end
                   description: Error message describing the issue
 """
 route("/protocols/:name/:protocol_id", method="GET") do
-    protocol_id = string(params(:protocol_id))
-    simulation_name = string(params(:name))
+  protocol_id = string(params(:protocol_id))
+  simulation_name = string(params(:name))
 
-    if !haskey(Cqn.STATE, simulation_name)
-      throw(not_found_error("Simulation", simulation_name))
-    end
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
 
-    state = Cqn.STATE[simulation_name]
-    result = Cqn.get_protocol_state(protocol_id, state)
+  state = Cqn.STATE[simulation_name]
+  result = Cqn.get_protocol_state(protocol_id, state)
 
-    json(Dict(:success => true, result...))
+  json(Dict(:success => true, result...))
 end
 
 ########################################################
@@ -1402,35 +1402,35 @@ end
                   description: Error message describing the issue
 """
 route("/logs/:name", method="GET") do
-    simulation_name = string(params(:name))
+  simulation_name = string(params(:name))
 
 
-    if !haskey(Cqn.STATE, simulation_name)
-      throw(not_found_error("Simulation", simulation_name))
-    end
-    
-    purge_raw = Genie.Requests.getpayload(:purge, "true")
-    purge = purge_raw isa Bool ? purge_raw : (lowercase(string(purge_raw)) in ("true", "1", "yes", "on"))
-    
-    logs = Cqn.get_logs(simulation_name, purge)
-    
-    json(Dict(
-      :success => true,
-      :logs => logs,
-      :count => length(logs)
-    ))
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
+
+  purge_raw = Genie.Requests.getpayload(:purge, "true")
+  purge = purge_raw isa Bool ? purge_raw : (lowercase(string(purge_raw)) in ("true", "1", "yes", "on"))
+
+  logs = Cqn.get_logs(simulation_name, purge)
+
+  json(Dict(
+    :success => true,
+    :logs => logs,
+    :count => length(logs)
+  ))
 end
 
 ########################################################
 
-info = Dict{String, Any}()
+info = Dict{String,Any}()
 info["title"] = "CQN API"
 info["version"] = "1.0.0"
 openApi = OpenAPI("3.0.0", info)
 swagger_document = build(openApi)
 
 route("/docs") do
-    render_swagger(swagger_document)
+  render_swagger(swagger_document)
 end
 
 ########################################################
