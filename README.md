@@ -48,6 +48,7 @@ The user interface is available at `http://localhost:8000`.
 - **`GET /simulations`** - List existing simulations with `name` and `status`
 - **`GET /known_functions`** - List of supported Julia functions usable as argument values
 - **`POST /test_code`** - Test Julia code in a sandboxed environment
+- **`POST /test_symbolic_expression`** - Evaluate a symbolic expression and return LaTeX
 - **`GET /platform_info`** - Versions: Julia, QuantumSavory (if installed), and app version
 - **`GET /logs/:name`** - Fetch log events for a simulation; supports `purge` query (default `true`). Example: `/logs/my-sim?purge=false`
 - **`GET /status`** - Server health check
@@ -66,6 +67,28 @@ The best way to explore the API is through the interactive Swagger documentation
 - Request/response schemas
 - Interactive testing interface
 - Example payloads and responses
+
+### Symbolic Expression Evaluation
+
+Use `POST /test_symbolic_expression` to evaluate a symbolic expression in a sandboxed module with QuantumSavory preloaded and get its LaTeX representation.
+
+Example request body:
+
+```json
+{ "expr": "(Z₁⊗Z₁+Z₂⊗Z₂) / √2" }
+```
+
+Successful response:<
+
+```json
+{ "success": true, "latex": "... LaTeX string ..." }
+```
+
+On error, you'll receive:
+
+```json
+{ "success": false, "error": "<message>", "error_type": "<ExceptionType>" }
+```
 
 ## Running Tests
 
