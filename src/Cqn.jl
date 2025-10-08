@@ -193,7 +193,7 @@ function parse_pt_type(parameters::AbstractVector)
 
     # Special case for SymbolicUtils.Symbolic
     if startswith(string(t), "SymbolicUtils.Symbolic{")
-      push!(result, (field = p.field, type = "SymbolicUtils.Symbolic", doc = p.doc))
+      push!(result, (field = p.field, type = "Symbolic", doc = p.doc))
       continue
     end
 
