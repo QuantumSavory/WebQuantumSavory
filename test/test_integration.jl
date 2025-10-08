@@ -387,6 +387,50 @@
       @test contains(body, "html") || contains(body, "swagger") || contains(body, "api")
   end
 
+  @testset "Test Code Endpoint" begin
+      # Success
+      response = make_request("POST", "/test_code", body=Dict("code" => "x = 1+2"))
+      @test response.status == 200
+      data = parse_response(response)
+      @test data["success"] == true
+      @test haskey(data, "results")
+
+      # Validation error (missing field)
+      response2 = make_request("POST", "/test_code", body=Dict("wrong" => "x=1"))
+      @test response2.status == 400
+      data2 = parse_response(response2)
+      @test data2["success"] == false
+      @test occursin("Missing required field 'code'", data2["error"])
+  end
+
+  @testset "Test Symbolic Expression Endpoint" begin
+      # Success
+      response = make_request("POST", "/test_symbolic_expression", body=Dict("expr" => "(Z₁⊗Z₁+Z₂⊗Z₂) / √2"))
+      @test response.status == 200
+      data = parse_response(response)
+      @test data["success"] == true
+      @test haskey(data, "results")
+      @test haskey(data["results"], "latex")
+      @test haskey(data["results"], "value")
+
+      # Validation error (missing field)
+      response2 = make_request("POST", "/test_symbolic_expression", body=Dict("wrong" => "..."))
+      @test response2.status == 400
+      data2 = parse_response(response2)
+      @test data2["success"] == false
+      @test occursin("Missing required field 'expr'", data2["error"])
+
+      # Execution error (bad expression)
+      response3 = make_request("POST", "/test_symbolic_expression", body=Dict("expr" => "(Z₁⊗Z₁+"))
+      @test response3.status == 400 || response3.status == 200  # server wraps as 400 via handler; allow either in case of internal mapping
+      data3 = parse_response(response3)
+      if response3.status == 400
+        @test data3["success"] == false
+      else
+        @test data3["success"] == false || haskey(data3, "error")
+      end
+  end
+
   # Cleanup after all tests
   @testset "Final Cleanup" begin
       # Clean up any remaining test simulations

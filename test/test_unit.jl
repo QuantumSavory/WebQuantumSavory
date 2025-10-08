@@ -503,6 +503,23 @@
     @test ok && v === true
   end
 
+  @testset "Symbolic Expression Evaluation (Unit)" begin
+    # Simple valid expression using QuantumSavory symbols should produce latex and value
+    expr = "(Z₁⊗Z₁+Z₂⊗Z₂) / √2"
+    success, results, err = Cqn.Sandbox.test_symbolic_expression(expr)
+    @test success == true
+    @test isa(results, Dict)
+    @test haskey(results, :latex)
+    @test haskey(results, :value)
+
+    # Invalid expression should return an error
+    bad_expr = "(Z₁⊗Z₁+"  # malformed
+    success2, results2, err2 = Cqn.Sandbox.test_symbolic_expression(bad_expr)
+    @test success2 == false
+    @test results2 === nothing
+    @test err2 !== nothing
+  end
+
   @testset "Extract Payload Error Handling" begin
     # Test with invalid JSON string
     @test_throws Cqn.APIError Cqn.extract_payload(nothing, "invalid json")
