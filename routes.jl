@@ -1267,6 +1267,87 @@ end
 ########################################################
 
 @swagger """
+/test_symbolic_expression:
+  post:
+    summary: Evaluate a symbolic expression and return its LaTeX form
+    description: |
+      Parses and evaluates a symbolic expression in a sandboxed environment
+      with QuantumSavory preloaded, returning the LaTeX representation of the
+      evaluated expression.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              expr:
+                type: string
+                description: Symbolic expression to evaluate
+                example: "(Z₁⊗Z₁+Z₂⊗Z₂) / √2"
+            required:
+              - expr
+    responses:
+      '200':
+        description: Expression evaluated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                results:
+                  type: object
+                  description: Evaluation results
+                  properties:
+                    value:
+                      type: string
+                      description: Stringified result of the evaluated expression
+                    latex:
+                      type: string
+                      description: LaTeX representation of the evaluated expression
+      '400':
+        description: Evaluation failed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Detailed error message
+                error_type:
+                  type: string
+                  description: Type of error that occurred
+"""
+route("/test_symbolic_expression", method="POST") do
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+
+  if !haskey(payload, "expr")
+    throw(validation_error("Missing required field 'expr'", Dict("required_field" => "expr")))
+  end
+
+  expr = payload["expr"]
+
+  success, results, error = Sandbox.test_symbolic_expression(expr)
+
+  if success
+    json(Dict(:success => true, :results => results, :message => "Expression evaluated successfully"))
+  else
+    error_type = string(typeof(error))
+    error_message = string(error)
+    json(Dict(:success => false, :error => error_message, :error_type => error_type))
+  end
+end
+
+########################################################
+
+@swagger """
 /platform_info:
   get:
     description: Get platform and application version information.
