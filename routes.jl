@@ -1237,7 +1237,7 @@ route("/test_code", method="POST") do
   payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
 
   if !haskey(payload, "code")
-    return json(Dict(:success => false, :error => "Missing 'code' field"))
+    throw(validation_error("Missing required field 'code'", Dict("required_field" => "code")))
   end
 
   code_string = payload["code"]
