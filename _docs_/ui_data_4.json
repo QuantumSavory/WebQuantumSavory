@@ -134,6 +134,11 @@
                                     "name": "chooseB",
                                     "type": "Lambda",
                                     "value": "function test(args...)\n    println(\"asda\")\nend"
+                                },
+                                {
+                                    "name": "pairstate",
+                                    "type": "Symbolic",
+                                    "value": "(Z₁⊗Z₁+Z₂⊗Z₂) / √2"
                                 }
                             ]
                         }

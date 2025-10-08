@@ -70,14 +70,14 @@ function test_code(code_string::String)
     end
 end
 
+
 """
 Evaluate a symbolic expression in an isolated temporary module preloaded with
 QuantumSavory-related namespaces. Returns a tuple of
-(success::Bool, results::Union{Dict,Nothing}, error::Union{Nothing,Exception}).
-If successful, `results` is a Dict with keys `:value` (stringified value) and
-`:latex` (LaTeX string from `Latexify.latexify`).
+(success::Bool, value::Any, error::Union{Nothing,Exception}).
+If successful, `value` is the actual evaluated symbolic object.
 """
-function test_symbolic_expression(expr::String)
+function evaluate_symbolic_expression(expr::String)
     # Create isolated module and load required namespaces
     tempmod = Module()
 
@@ -95,18 +95,35 @@ function test_symbolic_expression(expr::String)
         # Evaluate within the temporary module to resolve symbols like Z₁, Z₂, ⊗, √, etc
         value = Base.eval(tempmod, parsed)
 
-        # Convert to LaTeX string
-        latex_str = String(Latexify.latexify(value))
-
-        results = Dict(
-            :value => string(value),
-            :latex => latex_str,
-        )
-
-        return true, results, nothing
+        return true, value, nothing
     catch e
         return false, nothing, e
     end
+end
+
+
+"""
+Test and validate a symbolic expression, returning both the evaluated value and LaTeX representation.
+Uses `evaluate_symbolic_expression` internally for evaluation. Returns a tuple of
+(success::Bool, results::Union{Dict,Nothing}, error::Union{Nothing,Exception}).
+If successful, `results` is a Dict with keys `:value` (stringified value) and
+`:latex` (LaTeX string from `Latexify.latexify`).
+"""
+function test_symbolic_expression(expr::String)
+    success, value, error = evaluate_symbolic_expression(expr)
+    if !success
+        return false, nothing, error
+    end
+
+    # Convert to LaTeX string
+    latex_str = String(Latexify.latexify(value))
+
+    results = Dict(
+        :value => string(value),
+        :latex => latex_str,
+    )
+
+    return true, results, nothing
 end
 
 end

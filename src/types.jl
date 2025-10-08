@@ -49,6 +49,37 @@ function create_lambda(lambda_string::String)
 end
 
 """
+Symbolic type - represents symbolic mathematical expressions
+"""
+abstract type Symbolic end
+
+"""
+Concrete implementation of Symbolic that wraps a validated symbolic expression
+"""
+struct SymbolicImpl <: Symbolic
+    expression::String
+    value::Any
+    latex::String
+end
+
+"""
+Create a Symbolic from a string expression using Sandbox.test_symbolic_expression for validation
+"""
+function create_symbolic(expression_string::String)
+    success, results, error = Sandbox.test_symbolic_expression(expression_string)
+    
+    if !success
+        throw(ArgumentError("Failed to validate symbolic expression '$expression_string': $error"))
+    end
+    
+    return SymbolicImpl(
+        expression_string,
+        results[:value],
+        results[:latex]
+    )
+end
+
+"""
 Resolve a function reference by name, supporting dotted module paths like `Base.max`.
 Returns the `Function` if found, otherwise `nothing`.
 """

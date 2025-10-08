@@ -698,15 +698,18 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
     # Normalize union representation possibly coming as an array from metadata
     function_type_requested = false
     lambda_type_requested = false
+    symbolic_type_requested = false
     if isa(p_raw_type, AbstractVector)
       for t in p_raw_type
         ts = string(t)
         function_type_requested |= ts == "Function"
         lambda_type_requested |= ts == "Lambda"
+        symbolic_type_requested |= ts == "Symbolic"
       end
     else
       function_type_requested = ptype == "Function"
       lambda_type_requested = ptype == "Lambda"
+      symbolic_type_requested = ptype == "Symbolic"
     end
 
     # Try to convert the value, fall back gracefully if it fails
@@ -737,6 +740,28 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
           end
         else
           @warn "Function/Lambda parameter has unsupported value type; skipping" parameter_name=name value_type=typeof(value)
+          continue
+        end
+
+      # Handle symbolic parameters
+      elseif symbolic_type_requested
+        if isa(value, String)
+          try
+            # Use evaluate_symbolic_expression to get the actual symbolic object
+            success, symbolic_value, error = Sandbox.evaluate_symbolic_expression(value)
+            if success
+              kwargs[name] = symbolic_value  # Pass the actual evaluated symbolic object
+              continue
+            else
+              @warn "Failed to evaluate symbolic expression" parameter_name=name value=value error=error
+              continue
+            end
+          catch e
+            @warn "Failed to create symbolic expression from string" parameter_name=name value=value error=e
+            continue
+          end
+        else
+          @warn "Symbolic parameter has unsupported value type; skipping" parameter_name=name value_type=typeof(value)
           continue
         end
 
