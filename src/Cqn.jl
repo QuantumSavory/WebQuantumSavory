@@ -575,10 +575,10 @@ function run_simulation(state::State, simulation_name::String, time_units::Float
   
   # Start the simulation asynchronously with logging
   # @async begin
-  Logging.with_logger(Logger.make_logger(state)) do
-    run(state.simulation, time_units) |> errormonitor
-  end
-  # end
+    Logging.with_logger(Logger.make_logger(state)) do
+      run(state.simulation, time_units) 
+    end
+  # end |> errormonitor
   
   @info "Simulation running" simulation_name=simulation_name
 
