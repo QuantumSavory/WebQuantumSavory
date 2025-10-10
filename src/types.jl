@@ -11,7 +11,19 @@ struct LambdaImpl <: Lambda
 end
 
 # Make LambdaImpl callable
-(f::LambdaImpl)(args...) = f.func(args...)
+function (f::LambdaImpl)(args...)
+  try
+    result = f.func(args...)
+    # If the lambda returns nothing and we're expecting something, warn
+    if result === nothing
+      @warn "Lambda function returned nothing" args=args
+    end
+    return result
+  catch e
+    @error "Lambda function crashed" args=args error=e
+    rethrow(e)
+  end
+end
 
 """
 Create a Lambda from a string representation using a temporary module for safety
@@ -66,17 +78,24 @@ end
 Create a Symbolic from a string expression using Sandbox.test_symbolic_expression for validation
 """
 function create_symbolic(expression_string::String)
-    success, results, error = Sandbox.test_symbolic_expression(expression_string)
-    
-    if !success
-        throw(ArgumentError("Failed to validate symbolic expression '$expression_string': $error"))
+    try
+        success, results, error = Sandbox.test_symbolic_expression(expression_string)
+        
+        if !success
+            error_msg = "Failed to validate symbolic expression '$expression_string': $error"
+            @warn error_msg
+            throw(ArgumentError(error_msg))
+        end
+        
+        return SymbolicImpl(
+            expression_string,
+            results[:value],
+            results[:latex]
+        )
+    catch e
+        @error "Segmentation fault or critical error in symbolic evaluation" expression=expression_string error=e
+        rethrow(e)
     end
-    
-    return SymbolicImpl(
-        expression_string,
-        results[:value],
-        results[:latex]
-    )
 end
 
 """
