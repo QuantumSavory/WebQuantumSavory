@@ -3,6 +3,7 @@ module Logger
 using Logging
 using LoggingExtras
 using Dates
+using QuantumSavory
 
 export make_logger, MIN_LEVEL, MAX_LEVEL, log_event, @log_event
 
@@ -11,27 +12,43 @@ const MAX_LEVEL = Logging.Warn
 
 ultimateparent(mod) = mod === parentmodule(mod) ? mod : ultimateparent(parentmodule(mod))
 
-function make_logger(state)
-  return EarlyFilteredLogger(Logging.ConsoleLogger(stderr, MIN_LEVEL)) do args
-    # Filter for QuantumSavory logs in the specified level range
-    if MIN_LEVEL <= args.level <= MAX_LEVEL && ultimateparent(args._module) === QuantumSavory
-      # Collect the log event
-      try
-        push!(state.log_events, Dict(
-          :timestamp => Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS.s ssZ"),
-          :level => args.level,
-          :message => args.message,
-          :module => string(args._module),
-          :group => get(args.kwargs, :group, nothing),
-          :id => get(args.kwargs, :id, nothing),
-        ))
-      catch
-        # best-effort collection; ignore failures
-      end
-      return true
-    end
-    return false
+# Custom logger that captures logs into state while also displaying them
+struct CapturingLogger <: Logging.AbstractLogger
+  console::Logging.ConsoleLogger
+  state::Any
+end
+
+Logging.min_enabled_level(logger::CapturingLogger) = MIN_LEVEL
+
+function Logging.shouldlog(logger::CapturingLogger, level, _module, group, id)
+  # Filter for QuantumSavory logs in the specified level range
+  return MIN_LEVEL <= level <= MAX_LEVEL && ultimateparent(_module) === QuantumSavory
+end
+
+Logging.catch_exceptions(logger::CapturingLogger) = false
+
+function Logging.handle_message(logger::CapturingLogger, level, message, _module, group, id, filepath, line; kwargs...)
+  # Capture the log event
+  try
+    push!(logger.state.log_events, Dict(
+      :timestamp => Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS.sssZ"),
+      :level => level,
+      :message => string(message),
+      :module => string(_module),
+      :group => group,
+      :id => id,
+    ))
+  catch e
+    # best-effort collection; ignore failures
+    println(stderr, "❌ LOGGER ERROR: Failed to push log event: ", e)
   end
+  
+  # Also pass through to console logger for display
+  Logging.handle_message(logger.console, level, message, _module, group, id, filepath, line; kwargs...)
+end
+
+function make_logger(state)
+  return CapturingLogger(Logging.ConsoleLogger(stderr, MIN_LEVEL), state)
 end
 
 """Append a structured log event to the state's log_events with a timestamp.
