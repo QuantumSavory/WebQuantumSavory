@@ -1,28 +1,7 @@
 # Parser module for Cqn.jl
 # Contains all parsing, validation, and type resolution functionality
 
-using QuantumSavory
-using QuantumSavory.ProtocolZoo
-using InteractiveUtils
-using REPL
-import JSON
-using Graphs
-using ConcurrentSim
-using Logging
-using Base64
-using Genie
-
-# Include required modules
-include("errors.jl")
-include("types.jl")
-include("Sandbox.jl")
-include("Logger.jl")
 using .Logger: @log_event
-
-# Simple caches to avoid repeated scans/logs during type resolution
-const _PROTOCOL_TYPES_CACHE = Ref(Dict{String, Any}())
-const _NOISE_TYPES_CACHE = Ref(Dict{String, Any}())
-const _SLOT_TYPES_CACHE = Ref(Dict{String, Any}())
 
 function _ensure_protocol_types_cache!()
   if isempty(_PROTOCOL_TYPES_CACHE[])
