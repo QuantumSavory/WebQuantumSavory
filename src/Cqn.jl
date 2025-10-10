@@ -12,6 +12,20 @@ using ConcurrentSim
 using Logging
 using Base64
 import CairoMakie
+using Genie
+
+struct APIError <: Exception
+  message::String
+  status_code::Int
+  error_code::String
+  details::Union{Nothing,Dict{String,Any}}
+end
+
+APIError(message::String, status_code::Int) = APIError(message, status_code, "", nothing)
+APIError(message::String, status_code::Int, error_code::String) = APIError(message, status_code, error_code, nothing)
+
+Base.showerror(io::IO, e::APIError) = print(io, "APIError: $(e.message) (status: $(e.status_code))")
+
 
 # include("constructors.jl")
 include("errors.jl")
