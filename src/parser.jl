@@ -596,7 +596,7 @@ end
 """
 Handle Function or Lambda parameter conversion
 """
-function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, special_type::String, value)
+function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, special_type::String, value, state=nothing)
   if isa(value, Function)
     kwargs[name] = value
     return true
@@ -607,22 +607,55 @@ function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symb
     if resolved === nothing && special_type == "Lambda"
       try
         resolved = create_lambda(value)
+        # Validate the lambda - try calling it with a test value if it's a filter
+        if name == :filter || name == :chooseA || name == :chooseB
+          msg = "Created lambda for parameter: $name"
+          if state !== nothing
+            @log_event state Logging.Info msg parameter_name=string(name) lambda_string=value
+          else
+            @info msg parameter_name=name lambda_string=value
+          end
+          
+          # Warn about common mistakes
+          if !occursin("return", value) && !occursin("=>", value)
+            warning_msg = "Lambda function may not return a value (no 'return' statement or '=>' found). Functions like chooseA/chooseB must return an integer, filter must return a boolean."
+            if state !== nothing
+              @log_event state Logging.Warn warning_msg parameter_name=string(name) lambda_string=value
+            else
+              @warn warning_msg parameter_name=name lambda_string=value
+            end
+          end
+        end
       catch e
-        @warn "Failed to create lambda from string" parameter_name=name value=value error=e
+        msg = "Failed to create lambda from string"
+        if state !== nothing
+          @log_event state Logging.Warn msg parameter_name=string(name) value=value error=string(e)
+        else
+          @warn msg parameter_name=name value=value error=e
+        end
       end
     end
-    if resolved === nothing && special_type == "Function"
-      @warn "Could not resolve function by name" parameter_name=name value=value
-    elseif resolved === nothing && special_type == "Lambda"
-      @warn "Could not create lambda from value" parameter_name=name value=value
-    else
+    if resolved !== nothing
       kwargs[name] = resolved
       return true
+    else
+      msg = "Could not resolve function/lambda parameter"
+      if state !== nothing
+        @log_event state Logging.Warn msg parameter_name=string(name) value=value special_type=special_type
+      else
+        @warn msg parameter_name=name value=value special_type=special_type
+      end
+      return false
     end
   else
-    @warn "Function/Lambda parameter has unsupported value type; skipping" parameter_name=name value_type=typeof(value)
+    msg = "Function/Lambda parameter has unsupported value type; skipping"
+    if state !== nothing
+      @log_event state Logging.Warn msg parameter_name=string(name) value_type=string(typeof(value))
+    else
+      @warn msg parameter_name=name value_type=typeof(value)
+    end
+    return false
   end
-  return false
 end
 
 """
@@ -672,7 +705,7 @@ function _handle_regular_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, ptyp
   return false
 end
 
-function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
+function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any}, state=nothing)
   # Handle both Dict{String,Any} and JSON3.Object types
   tstr = get(prot_def, "type", nothing)
   tstr === nothing && return nothing
@@ -717,6 +750,12 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
       continue
     end
 
+    # Skip empty strings for function/lambda parameters
+    if isa(value, String) && isempty(strip(value))
+      @warn "Parameter has empty value, skipping" parameter_name=name
+      continue
+    end
+
     # Apply keyword name mapping if it exists
     if haskey(keyword_mappings, original_name)
       name = Symbol(keyword_mappings[original_name])
@@ -745,15 +784,28 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any})
 
     # Try to convert the value, fall back gracefully if it fails
     try
+      # Debug logging to see which branch is taken
+      debug_msg = "Processing parameter: $name, type: $ptype, special_type: $special_type"
+      if state !== nothing
+        @log_event state Logging.Debug debug_msg
+      else
+        @debug debug_msg
+      end
+      
       if special_type == "Function" || special_type == "Lambda"
-        _handle_function_lambda_parameter!(kwargs, name, special_type, value)
+        _handle_function_lambda_parameter!(kwargs, name, special_type, value, state)
       elseif special_type == "Symbolic"
         _handle_symbolic_parameter!(kwargs, name, value)
       else
         _handle_regular_parameter!(kwargs, name, ptype, value)
       end
     catch e
-      @warn "Failed to convert parameter" parameter_name=name parameter_type=ptype value=value error=e
+      msg = "Failed to convert parameter"
+      if state !== nothing
+        @log_event state Logging.Warn msg parameter_name=string(name) parameter_type=ptype value=value error=string(e)
+      else
+        @warn msg parameter_name=name parameter_type=ptype value=value error=e
+      end
       # Don't set the parameter - let the constructor use its default value
     end
   end
