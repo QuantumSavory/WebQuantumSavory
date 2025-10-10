@@ -405,7 +405,7 @@ function create_registers_from_nodes(data)
     node_data = node["data"]
     slots = get(node_data, "slots", [])
 
-    isempty(slots) && continue # TODO: what to do with empty slots?
+    # isempty(slots) && continue # TODO: what to do with empty slots?
 
     # Parse traits (Qubit/Qumode) and background noise for each slot
     traits = []
