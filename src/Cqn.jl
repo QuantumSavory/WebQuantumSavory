@@ -38,13 +38,6 @@ using .Logger: @log_event
 const up = Genie.up
 export up
 
-# Simple caches to avoid repeated scans/logs during type resolution
-const _PROTOCOL_TYPES_CACHE = Ref(Dict{String, Any}())
-const _NOISE_TYPES_CACHE = Ref(Dict{String, Any}())
-const _SLOT_TYPES_CACHE = Ref(Dict{String, Any}())
-
-
-
 @kwdef mutable struct State
   name::String
   payload::Union{Nothing, Dict} = nothing

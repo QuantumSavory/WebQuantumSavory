@@ -3,6 +3,11 @@
 
 using .Logger: @log_event
 
+# Simple caches to avoid repeated scans/logs during type resolution
+const _PROTOCOL_TYPES_CACHE = Ref(Dict{String, Any}())
+const _NOISE_TYPES_CACHE = Ref(Dict{String, Any}())
+const _SLOT_TYPES_CACHE = Ref(Dict{String, Any}())
+
 function _ensure_protocol_types_cache!()
   if isempty(_PROTOCOL_TYPES_CACHE[])
     mapping = Dict{String, Any}()
