@@ -133,7 +133,7 @@
                                 {
                                     "name": "chooseB",
                                     "type": "Lambda",
-                                    "value": "function test(args...)\n    println(\"asda\")\nend"
+                                    "value": "function test(args...)\n    20\nend"
                                 },
                                 {
                                     "name": "pairstate",
