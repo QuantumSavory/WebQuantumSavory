@@ -564,7 +564,6 @@ end
 
 function run_simulation(state::State, simulation_name::String, time_units::Float64)
   state.simulation_time = time_units
-  @log_event state Logging.Info "Simulation started" simulation_name=simulation_name time_units=time_units
   
   # Start the simulation asynchronously with logging
   # @async begin
@@ -573,8 +572,6 @@ function run_simulation(state::State, simulation_name::String, time_units::Float
     end
   # end |> errormonitor
   
-  @info "Simulation running" simulation_name=simulation_name
-
   return state
 end
 
