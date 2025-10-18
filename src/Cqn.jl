@@ -46,12 +46,14 @@ export up
   protocols_launched::Union{Nothing, Dict{String, Int}} = nothing
   simulation::Union{Nothing, Simulation} = nothing
   has_run::Bool = false
+  is_running::Bool = false
   slot_mapping::Union{Nothing, Dict{String, Any}} = nothing
   slot_reverse_mapping::Union{Nothing, IdDict{Any, String}} = nothing
   protocol_mapping::Union{Nothing, Dict{String, Any}} = nothing
   simulation_time::Union{Nothing, Float64} = nothing
   simulation_progress::Union{Nothing, Float64} = nothing
   log_events::Vector{Any} = Any[]
+  error::Union{Nothing, Exception} = nothing
 end
 
 const STATE = Dict{String, State}()
@@ -227,8 +229,9 @@ function serialize_state(state::State)
     "message" => _get_status_message(state), 
     "simulation" => Dict(
       "simulation_time" => state.simulation_time,
-      "simulation_progress" => state.simulation_time !== nothing ? QuantumSavory.now(state.simulation) : nothing,
-      "simulation_running" => simulation_status(state)
+      "simulation_progress" => state.simulation_progress,
+      "simulation_running" => state.is_running,
+      "simulation_error" => state.error !== nothing ? string(state.error) : nothing
     )
   )
 end
@@ -334,7 +337,7 @@ function simulation_status(state::State)
   if state.simulation_time === nothing
     return STATUS_NOT_STARTED
   end
-  if state.simulation_time - QuantumSavory.now(state.simulation) > 0
+  if state.is_running
     return STATUS_RUNNING
   end
 
@@ -526,13 +529,15 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
 end
 
 function destroy_simulation(simulation_name)
+  action_is_valid(simulation_name, false)
+  
   state = STATE[simulation_name]
 
-    # Perform cleanup before deletion
-    cleanup_success = cleanup_state!(state)
+  # Perform cleanup before deletion
+  cleanup_success = cleanup_state!(state)
 
-    # Remove from global state
-    delete!(STATE, simulation_name)
+  # Remove from global state
+  delete!(STATE, simulation_name)
 
   return cleanup_success
 end
@@ -543,6 +548,8 @@ end
 
 
 function prepare_simulation(state::State, simulation_name::String)
+  action_is_valid(simulation_name, false) # just check if running, don't destroy
+
   # Get the time tracker from the network
   sim = get_network_time_tracker(state.network)
 
@@ -562,15 +569,44 @@ function prepare_simulation(state::State, simulation_name::String)
   return state
 end
 
-function run_simulation(state::State, simulation_name::String, time_units::Float64)
+function run_simulation(state::State, time_units::Float64, simulation_name::String)
+  action_is_valid(simulation_name, false)
+
+  state.error = nothing
   state.simulation_time = time_units
-  
-  # Start the simulation asynchronously with logging
-  # @async begin
-    Logging.with_logger(Logger.make_logger(state)) do
-      run(state.simulation, time_units) 
+  state.simulation_progress = 0.0
+  state.log_events = []
+
+  Logging.with_logger(Logger.make_logger(state)) do
+    while state.simulation_progress < state.simulation_time
+      try
+        state.has_run = false
+        state.is_running = true
+
+        ConcurrentSim.step(state.simulation)
+        state.simulation_progress = QuantumSavory.now(state.simulation)
+      catch e
+        @error "Error running simulation" error=e
+        @log_event state Logging.Error "Error running simulation" error=e
+        
+        state.is_running = false
+        state.has_run = false
+        state.error = e
+
+        return state
+      end
+
+      @show simulation_progress=state.simulation_progress simulation_time=state.simulation_time
+      @log_event state Logging.Info "Simulation progress" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
     end
-  # end |> errormonitor
+
+    @show "Simulation completed" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
+    @log_event state Logging.Info "Simulation completed" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
+    
+    state.has_run = true
+    state.is_running = false
+    state.error = nothing
+  end
   
   return state
 end

@@ -821,6 +821,27 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any}, state=nothing)
   return T(; (k => v for (k, v) in kwargs)...)
 end
 
+function simulation_is_running_exception(simulation_name)
+  return APIError("Simulation $simulation_name is running, cannot destroy it", 400)
+end
+
+function action_is_valid(simulation_name, destroy::Bool = true)
+  if haskey(Cqn.STATE, simulation_name)
+    state = Cqn.STATE[simulation_name]
+
+    state.is_running && throw(simulation_is_running_exception(simulation_name))
+
+    destroy || return true
+
+    @warn "Simulation $simulation_name already exists, destroying it" simulation_name=simulation_name
+    @log_event Cqn.STATE[simulation_name] Logging.Warn "Simulation $simulation_name already exists, destroying it" simulation_name=simulation_name
+
+    Cqn.destroy_simulation(simulation_name)
+  end
+
+  return true
+end
+
 function parse_network_graph(data)
   g = build_graph(data)
 
@@ -831,10 +852,7 @@ function parse_network_graph(data)
   net = create_register_net(g, registers)
 
   simulation_name = data["data"]["name"]
-  if haskey(Cqn.STATE, simulation_name)
-    @warn "Simulation already exists, destroying it" simulation_name=simulation_name
-    Cqn.destroy_simulation(simulation_name)
-  end
+  action_is_valid(simulation_name)
 
   state = Cqn.State(
     name = simulation_name,

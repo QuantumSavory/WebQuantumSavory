@@ -726,7 +726,7 @@ route("/run_simulation", method="POST") do
   end
 
   try
-    state = Cqn.run_simulation(state, simulation_name, time_units)
+    state = Cqn.run_simulation(state, time_units, simulation_name)
   catch e
     if isa(e, APIError)
       rethrow(e)
@@ -737,8 +737,6 @@ route("/run_simulation", method="POST") do
     end
   end
 
-  # Mark that the simulation has been run
-  state.has_run = true
   Cqn.STATE[simulation_name] = state
 
   json(Dict(:success => true))
