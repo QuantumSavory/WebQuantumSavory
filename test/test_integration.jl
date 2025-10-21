@@ -28,10 +28,10 @@
     return
   end
 
-  # Load test data
-  test_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload.json"))
+  # Load test data - use payload3.json
+  test_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
 
-      # Helper function to make HTTP requests
+  # Helper function to make HTTP requests
   function make_request(method, endpoint; body=nothing, query=nothing)
     url = "$TEST_BASE_URL$endpoint"
     headers = ["Content-Type" => "application/json"]
@@ -505,8 +505,8 @@
       prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => pause_test_name))
       @test prepare_response.status == 200
 
-      # Start the simulation in the background (it will run with sleep)
-      run_response = make_request("POST", "/run_simulation", body=Dict("name" => pause_test_name, "time_units" => 100))
+      # Start the simulation in the background (it will run for a long time)
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => pause_test_name, "time_units" => 1000000))
       @test run_response.status == 200
 
       # Give it a moment to start running
@@ -589,7 +589,7 @@
       @test prepare_data["status"] == Cqn.STATUS_PREPARED
 
       # 3. Start simulation
-      run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_pause_name, "time_units" => 50))
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_pause_name, "time_units" => 1000000))
       @test run_response.status == 200
       run_data = parse_response(run_response)
       @test run_data["success"] == true
