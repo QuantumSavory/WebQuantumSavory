@@ -466,6 +466,9 @@ end
                       type: string
                       enum: ["running", "complete", "not_started"]
                       description: Current simulation execution status
+                    simulation_paused:
+                      type: boolean
+                      description: Whether the simulation is currently paused
                 message:
                   type: string
                   description: Human-readable status message
@@ -605,6 +608,9 @@ end
                       type: string
                       enum: ["running", "complete", "not_started"]
                       description: Current simulation execution status
+                    simulation_paused:
+                      type: boolean
+                      description: Whether the simulation is currently paused
                 message:
                   type: string
                   description: Human-readable status message
@@ -985,6 +991,85 @@ route("/slots/:name/:slot_id", method="GET") do
   result = Cqn.get_slot_state(slot_id, state)
 
   json(Dict(:success => true, result...))
+end
+
+########################################################
+
+@swagger """
+/pause_simulation:
+  post:
+    description: Pause a running simulation
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Name of the simulation to pause
+    responses:
+      '200':
+        description: Simulation paused successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                message:
+                  type: string
+                  example: Simulation paused
+      '400':
+        description: Simulation is not running
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Error message describing the issue
+      '404':
+        description: Simulation not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  description: Error message describing the issue
+"""
+route("/pause_simulation", method="POST") do
+  simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
+
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
+
+  try
+    state = Cqn.STATE[simulation_name]
+    Cqn.pause_simulation(state)
+
+    json(Dict(:success => true, :message => "Simulation paused"))
+  catch e
+    if isa(e, APIError)
+      rethrow(e)
+    else
+      @error stacktrace(catch_backtrace())
+      @show e
+      throw(server_error("Error pausing simulation: $e", Dict("error" => string(e))))
+    end
+  end
 end
 
 ########################################################

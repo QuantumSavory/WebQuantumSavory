@@ -47,6 +47,7 @@ export up
   simulation::Union{Nothing, Simulation} = nothing
   has_run::Bool = false
   is_running::Bool = false
+  simulation_paused::Bool = false
   slot_mapping::Union{Nothing, Dict{String, Any}} = nothing
   slot_reverse_mapping::Union{Nothing, IdDict{Any, String}} = nothing
   protocol_mapping::Union{Nothing, Dict{String, Any}} = nothing
@@ -231,6 +232,7 @@ function serialize_state(state::State)
       "simulation_time" => state.simulation_time,
       "simulation_progress" => state.simulation_progress,
       "simulation_running" => state.is_running,
+      "simulation_paused" => state.simulation_paused,
       "simulation_error" => state.error !== nothing ? string(state.error) : nothing
     )
   )
@@ -528,6 +530,25 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
   return launched
 end
 
+function pause_simulation(state::State)
+  if state.simulation === nothing
+    throw(validation_error("Simulation not prepared"))
+  end
+
+  if state.simulation_paused
+    throw(validation_error("Simulation already paused"))
+  end
+  
+  if !state.is_running
+    throw(validation_error("Simulation is not running"))
+  end
+  
+  state.simulation_paused = true
+  @log_event state Logging.Info "Simulation pause requested"
+  
+  return true
+end
+
 function destroy_simulation(simulation_name)
   action_is_valid(simulation_name, false)
   
@@ -576,9 +597,19 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
   state.simulation_time = time_units
   state.simulation_progress = 0.0
   state.log_events = []
+  state.simulation_paused = false
 
   Logging.with_logger(Logger.make_logger(state)) do
     while state.simulation_progress < state.simulation_time
+      sleep(2) # sleep to test pause functionality
+
+      # Check if simulation was paused
+      if state.simulation_paused
+        @log_event state Logging.Info "Simulation paused by user request"
+        state.is_running = false
+        return state
+      end
+
       try
         state.has_run = false
         state.is_running = true
@@ -597,7 +628,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
       end
 
       @show simulation_progress=state.simulation_progress simulation_time=state.simulation_time
-      @log_event state Logging.Info "Simulation progress" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
+      # @log_event state Logging.Info "Simulation progress" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
     end
 
     @show "Simulation completed" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
