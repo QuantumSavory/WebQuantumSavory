@@ -38,6 +38,35 @@ The user interface is available at `http://localhost:8000`.
 4. **Monitor State** (`GET /get_state`) - Check simulation status and progress
 5. **Cleanup** (`POST /destroy_simulation`) - Remove simulation and free resources
 
+### Simulation Control
+
+- **Pause Simulation** (`POST /pause_simulation`) - Pause a running simulation
+  - Requires simulation to be currently running
+  - Sets `simulation_paused` flag to `true`
+  - Simulation will stop at the next loop iteration
+  - Returns error if simulation is not running
+
+The simulation state includes a `simulation_paused` boolean field that indicates whether the simulation has been paused by user request. When paused, the simulation stops gracefully and can be monitored through the state endpoint.
+
+#### Example: Pausing a Simulation
+
+```bash
+# Start a simulation
+curl -X POST http://localhost:8000/run_simulation \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-simulation", "time_units": 100}'
+
+# Pause the simulation
+curl -X POST http://localhost:8000/pause_simulation \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-simulation"}'
+
+# Check simulation state
+curl http://localhost:8000/get_state?name=my-simulation
+```
+
+The state response will show `simulation_paused: true` and `simulation_running: false` when the simulation has been paused.
+
 ### Information Endpoints
 
 - **`GET /background_types`** - Available background noise models
@@ -59,6 +88,15 @@ The user interface is available at `http://localhost:8000`.
 - **`created`** - Network parsed and stored
 - **`prepared`** - Protocols launched, ready to run
 - **`complete`** - Simulation executed and finished
+
+### Simulation Status Fields
+
+When monitoring simulation state via `GET /get_state`, the response includes a `simulation` object with:
+- `simulation_running` - Boolean indicating if simulation is actively running
+- `simulation_paused` - Boolean indicating if simulation was paused by user request
+- `simulation_time` - Total time units for the simulation
+- `simulation_progress` - Current simulation time progress
+- `simulation_error` - Error message if simulation failed
 
 ## Getting Started
 
