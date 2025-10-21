@@ -673,4 +673,109 @@
       # This might fail if QuantumSavory packages aren't available in test environment
     end
   end
+
+  @testset "Simulation Pause Functionality" begin
+    # Test pause_simulation function with valid state
+    validation_result = Cqn.validate_payload(test_payload)
+    g = Cqn.build_graph(validation_result)
+    registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
+    net = Cqn.create_register_net(g, registers)
+    sim = Cqn.get_network_time_tracker(net)
+    
+    state = Cqn.State(
+      name="pause_test",
+      simulation=sim,
+      is_running=true,
+      simulation_paused=false
+    )
+    
+    # Test successful pause
+    result = Cqn.pause_simulation(state)
+    @test result == true
+    @test state.simulation_paused == true
+    
+    # Test pause when already paused
+    @test_throws Cqn.APIError Cqn.pause_simulation(state)
+    
+    # Test pause when not running
+    state.is_running = false
+    state.simulation_paused = false
+    @test_throws Cqn.APIError Cqn.pause_simulation(state)
+    
+    # Test pause when simulation not prepared
+    state.simulation = nothing
+    state.is_running = true
+    @test_throws Cqn.APIError Cqn.pause_simulation(state)
+  end
+
+  @testset "State Serialization with Pause Field" begin
+    # Test that simulation_paused field is included in serialization
+    state = Cqn.State(
+      name="serialization_test",
+      simulation_paused=true,
+      is_running=false
+    )
+    
+    serialized = Cqn.serialize_state(state)
+    @test haskey(serialized, "simulation")
+    @test haskey(serialized["simulation"], "simulation_paused")
+    @test serialized["simulation"]["simulation_paused"] == true
+    @test serialized["simulation"]["simulation_running"] == false
+    
+    # Test with false pause state
+    state.simulation_paused = false
+    state.is_running = true
+    serialized2 = Cqn.serialize_state(state)
+    @test serialized2["simulation"]["simulation_paused"] == false
+    @test serialized2["simulation"]["simulation_running"] == true
+  end
+
+  @testset "Run Simulation with Pause Check" begin
+    # Test that run_simulation respects pause flag
+    validation_result = Cqn.validate_payload(test_payload)
+    g = Cqn.build_graph(validation_result)
+    registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
+    net = Cqn.create_register_net(g, registers)
+    sim = Cqn.get_network_time_tracker(net)
+    
+    state = Cqn.State(
+      name="pause_run_test",
+      simulation=sim,
+      simulation_time=10.0,
+      simulation_progress=0.0,
+      simulation_paused=false,
+      is_running=false
+    )
+    
+    # Store state in global STATE for action_is_valid
+    original_state = get(Cqn.STATE, "pause_run_test", nothing)
+    Cqn.STATE["pause_run_test"] = state
+    
+    try
+      # Test normal run (this will complete quickly due to sleep in the loop)
+      result_state = Cqn.run_simulation(state, 1.0, "pause_run_test")
+      @test result_state.simulation_progress >= 0.0
+      @test result_state.is_running == false
+      @test result_state.simulation_paused == false
+      
+      # Test run with pause request
+      state.simulation_progress = 0.0
+      state.simulation_paused = false
+      state.is_running = false
+      
+      # Set pause flag before running
+      state.simulation_paused = true
+      result_state_paused = Cqn.run_simulation(state, 10.0, "pause_run_test")
+      @test result_state_paused.simulation_paused == true
+      @test result_state_paused.is_running == false
+      
+    finally
+      # Clean up
+      if original_state !== nothing
+        Cqn.STATE["pause_run_test"] = original_state
+      else
+        delete!(Cqn.STATE, "pause_run_test")
+      end
+    end
+  end
 end

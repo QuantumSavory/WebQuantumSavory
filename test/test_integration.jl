@@ -493,10 +493,150 @@
       @test data["details"]["identifier"] == "nonexistent_sim"
   end
 
+  @testset "Pause Simulation - Success" begin
+      # First create and prepare a simulation
+      pause_test_name = "pause_test_sim"
+      payload = deepcopy(test_payload)
+      payload["name"] = pause_test_name
+
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
+
+      prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => pause_test_name))
+      @test prepare_response.status == 200
+
+      # Start the simulation in the background (it will run with sleep)
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => pause_test_name, "time_units" => 100))
+      @test run_response.status == 200
+
+      # Give it a moment to start running
+      sleep(0.5)
+
+      # Check that simulation is running
+      state_response = make_request("GET", "/get_state", query=Dict("name" => pause_test_name))
+      @test state_response.status == 200
+      state_data = parse_response(state_response)
+      @test state_data["success"] == true
+      @test state_data["state"]["simulation"]["simulation_running"] == true
+      @test state_data["state"]["simulation"]["simulation_paused"] == false
+
+      # Pause the simulation
+      pause_response = make_request("POST", "/pause_simulation", body=Dict("name" => pause_test_name))
+      @test pause_response.status == 200
+      pause_data = parse_response(pause_response)
+      @test pause_data["success"] == true
+      @test pause_data["message"] == "Simulation paused"
+
+      # Give it a moment to pause
+      sleep(1.0)
+
+      # Check that simulation is paused
+      state_response2 = make_request("GET", "/get_state", query=Dict("name" => pause_test_name))
+      @test state_response2.status == 200
+      state_data2 = parse_response(state_response2)
+      @test state_data2["success"] == true
+      @test state_data2["state"]["simulation"]["simulation_running"] == false
+      @test state_data2["state"]["simulation"]["simulation_paused"] == true
+
+      # Clean up
+      destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => pause_test_name))
+      @test destroy_response.status == 200
+  end
+
+  @testset "Pause Simulation - Error Cases" begin
+      # Test pausing non-existent simulation
+      response = make_request("POST", "/pause_simulation", body=Dict("name" => "nonexistent_sim"))
+      @test response.status == 404
+      data = parse_response(response)
+      @test data["success"] == false
+      @test data["error"] == "Simulation not found"
+
+      # Test pausing unprepared simulation
+      unprepared_name = "unprepared_pause_test"
+      payload = deepcopy(test_payload)
+      payload["name"] = unprepared_name
+
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
+
+      pause_response = make_request("POST", "/pause_simulation", body=Dict("name" => unprepared_name))
+      @test pause_response.status == 400
+      pause_data = parse_response(pause_response)
+      @test pause_data["success"] == false
+      @test occursin("not running", pause_data["error"])
+
+      # Clean up
+      destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => unprepared_name))
+      @test destroy_response.status == 200
+  end
+
+  @testset "Complete Workflow with Pause" begin
+      workflow_pause_name = "workflow_pause_test_sim"
+
+      # 1. Create network
+      payload = deepcopy(test_payload)
+      payload["name"] = workflow_pause_name
+
+      create_response = make_request("POST", "/parse_network_graph", body=payload)
+      @test create_response.status == 200
+      create_data = parse_response(create_response)
+      @test create_data["status"] == Cqn.STATUS_CREATED
+
+      # 2. Prepare simulation
+      prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => workflow_pause_name))
+      @test prepare_response.status == 200
+      prepare_data = parse_response(prepare_response)
+      @test prepare_data["status"] == Cqn.STATUS_PREPARED
+
+      # 3. Start simulation
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_pause_name, "time_units" => 50))
+      @test run_response.status == 200
+      run_data = parse_response(run_response)
+      @test run_data["success"] == true
+
+      # Give it a moment to start
+      sleep(0.5)
+
+      # 4. Check initial state
+      state_response = make_request("GET", "/get_state", query=Dict("name" => workflow_pause_name))
+      @test state_response.status == 200
+      state_data = parse_response(state_response)
+      @test state_data["success"] == true
+      @test state_data["state"]["simulation"]["simulation_running"] == true
+      @test state_data["state"]["simulation"]["simulation_paused"] == false
+
+      # 5. Pause simulation
+      pause_response = make_request("POST", "/pause_simulation", body=Dict("name" => workflow_pause_name))
+      @test pause_response.status == 200
+      pause_data = parse_response(pause_response)
+      @test pause_data["success"] == true
+
+      # Give it a moment to pause
+      sleep(1.0)
+
+      # 6. Check paused state
+      state_response2 = make_request("GET", "/get_state", query=Dict("name" => workflow_pause_name))
+      @test state_response2.status == 200
+      state_data2 = parse_response(state_response2)
+      @test state_data2["success"] == true
+      @test state_data2["state"]["simulation"]["simulation_running"] == false
+      @test state_data2["state"]["simulation"]["simulation_paused"] == true
+
+      # 7. Clean up
+      destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => workflow_pause_name))
+      @test destroy_response.status == 200
+      destroy_data = parse_response(destroy_response)
+      @test destroy_data["success"] == true
+
+      # Verify cleanup
+      verify_response = make_request("GET", "/get_state", query=Dict("name" => workflow_pause_name))
+      @test verify_response.status == 404
+  end
+
   # Cleanup after all tests
   @testset "Final Cleanup" begin
       # Clean up any remaining test simulations
-      test_names = [TEST_SIMULATION_NAME, "unprepared_sim", "workflow_test_sim", "logs_test_sim"]
+      test_names = [TEST_SIMULATION_NAME, "unprepared_sim", "workflow_test_sim", "logs_test_sim", "pause_test_sim", "unprepared_pause_test", "workflow_pause_test_sim"]
 
       for name in test_names
         try

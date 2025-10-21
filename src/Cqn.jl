@@ -601,7 +601,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
 
   Logging.with_logger(Logger.make_logger(state)) do
     while state.simulation_progress < state.simulation_time
-      sleep(2) # sleep to test pause functionality
+      # sleep(2) # sleep to test pause functionality
 
       # Check if simulation was paused
       if state.simulation_paused
