@@ -18,7 +18,7 @@ function cleanup_stale_simulations_once()
                 # Check if older than 30 minutes
                 if Dates.now() - state.simulation_last_active_time > Dates.Minute(CLEANUP_THRESHOLD)
                     @info "Destroying stale simulation: $simulation_name"
-                    @log_event state Logging.Info "Simulation $simulation_name was purged due to inactivity"
+                    @log_event state Logging.Info "Stopping simulation $simulation_name after $CLEANUP_THRESHOLD minutes of inactivity"
                     
                     Cqn.destroy_simulation(simulation_name)
                 end
