@@ -23,6 +23,8 @@ function route(f::Function, args...; name=nothing, kwargs...)
   end
 end
 
+function bootstrap()
+# don't indent everything 
 route("/") do
   Genie.Router.serve_static_file("index.html")
 end
@@ -1599,3 +1601,14 @@ end
 
 ########################################################
 
+try 
+  @async Cqn.cleanup_stale_simulations() |> errormonitor
+catch e
+  @error "Error starting cleanup_stale_simulations" error=e
+end
+
+########################################################
+
+end # bootstrap()
+
+bootstrap()

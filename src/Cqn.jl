@@ -13,6 +13,7 @@ using Logging
 using Base64
 import CairoMakie
 using Genie
+using Dates
 
 struct APIError <: Exception
   message::String
@@ -55,6 +56,7 @@ export up
   simulation_progress::Union{Nothing, Float64} = nothing
   log_events::Vector{Any} = Any[]
   error::Union{Nothing, Exception} = nothing
+  simulation_last_active_time::Union{Nothing, DateTime} = nothing
 end
 
 const STATE = Dict{String, State}()
@@ -233,7 +235,8 @@ function serialize_state(state::State)
       "simulation_progress" => state.simulation_progress,
       "simulation_running" => state.is_running,
       "simulation_paused" => state.simulation_paused,
-      "simulation_error" => state.error !== nothing ? string(state.error) : nothing
+      "simulation_error" => state.error !== nothing ? string(state.error) : nothing,
+      "simulation_last_active_time" => state.simulation_last_active_time
     )
   )
 end
@@ -544,6 +547,7 @@ function pause_simulation(state::State)
   end
   
   state.simulation_paused = true
+  state.simulation_last_active_time = Dates.now()
   @log_event state Logging.Info "Simulation pause requested"
   
   return true
@@ -584,6 +588,7 @@ function prepare_simulation(state::State, simulation_name::String)
   state.simulation = sim
   state.protocols_launched = launch_counts
   state.protocol_mapping = protocol_mapping
+  state.simulation_last_active_time = Dates.now()
 
   Cqn.STATE[simulation_name] = state
 
@@ -598,6 +603,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
   state.simulation_progress = 0.0
   state.log_events = []
   state.simulation_paused = false
+  state.simulation_last_active_time = Dates.now()
 
   Logging.with_logger(Logger.make_logger(state)) do
     while state.simulation_progress < state.simulation_time
@@ -637,6 +643,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
     state.has_run = true
     state.is_running = false
     state.error = nothing
+    state.simulation_last_active_time = Dates.now()
   end
   
   return state
@@ -658,5 +665,6 @@ function get_logs(simulation_name::String, purge::Bool = true)
 end
 
 include("mocks.jl")
+include("services.jl")
 
 end

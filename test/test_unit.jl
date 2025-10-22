@@ -4,6 +4,7 @@
   using .Cqn
   using Graphs
   using QuantumSavory
+  using Dates
 
   # Load test data
   test_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload.json"))
@@ -732,5 +733,87 @@
     @test state.simulation_paused == false
     state.simulation_paused = true
     @test state.simulation_paused == true
+  end
+
+  @testset "Cleanup Stale Simulations - Basic Test" begin
+    # Load payload3 for testing
+    test_payload3 = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    
+    # Create and setup a simulation
+    simulation_name = "cleanup_test_basic"
+    test_payload3["name"] = simulation_name
+    
+    # Validate payload first (this adds the graph_info structure)
+    validation_result = Cqn.validate_payload(test_payload3)
+    
+    # Parse the network graph
+    state = Cqn.parse_network_graph(validation_result)
+    @test haskey(Cqn.STATE, simulation_name)
+    @test state.simulation_last_active_time !== nothing
+    
+    # Prepare the simulation
+    state = Cqn.prepare_simulation(state, simulation_name)
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Make the simulation stale by setting last_active_time to 31 minutes ago
+    state.simulation_last_active_time = Dates.now() - Dates.Minute(31)
+    Cqn.STATE[simulation_name] = state
+    
+    # Verify simulation exists before cleanup
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Call cleanup function (modified to run once instead of infinite loop)
+    Cqn.cleanup_stale_simulations_once()
+    
+    # Verify simulation was cleaned up
+    @test !haskey(Cqn.STATE, simulation_name)
+  end
+
+  @testset "Cleanup Stale Simulations - Running Simulation Test" begin
+    # Load payload3 for testing
+    test_payload3 = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    
+    # Create and setup a simulation
+    simulation_name = "cleanup_test_running"
+    test_payload3["name"] = simulation_name
+    
+    # Validate payload first (this adds the graph_info structure)
+    validation_result = Cqn.validate_payload(test_payload3)
+    
+    # Parse the network graph
+    state = Cqn.parse_network_graph(validation_result)
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Prepare the simulation
+    state = Cqn.prepare_simulation(state, simulation_name)
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Make the simulation stale by setting last_active_time to 31 minutes ago
+    state.simulation_last_active_time = Dates.now() - Dates.Minute(31)
+    
+    # Start simulation in background (very long time)
+    state.is_running = true
+    Cqn.STATE[simulation_name] = state
+    
+    # Verify simulation exists before cleanup
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Call cleanup function - should NOT clean up running simulation
+    Cqn.cleanup_stale_simulations_once()
+    
+    # Verify simulation was NOT cleaned up because it's running
+    @test haskey(Cqn.STATE, simulation_name)
+    @test Cqn.STATE[simulation_name].is_running == true
+    
+    # Now pause the simulation
+    state.is_running = false
+    state.simulation_paused = true
+    Cqn.STATE[simulation_name] = state
+    
+    # Call cleanup function again - should clean up paused simulation
+    Cqn.cleanup_stale_simulations_once()
+    
+    # Verify simulation was cleaned up after pausing
+    @test !haskey(Cqn.STATE, simulation_name)
   end
 end

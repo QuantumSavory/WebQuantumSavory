@@ -1,6 +1,7 @@
 # Parser module for Cqn.jl
 # Contains all parsing, validation, and type resolution functionality
 
+using Dates
 using .Logger: @log_event
 
 # Simple caches to avoid repeated scans/logs during type resolution
@@ -863,6 +864,7 @@ function parse_network_graph(data)
     slot_reverse_mapping = slot_reverse_mapping,
   )
 
+  state.simulation_last_active_time = Dates.now()
   Cqn.STATE[simulation_name] = state
 
   return state
