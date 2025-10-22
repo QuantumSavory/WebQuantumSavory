@@ -1,6 +1,7 @@
+
 function cleanup_stale_simulations_once()
     CLEANUP_THRESHOLD = 30
-    
+
     # Get all simulation names to avoid mutating while iterating
     simulation_names = collect(keys(Cqn.STATE))
     
@@ -17,6 +18,8 @@ function cleanup_stale_simulations_once()
                 # Check if older than 30 minutes
                 if Dates.now() - state.simulation_last_active_time > Dates.Minute(CLEANUP_THRESHOLD)
                     @info "Destroying stale simulation: $simulation_name"
+                    @log_event state Logging.Info "Simulation $simulation_name was purged due to inactivity"
+                    
                     Cqn.destroy_simulation(simulation_name)
                 end
             end
