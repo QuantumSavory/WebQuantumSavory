@@ -23,23 +23,32 @@ function test_code(code_string::String)
         parsed = Meta.parse(code_string)
 
         # Get names that exist before evaluation (default functions)
-        default_names_raw = names(sandbox, all=true)
-        default_names = Set{Symbol}(default_names_raw)
+        default_names = @invokelatest names(sandbox, all=true)
 
         # Evaluate in sandbox
-        Base.eval(sandbox, parsed)
+        evaluation_result = Base.eval(sandbox, parsed)
+        @show evaluation_result
+
+        @show @invokelatest methods(evaluation_result)
+
+        if count(@invokelatest methods(evaluation_result)) == 0
+            return (false, nothing, "Evaluation result is not a function")
+        end
 
         # Get names that exist after evaluation
-        all_names_raw = names(sandbox, all=true)
-        all_names = Set{Symbol}(all_names_raw)
+        all_names = @invokelatest names(sandbox, all=true)
+
+        @info "All names" all_names=all_names
 
         # Find newly created names by filtering
         created_names = Symbol[]
-        for name in all_names_raw
-            if !(name in default_names_raw)
+        for name in all_names
+            if !(name in default_names)
                 push!(created_names, name)
             end
         end
+
+        # @info "Created names" created_names=created_names
 
         # Separate functions from other values
         functions = String[]
@@ -47,6 +56,7 @@ function test_code(code_string::String)
 
         for name in created_names
             name_str = string(name)
+            @info "Name" name=name name_str=name_str
             # Skip internal Julia names
             if !startswith(name_str, "#") && !startswith(name_str, "@")
                 value = getfield(sandbox, name)
@@ -94,6 +104,8 @@ function evaluate_symbolic_expression(expr::String)
 
         # Evaluate within the temporary module to resolve symbols like Z₁, Z₂, ⊗, √, etc
         value = Base.eval(tempmod, parsed)
+
+
 
         return true, value, nothing
     catch e
