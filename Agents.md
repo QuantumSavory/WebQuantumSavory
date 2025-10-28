@@ -46,6 +46,16 @@ cd test/
 julia --project runtests.jl test_integration
 ```
 
+Notes for agents:
+- When constructing a state from JSON in tests or scripts, always do:
+
+  ```julia
+  validation_result = Cqn.validate_payload(raw_payload)
+  state = Cqn.parse_network_graph(validation_result)
+  ```
+
+- Unit tests exercise cleanup using `Cqn.cleanup_stale_simulations_once()` to avoid infinite loops.
+
 ### Test Structure
 - **Unit Tests** (`test_unit.jl`) - Direct function calls, no HTTP
 - **Integration Tests** (`test_integration.jl`) - HTTP API testing
@@ -91,6 +101,12 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 - **Threshold**: 30 minutes of inactivity
 - **Protection**: Skips running simulations (`is_running == true`)
 - **Test Helper**: `cleanup_stale_simulations_once()` for unit testing
+ - **Startup**: launched from `routes.jl` inside `bootstrap()`
+ - **Log Event**: before deletion, logs via
+
+   ```julia
+   @log_event state Logging.Info "Stopping simulation $simulation_name after $CLEANUP_THRESHOLD minutes of inactivity"
+   ```
 
 ## API Endpoints
 

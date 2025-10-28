@@ -142,6 +142,10 @@ cd test
 julia --project runtests.jl test_unit
 ```
 
+Notes:
+- Unit tests include deterministic checks for the background cleanup via `cleanup_stale_simulations_once()`.
+- When creating states from payloads in tests, always call `Cqn.validate_payload(payload)` before `Cqn.parse_network_graph(...)`.
+
 ### Run Integration Tests
 
 1. Start the server (in a separate terminal):
@@ -154,3 +158,25 @@ julia --project runtests.jl test_unit
    cd test
    julia --project runtests.jl test_integration
    ```
+
+## Automatic Cleanup of Inactive Simulations
+
+The system includes a background task that periodically cleans up simulations that have been inactive for more than 30 minutes.
+
+- Service function: `Cqn.cleanup_stale_simulations()` (in `src/services.jl`)
+- Frequency: every 60 seconds
+- Threshold: 30 minutes of inactivity
+- Skips cleanup when `state.is_running == true`
+- Startup: launched from `routes.jl` inside `bootstrap()` via
+
+  ```julia
+  @async Cqn.cleanup_stale_simulations() |> errormonitor
+  ```
+
+- Logging: before destroying a stale simulation, an event is logged with the simulation's state using the Logger module macro:
+
+  ```julia
+  @log_event state Logging.Info "Stopping simulation $simulation_name after $CLEANUP_THRESHOLD minutes of inactivity"
+  ```
+
+You can trigger a single cleanup pass manually (useful in tests) via `Cqn.cleanup_stale_simulations_once()`.
