@@ -225,6 +225,10 @@
       @test serialized["edge_count"] == 0
       @test serialized["protocols_launched"] === nothing
       @test haskey(serialized, "message")
+      @test haskey(serialized, "simulation")
+      @test haskey(serialized["simulation"], "simulation_started_at")
+      @test haskey(serialized["simulation"], "simulation_execution_time_exceeded")
+      @test haskey(serialized["simulation"], "simulation_auto_purged")
   end
 
   @testset "Status Determination" begin
@@ -765,8 +769,16 @@
     # Call cleanup function (modified to run once instead of infinite loop)
     Cqn.cleanup_stale_simulations_once()
     
-    # Verify simulation was cleaned up
-    @test !haskey(Cqn.STATE, simulation_name)
+    # Verify simulation was NOT destroyed but blocked and preserved
+    # Auto-purged simulations have execution_time_exceeded=false, auto_purged=true
+    @test haskey(Cqn.STATE, simulation_name)
+    blocked = Cqn.STATE[simulation_name]
+    @test blocked.execution_time_exceeded == false
+    @test blocked.auto_purged == true
+    @test blocked.payload === nothing
+    @test blocked.graph === nothing
+    @test blocked.network === nothing
+    @test blocked.simulation === nothing
   end
 
   @testset "Cleanup Stale Simulations - Running Simulation Test" begin
@@ -813,7 +825,101 @@
     # Call cleanup function again - should clean up paused simulation
     Cqn.cleanup_stale_simulations_once()
     
-    # Verify simulation was cleaned up after pausing
+    # Verify simulation was blocked (preserved, not destroyed)
+    # Auto-purged simulations have execution_time_exceeded=false, auto_purged=true
+    @test haskey(Cqn.STATE, simulation_name)
+    s2 = Cqn.STATE[simulation_name]
+    @test s2.execution_time_exceeded == false
+    @test s2.auto_purged == true
+  end
+
+  @testset "Block Simulation Behavior" begin
+    # Test timeout block (execution_time_exceeded=true)
+    simulation_name = "block_behavior_test_timeout"
+    state1 = Cqn.State(name=simulation_name, payload=Dict("data"=>Dict()), graph=SimpleGraph(0))
+    Cqn.STATE[simulation_name] = state1
+
+    # Block it explicitly with timeout reason
+    ok = Cqn.block_simulation(state1; reason=:timeout, max_minutes=Cqn.MAX_SIM_RUNTIME_MINUTES)
+    @test ok == true
+    @test state1.execution_time_exceeded == true
+    @test state1.auto_purged == false
+    @test state1.payload === nothing
+
+    # Further non-destroy actions should be forbidden
+    try
+      Cqn.action_is_valid(simulation_name, false)
+      @test false  # should not reach
+    catch e
+      @test e isa Cqn.APIError
+      @test occursin("expired", e.message)
+    end
+
+    # Test auto-purge block (auto_purged=true, execution_time_exceeded=false)
+    simulation_name2 = "block_behavior_test_autopurge"
+    state2 = Cqn.State(name=simulation_name2, payload=Dict("data"=>Dict()), graph=SimpleGraph(0))
+    Cqn.STATE[simulation_name2] = state2
+
+    # Block it explicitly with autopurge reason
+    ok2 = Cqn.block_simulation(state2; reason=:autopurge, max_minutes=30, auto_purged=true)
+    @test ok2 == true
+    @test state2.execution_time_exceeded == false
+    @test state2.auto_purged == true
+    @test state2.payload === nothing
+
+    # Further non-destroy actions should be forbidden (auto_purged also blocks)
+    try
+      Cqn.action_is_valid(simulation_name2, false)
+      @test false  # should not reach
+    catch e
+      @test e isa Cqn.APIError
+      @test occursin("expired", e.message)
+    end
+
+    # Destroy should still be allowed for both
+    Cqn.destroy_simulation(simulation_name)
+    Cqn.destroy_simulation(simulation_name2)
+    @test !haskey(Cqn.STATE, simulation_name)
+    @test !haskey(Cqn.STATE, simulation_name2)
+  end
+
+  @testset "Execution Time Exceeded Prevention" begin
+    # Test that blocked simulations cannot be run
+    simulation_name = "expired_simulation"
+    state = Cqn.State(name=simulation_name, execution_time_exceeded=true)
+    Cqn.STATE[simulation_name] = state
+
+    # Attempting to run should fail via action_is_valid check
+    try
+      Cqn.run_simulation(state, 5.0, simulation_name)
+      @test false  # should not reach
+    catch e
+      @test e isa Cqn.APIError
+      @test occursin("expired", e.message) || occursin("blocked", e.message)
+    end
+
+    # Cleanup
+    Cqn.destroy_simulation(simulation_name)
+    @test !haskey(Cqn.STATE, simulation_name)
+  end
+
+  @testset "Auto-Purged State Prevention" begin
+    # Test that auto-purged simulations cannot be run
+    simulation_name = "autopurged_simulation"
+    state = Cqn.State(name=simulation_name, auto_purged=true)
+    Cqn.STATE[simulation_name] = state
+
+    # Attempting to run should fail via action_is_valid check
+    try
+      Cqn.run_simulation(state, 5.0, simulation_name)
+      @test false  # should not reach
+    catch e
+      @test e isa Cqn.APIError
+      @test occursin("expired", e.message) || occursin("blocked", e.message)
+    end
+
+    # Cleanup
+    Cqn.destroy_simulation(simulation_name)
     @test !haskey(Cqn.STATE, simulation_name)
   end
 end

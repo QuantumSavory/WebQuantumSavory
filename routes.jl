@@ -1601,6 +1601,120 @@ end
 
 ########################################################
 
+@swagger """
+/dev/manipulate_state:
+  post:
+    summary: Dev-only endpoint to manipulate simulation state for testing
+    description: Allows modification of simulation state fields for testing purposes. Only available in dev environment.
+    tags:
+      - Dev
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - name
+            properties:
+              name:
+                type: string
+                description: Name of the simulation
+              is_running:
+                type: boolean
+                description: Set simulation running state
+              simulation_paused:
+                type: boolean
+                description: Set simulation paused state
+              has_run:
+                type: boolean
+                description: Set whether simulation has run
+              simulation_progress:
+                type: number
+                description: Set simulation progress
+              simulation_started_at:
+                type: string
+                nullable: true
+                description: Set simulation start time
+              simulation_last_active_time:
+                type: string
+                description: Set last active time
+    responses:
+      '200':
+        description: State updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                message:
+                  type: string
+                name:
+                  type: string
+      '400':
+        description: Validation error
+      '404':
+        description: Simulation not found
+      '500':
+        description: Internal server error or not in dev mode
+"""
+# Dev-only endpoint for test support
+route("/dev/manipulate_state", method="POST") do
+  # Only allow in dev environment
+  if ! Genie.Configuration.isdev()
+    throw(server_error("This endpoint is only available in dev environment"))
+  end
+
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  
+  if !haskey(payload, "name")
+    throw(validation_error("Missing required field: 'name'"))
+  end
+
+  simulation_name = payload["name"]
+
+  if !haskey(Cqn.STATE, simulation_name)
+    throw(not_found_error("Simulation", simulation_name))
+  end
+
+  state = Cqn.STATE[simulation_name]
+
+  # Allow manipulation of various fields
+  if haskey(payload, "is_running")
+    state.is_running = payload["is_running"]
+  end
+
+  if haskey(payload, "simulation_paused")
+    state.simulation_paused = payload["simulation_paused"]
+  end
+
+  if haskey(payload, "has_run")
+    state.has_run = payload["has_run"]
+  end
+
+  if haskey(payload, "simulation_progress")
+    state.simulation_progress = payload["simulation_progress"]
+  end
+
+  if haskey(payload, "simulation_started_at")
+    if payload["simulation_started_at"] === nothing
+      state.simulation_started_at = nothing
+    else
+      # Assume it's a timestamp string or DateTime
+      state.simulation_started_at = payload["simulation_started_at"]
+    end
+  end
+
+  if haskey(payload, "simulation_last_active_time")
+    state.simulation_last_active_time = payload["simulation_last_active_time"]
+  end
+
+  json(Dict(:success => true, :message => "State updated", :name => simulation_name))
+end
+
+########################################################
+
 try 
   @async Cqn.cleanup_stale_simulations() |> errormonitor
 catch e

@@ -826,11 +826,20 @@ function simulation_is_running_exception(simulation_name)
   return APIError("Simulation $simulation_name is running, cannot destroy it", 400)
 end
 
+function simulation_blocked_exception(simulation_name)
+  return APIError("Simulation $simulation_name is expired; destroy it to recreate", 400)
+end
+
 function action_is_valid(simulation_name, destroy::Bool = true)
   if haskey(Cqn.STATE, simulation_name)
     state = Cqn.STATE[simulation_name]
 
     state.is_running && throw(simulation_is_running_exception(simulation_name))
+
+    # If the state has been blocked (either timeout or auto-purged), prevent any modifying actions except destroy
+    if (state.execution_time_exceeded || state.auto_purged) && !destroy
+      throw(simulation_blocked_exception(simulation_name))
+    end
 
     destroy || return true
 

@@ -1,7 +1,7 @@
 
-function cleanup_stale_simulations_once()
-    CLEANUP_THRESHOLD = 30
+const AUTO_PURGE_MINUTES = 30
 
+function cleanup_stale_simulations_once()
     # Get all simulation names to avoid mutating while iterating
     simulation_names = collect(keys(Cqn.STATE))
     
@@ -15,12 +15,13 @@ function cleanup_stale_simulations_once()
                     continue
                 end
                 
-                # Check if older than 30 minutes
-                if Dates.now() - state.simulation_last_active_time > Dates.Minute(CLEANUP_THRESHOLD)
-                    @info "Destroying stale simulation: $simulation_name"
-                    @log_event state Logging.Info "Stopping simulation $simulation_name after $CLEANUP_THRESHOLD minutes of inactivity"
-                    
-                    Cqn.destroy_simulation(simulation_name)
+                # Check if older than AUTO_PURGE_MINUTES
+                if Dates.now() - state.simulation_last_active_time > Dates.Minute(AUTO_PURGE_MINUTES)
+                    @info "Auto-stopping stale simulation: $simulation_name"
+                    @log_event state Logging.Info "Stopping simulation $simulation_name after $AUTO_PURGE_MINUTES minutes of inactivity"
+
+                    # Non-destructive block to preserve state for UI
+                    Cqn.block_simulation(state; reason=:autopurge, max_minutes=AUTO_PURGE_MINUTES, auto_purged=true)
                 end
             end
         catch e

@@ -39,6 +39,9 @@ using .Logger: @log_event
 const up = Genie.up
 export up
 
+# Configuration constants
+const MAX_SIM_RUNTIME_MINUTES = 10
+
 @kwdef mutable struct State
   name::String
   payload::Union{Nothing, Dict} = nothing
@@ -57,6 +60,9 @@ export up
   log_events::Vector{Any} = Any[]
   error::Union{Nothing, Exception} = nothing
   simulation_last_active_time::Union{Nothing, DateTime} = nothing
+  simulation_started_at::Union{Nothing, DateTime} = nothing
+  execution_time_exceeded::Bool = false
+  auto_purged::Bool = false
 end
 
 const STATE = Dict{String, State}()
@@ -229,14 +235,17 @@ function serialize_state(state::State)
     "protocols_launched" => state.protocols_launched,
     "slots" => _serialize_slots(state),
     "protocols" => _serialize_protocols(state),
-    "message" => _get_status_message(state), 
+    "message" => _get_status_message(state),
     "simulation" => Dict(
       "simulation_time" => state.simulation_time,
       "simulation_progress" => state.simulation_progress,
       "simulation_running" => state.is_running,
       "simulation_paused" => state.simulation_paused,
       "simulation_error" => state.error !== nothing ? string(state.error) : nothing,
-      "simulation_last_active_time" => state.simulation_last_active_time
+      "simulation_last_active_time" => state.simulation_last_active_time,
+      "simulation_started_at" => state.simulation_started_at,
+      "simulation_execution_time_exceeded" => state.execution_time_exceeded,
+      "simulation_auto_purged" => state.auto_purged
     )
   )
 end
@@ -382,10 +391,6 @@ function cleanup_state!(state::State)
             if QuantumSavory.isassigned(slot)
               # Clear the quantum state
               QuantumSavory.clear!(slot)
-            end
-            # Unlock the slot if it's locked
-            if QuantumSavory.islocked(slot)
-              QuantumSavory.unlock!(slot)
             end
           catch e
             @warn "Failed to cleanup slot" reg_idx=reg_idx slot_idx=slot_idx error=e
@@ -554,7 +559,18 @@ function pause_simulation(state::State)
 end
 
 function destroy_simulation(simulation_name)
-  action_is_valid(simulation_name, false)
+  # Check if simulation exists and isn't running, but allow destroying blocked states
+  if haskey(STATE, simulation_name)
+    state = STATE[simulation_name]
+    if state.is_running
+      throw(simulation_is_running_exception(simulation_name))
+    end
+  end
+  
+  # Don't call action_is_valid here as it blocks expired simulations
+  if !haskey(STATE, simulation_name)
+    return true  # Already deleted or never existed
+  end
   
   state = STATE[simulation_name]
 
@@ -566,6 +582,49 @@ function destroy_simulation(simulation_name)
 
   return cleanup_success
 end
+
+function block_simulation(state::State; reason::Symbol = :timeout, max_minutes::Int = 10, auto_purged::Bool = false)
+  # Log the reason and duration
+  msg = reason == :autopurge ?
+    "Simulation auto-stopped due to inactivity after $(max_minutes) minutes" :
+    "Simulation auto-stopped due to exceeding max execution time of $(max_minutes) minutes"
+  @log_event state Logging.Warn msg
+
+  # Stop running flags
+  state.is_running = false
+  state.simulation_paused = false
+
+  # Cleanup heavy resources but keep lightweight status for UI
+  try
+    # Clear network and quantum resources if present
+    if state.network !== nothing || state.simulation !== nothing
+      cleanup_state!(state)
+    end
+  catch e
+    @warn "Error during cleanup while blocking simulation" error=e
+  end
+
+  # Ensure all expensive fields are nilled regardless
+  state.payload = nothing
+  state.graph = nothing
+  state.network = nothing
+  state.protocols_launched = nothing
+  state.simulation = nothing
+  state.slot_mapping = nothing
+  state.slot_reverse_mapping = nothing
+  state.protocol_mapping = nothing
+
+  # Set flags and timestamps
+  # execution_time_exceeded: true for timeout (10 min running), false for auto-purge (30 min idle)
+  # auto_purged: true only when purged due to inactivity
+  state.execution_time_exceeded = reason == :timeout ? true : false
+  state.auto_purged = auto_purged
+  state.simulation_started_at = nothing
+  state.simulation_last_active_time = Dates.now()
+
+  return true
+end
+
 
 function known_functions()
   [string(f) for f in [min, maximum, abs, identity]]
@@ -596,7 +655,7 @@ function prepare_simulation(state::State, simulation_name::String)
 end
 
 function run_simulation(state::State, time_units::Float64, simulation_name::String)
-  action_is_valid(simulation_name, false)
+  action_is_valid(simulation_name, false)  # This already checks if blocked
 
   state.error = nothing
   state.simulation_time = time_units
@@ -604,6 +663,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
   state.log_events = []
   state.simulation_paused = false
   state.simulation_last_active_time = Dates.now()
+  state.simulation_started_at = Dates.now()
 
   Logging.with_logger(Logger.make_logger(state)) do
     while state.simulation_progress < state.simulation_time
@@ -613,6 +673,12 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
       if state.simulation_paused
         @log_event state Logging.Info "Simulation paused by user request"
         state.is_running = false
+        return state
+      end
+
+      # Enforce max wall-clock execution time
+      if state.simulation_started_at !== nothing && (Dates.now() - state.simulation_started_at > Dates.Minute(MAX_SIM_RUNTIME_MINUTES))
+        block_simulation(state; reason=:timeout, max_minutes=MAX_SIM_RUNTIME_MINUTES)
         return state
       end
 
@@ -644,6 +710,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
     state.is_running = false
     state.error = nothing
     state.simulation_last_active_time = Dates.now()
+    state.simulation_started_at = nothing
   end
   
   return state
