@@ -347,17 +347,6 @@ function _determine_status(state::State)
   end
 end
 
-function simulation_status(state::State)
-  if state.simulation_time === nothing
-    return STATUS_NOT_STARTED
-  end
-  if state.is_running
-    return STATUS_RUNNING
-  end
-
-  return STATUS_COMPLETE
-end
-
 const STATUS_MESSAGE_COMPLETE = "Simulation has run"
 const STATUS_MESSAGE_PREPARED = "Simulation is prepared and ready to run"
 const STATUS_MESSAGE_CREATED = "Network has been created"
