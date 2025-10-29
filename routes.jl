@@ -1589,18 +1589,6 @@ end
 
 ########################################################
 
-info = Dict{String,Any}()
-info["title"] = "CQN API"
-info["version"] = "1.0.0"
-openApi = OpenAPI("3.0.0", info)
-swagger_document = build(openApi)
-
-route("/docs") do
-  render_swagger(swagger_document)
-end
-
-########################################################
-
 @swagger """
 /dev/manipulate_state:
   post:
@@ -1711,6 +1699,18 @@ route("/dev/manipulate_state", method="POST") do
   end
 
   json(Dict(:success => true, :message => "State updated", :name => simulation_name))
+end
+
+########################################################
+
+info = Dict{String,Any}()
+info["title"] = "CQN API"
+info["version"] = "1.0.0"
+openApi = OpenAPI("3.0.0", info)
+swagger_document = build(openApi)
+
+route("/docs") do
+  render_swagger(swagger_document)
 end
 
 ########################################################
