@@ -30,16 +30,10 @@ This project uses Playwright for automated end-to-end testing.
 
 ```bash
 # Run all e2e tests
-npm run test:e2e
-
-# Run tests with UI mode (interactive)
-npm run test:e2e:ui
-
-# View test report
-npm run test:e2e:report
+npm run test
 ```
 
-The e2e tests automatically start the Vite dev server and run tests across Chromium, Firefox, and WebKit browsers.
+The e2e tests automatically start the Vite dev server and run tests in the browser.
 
 ### Test Structure
 - Tests are located in `tests/e2e/`
