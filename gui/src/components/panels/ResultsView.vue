@@ -93,15 +93,17 @@ const windowTitle = computed(() => {
   const context = props.itemDetails.context || {}
   
   if (type === 'slot') {
-    // Check if this is an entangled state (has stateId and slotCount in context)
-    if (context.stateId && context.slotCount) {
-      return `Entangled State (${context.slotCount} slots)`
-    }
-    
     // Regular slot
     const nodeName = context.nodeName || 'Unknown Node'
     const slotIndex = context.slotIndex !== undefined ? context.slotIndex : '?'
-    return `Node '${nodeName}' / Slot ${slotIndex+1}`
+    let title = `'${nodeName}' / Slot ${slotIndex+1}`
+
+    // Check if this is an entangled state (has stateId and slotCount in context)
+    if (context.stateId && context.slotCount) {
+      return `Entangled State (${context.slotCount} slots) - ${title}`
+    }
+      return 'Node ' + title;
+    
   } else if (type === 'protocol') {
     const protocolType = context.protocolType || 'Protocol'
     
@@ -321,6 +323,11 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', stopDrag)
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
+})
+
+// Expose fetchResults method so parent can call it to refresh content
+defineExpose({
+  fetchResults
 })
 </script>
 

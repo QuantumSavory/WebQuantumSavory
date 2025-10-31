@@ -19,7 +19,7 @@ function getUpdateLastLogFunc(applicationLogs) {
  * useSimulation - Composable for simulation state and operations
  * Extracted from App.vue to improve code organization
  */
-export function useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPolling, applicationLogs) {
+export function useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPolling, applicationLogs, refreshAllWindows, checkAndHideInvalidEntangledStates) {
   // Helper for updateLastLog
   const updateLastLogLocal = getUpdateLastLogFunc(applicationLogs)
   
@@ -444,6 +444,16 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         }
       } else if (addLogs) {
         addLog('success', 'Simulation status retrieved OK', 'Backend', JSON.stringify(response, null, 2))
+      }
+      
+      // Refresh all open result windows with latest data
+      if (refreshAllWindows && typeof refreshAllWindows === 'function') {
+        refreshAllWindows()
+      }
+      
+      // Check if displayed entangled state still exists and hide if invalid
+      if (checkAndHideInvalidEntangledStates && typeof checkAndHideInvalidEntangledStates === 'function') {
+        checkAndHideInvalidEntangledStates(response)
       }
     }
     console.log('📊 getSimulationStatus: Final status set to:', simulationStatus.value.status)

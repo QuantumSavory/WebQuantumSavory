@@ -129,3 +129,49 @@ export function getSlotMapPosition(slotElement, map) {
 export function generateConnectionId(stateId, slotId) {
   return `${stateId}-${slotId}-${Date.now()}`
 }
+
+/**
+ * Check if a displayed entangled state still exists in the new entanglements
+ * @param {Object} displayedState - The currently displayed entangled state with structure: { id: string, slots: [{nodeId, slotId}, ...] }
+ * @param {Array} newEntanglements - Array of entanglement arrays: [[slotId1, slotId2, ...], ...]
+ * @returns {boolean} True if all displayed slot IDs appear together in at least one entanglement array, false otherwise
+ */
+export function isEntangledStateStillValid(displayedState, newEntanglements) {
+  if (!displayedState || !displayedState.slots || displayedState.slots.length === 0) {
+    return false
+  }
+  
+  if (!newEntanglements || !Array.isArray(newEntanglements) || newEntanglements.length === 0) {
+    return false
+  }
+  
+  // Extract all slot IDs from the displayed state
+  const displayedSlotIds = new Set(displayedState.slots.map(s => s.slotId))
+  
+  // Check if all displayed slot IDs appear together in at least one entanglement array
+  // An entangled state is valid if all its slot IDs are found together in a single entanglement entry
+  for (const entanglement of newEntanglements) {
+    if (!Array.isArray(entanglement)) continue
+    
+    // Convert entanglement array to Set for easier comparison
+    const entanglementSlotIds = new Set(entanglement)
+    
+    // Check if all displayed slot IDs are present in this entanglement
+    // and if the entanglement contains at least all of them (it can contain more)
+    let allFound = true
+    for (const slotId of displayedSlotIds) {
+      if (!entanglementSlotIds.has(slotId)) {
+        allFound = false
+        break
+      }
+    }
+    
+    if (allFound) {
+      // All displayed slot IDs are found together in this entanglement
+      return true
+    }
+  }
+  
+  // No entanglement found containing all displayed slot IDs together
+  return false
+}

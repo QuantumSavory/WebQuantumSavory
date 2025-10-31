@@ -197,7 +197,30 @@ export class ApiConnector {
         headers: this.requestHeaders,
         method: 'GET',
       })
-      return res.json()
+      const response = await res.json()
+
+      // TEMPORARY TEST CODE: Randomly simulate no entanglements ~20% of the time
+      // TODO: Remove this test code after testing the entanglement cleanup feature
+      /* try{
+        const chance = Math.random();
+        if (chance < 0.2 && response && response.state && response.state.slots) {
+          console.warn('🧪 TEST MODE (frontend): Simulating empty entanglements (Math.random() < 0.2)')
+          if (response.state.slots.entanglements) {
+            response.state.slots.entanglements = []
+          }
+          if (Array.isArray(response.state.slots.slots)) {
+            response.state.slots.slots.forEach(slotInfo => {
+              if (slotInfo && Array.isArray(slotInfo.entangled_slots)) {
+                slotInfo.entangled_slots = []
+              }
+            })
+          }
+        }
+      }catch (e){
+        console.warn('Frontend entanglement simulation failed silently:', e)
+      } */
+
+      return response
     } catch (e) {
       this._error.value = e;
       console.error( 'getSimulationStatus error', e );

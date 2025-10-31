@@ -43,6 +43,7 @@ import { useProjectHandlers } from './composables/useProjectHandlers.js'
 import { validatePayload, generateRandomNodes, generateRandomEdges, getNodeById, getNodeBySlotId } from './utils/projectHelpers.js'
 import { showEntangledSlots as showEntangledSlotsUtil, hideSlotState } from './utils/windowHelpers.js'
 import { fetchBackendLogs, mapBackendLogLevel, compareVersionsMismatch } from './utils/backendHelpers.js'
+import { isEntangledStateStillValid } from './utils/SlotConnectionUtils.js'
 
 // Import demo projects
 import demo1 from './demos/1.Entangler.Example.json'
@@ -206,6 +207,67 @@ const minimizedProjectData = computed(() => {
 // Provide a temporary no-op for stopPolling to satisfy useSimulation signature
 const stopPollingForSim = () => {}
 
+// Initialize window management first (needed by useSimulation and usePolling)
+const {
+  resultWindows,
+  closeResultWindow,
+  bringWindowToFront,
+  updateWindowPosition,
+  updateWindowSize,
+  registerWindowRef,
+  unregisterWindowRef,
+  refreshAllWindows
+} = useWindowManagement()
+
+/**
+ * Check if the currently displayed entangled state still exists in the new response
+ * If not, hide the entanglement visualization and close associated result windows
+ * @param {Object} response - The get_state response containing new entanglements
+ */
+function checkAndHideInvalidEntangledStates(response) {
+  if (!baseMapInstance.value || !response?.state?.slots?.entanglements) {
+    return
+  }
+  
+  try {
+    // Get the currently active slot connection state from BaseMap
+    const activeState = baseMapInstance.value.getActiveSlotConnectionState()
+    
+    if (!activeState) {
+      // No state currently displayed, nothing to check
+      return
+    }
+    
+    // Get new entanglements from response
+    const newEntanglements = response.state.slots.entanglements
+    
+    // Check if the displayed state still exists
+    const isStillValid = isEntangledStateStillValid(activeState, newEntanglements)
+    
+    if (!isStillValid) {
+      console.log('🔍 checkAndHideInvalidEntangledStates: Displayed entangled state no longer exists, hiding it')
+      
+      // Hide the entanglement visualization
+      if (baseMapInstance.value.hideSlotConnectionState) {
+        baseMapInstance.value.hideSlotConnectionState()
+      }
+      
+      // Find and close all result windows associated with this entangled state
+      const stateId = activeState.id
+      const windowsToClose = resultWindows.value.filter(window => {
+        return window.context?.stateId === stateId
+      })
+      
+      windowsToClose.forEach(window => {
+        console.log(`🔍 checkAndHideInvalidEntangledStates: Closing window ${window.id} associated with state ${stateId}`)
+        closeResultWindow(window.id)
+      })
+    }
+  } catch (error) {
+    console.error('Error checking entangled states:', error)
+  }
+}
+
 // Use composables - initialize with basic dependencies first
 const {
   simulationState,
@@ -232,7 +294,7 @@ const {
   stopSimulation: stopSimulationSim,
   getSimulationStatus: getSimulationStatusSim,
   processIntermediateResults: processIntermediateResultsSim
-} = useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPollingForSim, applicationLogs)
+} = useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPollingForSim, applicationLogs, refreshAllWindows, checkAndHideInvalidEntangledStates)
 
 // Initialize polling composable
 const {
@@ -240,7 +302,7 @@ const {
   stopPolling: stopPollingComposable, 
   startAlivePolling,
   stopAlivePolling,
-} = usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim)
+} = usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim, refreshAllWindows, checkAndHideInvalidEntangledStates)
 
 // Create local wrappers to use composable functions
 function startPolling() {
@@ -294,14 +356,6 @@ const {
   panelFlexValues,
   toggleRightSidebar
 } = usePanelLayout()
-
-const {
-  resultWindows,
-  closeResultWindow,
-  bringWindowToFront,
-  updateWindowPosition,
-  updateWindowSize
-} = useWindowManagement()
 
 // Initialize node/edge operations composable  
 const {
@@ -1046,6 +1100,15 @@ onMounted( async () => {
     <ResultsView
       v-for="window in resultWindows"
       :key="window.id"
+      :ref="(el) => {
+        // Handle both single ref and array (Vue may pass array in some cases)
+        const ref = Array.isArray(el) ? el[0] : el
+        if (ref) {
+          registerWindowRef(window.id, ref)
+        } else {
+          unregisterWindowRef(window.id)
+        }
+      }"
       :windowId="window.id"
       :itemDetails="{ type: window.type, item: window.item, context: window.context }"
       :position="window.position"

@@ -3,7 +3,7 @@ import { api } from '../utils/ApiConnector'
 /**
  * usePolling - Composable for simulation polling operations
  */
-export function usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim) {
+export function usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim, refreshAllWindows, checkAndHideInvalidEntangledStates) {
   
   function startPolling() {
     console.log('🚀 startPolling: Starting simulation polling')
@@ -70,6 +70,16 @@ export function usePolling(simulationState, simulationStatus, projectData, minim
           }
           
           updateSimulationStatus()
+          
+          // Refresh all open result windows with latest data
+          if (refreshAllWindows && typeof refreshAllWindows === 'function') {
+            refreshAllWindows()
+          }
+          
+          // Check if displayed entangled state still exists and hide if invalid
+          if (checkAndHideInvalidEntangledStates && typeof checkAndHideInvalidEntangledStates === 'function') {
+            checkAndHideInvalidEntangledStates(response)
+          }
           
           if (sim.simulation_running === false) {
             // Check if the simulation execution time exceeded
@@ -149,6 +159,17 @@ export function usePolling(simulationState, simulationStatus, projectData, minim
 
     if( response.success && response.state?.simulation ){
       const sim = response.state.simulation;
+      
+      // Refresh all open result windows with latest data
+      if (refreshAllWindows && typeof refreshAllWindows === 'function') {
+        refreshAllWindows()
+      }
+      
+      // Check if displayed entangled state still exists and hide if invalid
+      if (checkAndHideInvalidEntangledStates && typeof checkAndHideInvalidEntangledStates === 'function') {
+        checkAndHideInvalidEntangledStates(response)
+      }
+      
       if( sim.simulation_running === false && sim.simulation_auto_purged ){
         stopPolling()
         simulationStatus.value = {

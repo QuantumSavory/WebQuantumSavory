@@ -5,6 +5,7 @@ import { ref } from 'vue'
  */
 export function useWindowManagement() {
   const resultWindows = ref([])
+  const windowRefs = new Map() // Map of windowId -> component ref
   let nextWindowId = 1
   let nextWindowZIndex = 1000
 
@@ -19,8 +20,8 @@ export function useWindowManagement() {
         y: 100 + (resultWindows.value.length * 30)
       },
       size: {
-        width: 800,
-        height: 600
+        width: 400,
+        height: 300
       },
       zIndex: nextWindowZIndex++,
       results: null
@@ -33,6 +34,8 @@ export function useWindowManagement() {
     if (index !== -1) {
       resultWindows.value.splice(index, 1)
     }
+    // Clean up ref when window is closed
+    unregisterWindowRef(windowId)
   }
 
   function bringWindowToFront(windowId) {
@@ -56,11 +59,48 @@ export function useWindowManagement() {
     }
   }
 
+  /**
+   * Register a component ref for a window
+   * @param {string} windowId - The ID of the window
+   * @param {Object} ref - The component ref instance
+   */
+  function registerWindowRef(windowId, ref) {
+    if (ref) {
+      windowRefs.set(windowId, ref)
+    }
+  }
+
+  /**
+   * Unregister a component ref for a window
+   * @param {string} windowId - The ID of the window
+   */
+  function unregisterWindowRef(windowId) {
+    windowRefs.delete(windowId)
+  }
+
+  /**
+   * Refresh all open result windows by calling their fetchResults method
+   */
+  function refreshAllWindows() {
+    windowRefs.forEach((ref, windowId) => {
+      if (ref && typeof ref.fetchResults === 'function') {
+        try {
+          ref.fetchResults()
+        } catch (error) {
+          console.error(`Error refreshing window ${windowId}:`, error)
+        }
+      }
+    })
+  }
+
   return {
     resultWindows,
     closeResultWindow,
     bringWindowToFront,
     updateWindowPosition,
-    updateWindowSize
+    updateWindowSize,
+    registerWindowRef,
+    unregisterWindowRef,
+    refreshAllWindows
   }
 }

@@ -391,7 +391,8 @@ defineExpose({
   map, 
   showSlotConnectionState, 
   hideSlotConnectionState,
-  updateSlotConnectionPositions
+  updateSlotConnectionPositions,
+  getActiveSlotConnectionState: () => activeSlotConnectionState.value
 })
 </script>
 
