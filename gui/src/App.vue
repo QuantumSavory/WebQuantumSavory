@@ -1,0 +1,1062 @@
+<script setup>
+import { reactive, ref, computed, nextTick, onMounted } from 'vue'
+import BaseMap from './components/map/BaseMap.vue'
+import Node from './models/Node'
+import Edge from './models/Edge'
+import NodePanel from './components/panels/NodePanel.vue'
+import ProjectStore from './models/ProjectStore.js'
+import NodeListPanel from './components/panels/NodeListPanel.vue'
+import RunnerPanel from './components/panels/RunnerPanel.vue'
+import FloatingProtocolsPanel from './components/panels/FloatingProtocolsPanel.vue'
+import FloatingProtocol from './models/FloatingProtocol'
+import EdgeProtocol from './models/EdgeProtocol'
+import { api } from './utils/ApiConnector'
+import {JsonViewer} from "vue3-json-viewer"
+import { generateUUid, setEdgeCorrectNodeOrder } from './utils/Utils'
+//import "vue3-json-viewer/dist/vue3-json-viewer.css";
+import Menu from 'primevue/menu';
+import TieredMenu from 'primevue/tieredmenu';
+import EdgeListPanel from './components/panels/EdgeListPanel.vue'
+import EdgePanel from './components/panels/EdgePanel.vue'
+import LogsPanel from './components/panels/LogsPanel.vue'
+import ProjectNameDialog from './components/ProjectNameDialog.vue'
+import ImportConflictDialog from './components/ImportConflictDialog.vue'
+import OpenProjectDialog from './components/OpenProjectDialog.vue'
+import AboutModal from './components/AboutModal.vue'
+import packageJson from '../package.json'
+import VoidPanel from './components/panels/VoidPanel.vue'
+import ResultsView from './components/panels/ResultsView.vue'
+
+// Import composables
+import { useSimulation } from './composables/useSimulation.js'
+import { usePolling } from './composables/usePolling.js'
+import { usePanelLayout } from './composables/usePanelLayout.js'
+import { useWindowManagement } from './composables/useWindowManagement.js'
+import { useNodeEdgeOperations } from './composables/useNodeEdgeOperations.js'
+import { useProjectManagement } from './composables/useProjectManagement.js'
+import { useImportExport } from './composables/useImportExport.js'
+import { useDialogs } from './composables/useDialogs.js'
+import { useAppState } from './composables/useAppState.js'
+import { useProjectHandlers } from './composables/useProjectHandlers.js'
+
+// Import utils
+import { validatePayload, generateRandomNodes, generateRandomEdges, getNodeById, getNodeBySlotId } from './utils/projectHelpers.js'
+import { showEntangledSlots as showEntangledSlotsUtil, hideSlotState } from './utils/windowHelpers.js'
+import { fetchBackendLogs, mapBackendLogLevel, compareVersionsMismatch } from './utils/backendHelpers.js'
+
+// Import demo projects
+import demo1 from './demos/1.Entangler.Example.json'
+import demo2 from './demos/2.Entangler.Example.with.consumer.json'
+
+
+const baseMapInstance = ref(null);
+
+const TIME_STEP = 0.1;
+
+// Default map configuration (must be defined before composables that use it)
+const DEFAULT_MAP_CENTER = [-98.5795, 39.8283] // Roughly the center of continental US
+const DEFAULT_MAP_ZOOM = 4 // Zoom level to show most of the US
+
+// Initialize composables
+const projectData = ref({
+  name: 'New Project',
+  simulationConfig: {
+    time: 1.0,
+    timeStep: 0.1,
+  },
+  net: {
+    nodes: [],
+    edges: [],
+    protocols: []
+  }
+})
+
+// Required variables and functions for composables
+// Log management functions
+function addLog(level, message, source = 'App', extendedInfo = null) {
+  // Check if this message is the same as the last log entry
+  const lastLog = applicationLogs.value[applicationLogs.value.length - 1];
+  if (lastLog && lastLog.message === message && lastLog.source === source) {
+    // Update the timestamp of the existing log entry
+    lastLog.timestamp = new Date().toISOString();
+    lastLog.count = (lastLog.count || 1) + 1;
+    return;
+  }
+  
+  const logEntry = {
+    id: generateUUid('log'),
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    source,
+    extendedInfo,
+    count: 1
+  };
+  
+  applicationLogs.value.push(logEntry);
+  
+  // Keep only the last maxLogs entries
+  if (applicationLogs.value.length > maxLogs.value) {
+    applicationLogs.value = applicationLogs.value.slice(-maxLogs.value);
+  }
+}
+
+// Application logs
+const applicationLogs = ref([])
+const maxLogs = ref(1000)
+
+// Minimized project data - cleans up project data for API calls
+const minimizedProjectData = computed(() => {
+  const projectCopy = JSON.parse(JSON.stringify(projectData.value))
+  
+  // Remove simulation config from the project data
+  delete projectCopy.simulationConfig
+  
+  // Exclusion lists
+  const excludeCommon = ['sim', 'net']
+  const excludeNode = [...excludeCommon, 'node']
+  const excludeEdge = [...excludeCommon, 'nodeA', 'nodeB']
+
+  // Clean Up Node Nodes
+  projectCopy.net.nodes.forEach(node => {
+    // Clean Up slot bg noises and ui-state properties
+    node.data.slots.forEach(slot => {
+      // delete ui-state properties
+      delete slot.ui_expanded
+
+      // Properly format background noise to object
+      if (typeof slot.backgroundNoise === 'string') {
+        slot.backgroundNoise = {
+          type: slot.backgroundNoise,
+          parameters: []
+        }
+      } else {
+        delete slot.backgroundNoise.doc
+        slot.backgroundNoise.parameters = slot.backgroundNoise.parameters.filter(p => {
+          const valueIsNull = p.value == null || p.value == ""
+          return !valueIsNull
+        })
+        slot.backgroundNoise.parameters = slot.backgroundNoise.parameters.map(p => {
+          const cleanParam = {
+            name: p.field,
+            value: p.value
+          }
+          return cleanParam
+        })
+      }
+    })
+    // Clean Up Node Protocol parameters
+    node.data.protocols.forEach(protocol => {
+      protocol.parameters = protocol.parameters.filter(p => {
+        // set type
+        if (p.selectedType != null) {
+          p.type = p.selectedType
+          delete p.selectedType
+        }
+        const isExcluded = excludeNode.includes(p.name)
+        const valueIsNull = p.value == null || p.value == ""
+        return !isExcluded && !valueIsNull
+      })
+    })
+  })
+
+  // Clean Up Edge Protocol parameters
+  projectCopy.net.edges.forEach(edge => {
+    edge.data.protocols.forEach(protocol => {
+      protocol.parameters = protocol.parameters.filter(p => {
+        // set type
+        if (p.selectedType != null) {
+          p.type = p.selectedType
+          delete p.selectedType
+        }
+        const isExcluded = excludeEdge.includes(p.name)
+        const valueIsNull = p.value == null || p.value == ""
+        return !isExcluded && !valueIsNull
+      })
+    })
+  })
+
+  // Clean Up Floating Protocol parameters
+  projectCopy.net.protocols.forEach(protocol => {
+    protocol.parameters = protocol.parameters.filter(p => {
+      // set type
+      if (p.selectedType != null) {
+        p.type = p.selectedType
+        delete p.selectedType
+      }
+      const isExcluded = excludeEdge.includes(p.name)
+      const valueIsNull = p.value == null || p.value == ""
+      return !isExcluded && !valueIsNull
+    })
+  })
+
+  // Remove read-only properties in slots
+  projectCopy.net.nodes.forEach(node => {
+    node.data.slots.forEach(slot => {
+      delete slot.isLocked
+      delete slot.assignment
+      delete slot.lastOperationTime
+      delete slot.representationType
+    })
+  })
+
+  return projectCopy
+})
+
+// Provide a temporary no-op for stopPolling to satisfy useSimulation signature
+const stopPollingForSim = () => {}
+
+// Use composables - initialize with basic dependencies first
+const {
+  simulationState,
+  simulationStatus,
+  backendSimulation,
+  isSimulationRunning,
+  isSimulationPaused,
+  isSimulationComplete,
+  isSimulationIdle,
+  currentSimulationTime,
+  targetSimulationTime,
+  hasSimulationRun,
+  getSlotById,
+  calculateSimulationProgress,
+  updateSimulationStatus,
+  resetSlotStates,
+  resetSimulation,
+  // Simulation lifecycle from composable (aliased)
+  prepareNetworkGraph: prepareNetworkGraphSim,
+  prepareSimulation: prepareSimulationSim,
+  runSimulationWithSteps: runSimulationWithStepsSim,
+  pauseSimulation: pauseSimulationSim,
+  resumeSimulation: resumeSimulationSim,
+  stopSimulation: stopSimulationSim,
+  getSimulationStatus: getSimulationStatusSim,
+  processIntermediateResults: processIntermediateResultsSim
+} = useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPollingForSim, applicationLogs)
+
+// Initialize polling composable
+const {
+  startPolling: startPollingComposable,
+  stopPolling: stopPollingComposable, 
+  startAlivePolling,
+  stopAlivePolling,
+} = usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim)
+
+// Create local wrappers to use composable functions
+function startPolling() {
+  startPollingComposable()
+}
+
+function stopPolling() {
+  stopPollingComposable()
+}
+
+// Simulation lifecycle wrappers bound to composable functions
+function prepareNetworkGraph() {
+  return prepareNetworkGraphSim()
+}
+
+function prepareSimulation() {
+  return prepareSimulationSim()
+}
+
+function runSimulationWithSteps() {
+  startAlivePolling();
+  return runSimulationWithStepsSim(startPolling)
+}
+
+function pauseSimulation() {
+  return pauseSimulationSim(minimizedProjectData)
+}
+
+function resumeSimulation() {
+  startAlivePolling();
+  return resumeSimulationSim(minimizedProjectData, startPolling)
+}
+
+function stopSimulation() {
+  return stopSimulationSim(minimizedProjectData, isSimulationRunning, isSimulationPaused)
+}
+
+function getSimulationStatus(addLogs = true, updatePreviousLog = false) {
+  return getSimulationStatusSim(addLogs, updatePreviousLog)
+}
+
+function processIntermediateResults(stepResults) {
+  return processIntermediateResultsSim(stepResults)
+}
+
+const {
+  isRightSidebarVisible,
+  panelCollapsedStates,
+  panelContainerKey,
+  handlePanelCollapse,
+  panelFlexValues,
+  toggleRightSidebar
+} = usePanelLayout()
+
+const {
+  resultWindows,
+  closeResultWindow,
+  bringWindowToFront,
+  updateWindowPosition,
+  updateWindowSize
+} = useWindowManagement()
+
+// Initialize node/edge operations composable  
+const {
+  mapCenter,
+  mapZoom,
+  selectedItem,
+  selectedType,
+  justCreatedNode,
+  isCreatingNode,
+  newNodeName,
+  newNodeType,
+  waitingForPosition,
+  handleSelect,
+  addNewNode,
+  handleMapClick: handleMapClickComposable,
+  handleMapStateChange: handleMapStateChangeComposable,
+  startCreateNode,
+  cancelCreateNode,
+  proceedToPosition,
+  createNewSlotClicked,
+  deleteSelected,
+  handleEdgeCreated
+} = useNodeEdgeOperations(projectData, hasSimulationRun, addLog)
+
+// Initialize app state composable
+const {
+  showMenu,
+  showLoadDialog,
+  loadProjectList,
+  currentProjectName,
+  isDemoProject,
+  showProjectDropdown,
+  projectListDropdown,
+  showJsonViewer,
+  jsonViewerMode,
+  showImportConflictDialog,
+  importedProjectData,
+  conflictProjectName,
+  showProjectNameDialog,
+  projectNameDialogMode,
+  projectNameDialogInitialValue,
+  showAboutModal,
+  selectedNodeIndex,
+  selectedItemInfo,
+  toggleJsonViewerVisibility: toggleJsonViewerVisibilityState,
+  toggleJsonViewerMode: toggleJsonViewerModeState,
+  toggleProjectDropdown: toggleProjectDropdownState
+} = useAppState(projectData, selectedItem, selectedType, mapCenter, mapZoom, applicationLogs, minimizedProjectData)
+
+// Initialize project management composable (requires dependencies from above)
+const {
+  openProject,
+  loadDemoProject,
+  createNewProject,
+  createSaveAsProject,
+  saveProject,
+  handleDeleteProject: handleDeleteProjectPM,
+  toggleProjectDropdown: toggleProjectDropdownPM,
+  serializeProjectData,
+  deserializeProjectData,
+  generateCopyName
+} = useProjectManagement(
+  projectData,
+  currentProjectName,
+  isDemoProject,
+  selectedItem,
+  selectedType,
+  mapCenter,
+  mapZoom,
+  clearLogs,
+  addLog,
+  getSimulationStatus,
+  DEFAULT_MAP_CENTER,
+  DEFAULT_MAP_ZOOM,
+  TIME_STEP
+)
+
+// Initialize import/export composable
+const {
+  importProject,
+  exportProject,
+  handleImportConflictOverwrite,
+  handleImportConflictNewName,
+  cancelImportConflict
+} = useImportExport(
+  currentProjectName,
+  importedProjectData,
+  conflictProjectName,
+  showImportConflictDialog,
+  clearLogs,
+  addLog,
+  openProject,
+  serializeProjectData,
+  minimizedProjectData
+)
+
+// Project handlers are still in App.vue due to circular dependencies
+// TODO: Refactor to avoid needing handleMenu defined before composables
+
+window.showEntangledSlots = ( slotId )=>{
+  console.log('🔗 showEntangledSlots: Called for slot:', slotId)
+  console.log('🔗 showEntangledSlots: simulationStatus.value:', simulationStatus.value)
+  console.log('🔗 showEntangledSlots: simulationStatus.value.state:', simulationStatus.value?.state)
+  const allEntanglements = simulationStatus.value?.state?.slots?.entanglements;
+  console.log('🔗 showEntangledSlots: All entanglements:', allEntanglements)
+  if( !allEntanglements ){
+    console.warn('⚠️ showEntangledSlots: No entanglements found')
+    //alert('No entanglements found')
+    return
+  }
+
+  const relatedSlotIds = [];
+  allEntanglements.forEach(entanglement => {
+    let slotIdToAdd = null;
+    if( entanglement[0] === slotId ){
+      slotIdToAdd = entanglement[1];
+    }else if( entanglement[1] === slotId ){
+      slotIdToAdd = entanglement[0];
+    }
+    if( slotIdToAdd && !relatedSlotIds.includes(slotIdToAdd) ){
+      relatedSlotIds.push(slotIdToAdd);
+    }
+  });
+
+  const entangledSlots = [];
+  projectData.value.net.nodes.forEach(node => {
+    node.data.slots.forEach(slot => {
+      if( relatedSlotIds.includes(slot.id) ){
+        entangledSlots.push( { nodeId: node.id, slotId: slot.id } );
+      }
+    });
+  });
+
+  const baseMapComponent = baseMapInstance.value; 
+  const entagledState = {
+    id: "state_1",
+    slots: entangledSlots
+  }
+
+  try {
+      const result = baseMapComponent.showSlotConnectionState(entagledState);
+  } catch (error) {
+      console.error('Error calling showSlotConnectionState:', error)
+  }
+  
+}
+
+
+window.hideSlotState = ()=>{
+  try{
+    baseMapInstance.value.hideSlotConnectionState();
+  }catch(error){
+    console.log('Error calling hideSlotConnectionState:', error)
+  }
+}
+
+
+// ============= END DEBUGGING FUNCTIONS, NOT FOR PRODUCTION =============
+
+
+const mainMenuItems = computed(() => {
+  let result = [
+    { label: 'New', icon: 'pi pi-plus', command: () => handleMenu('new') },
+    { label: 'Open', icon: 'pi pi-folder-open', command: () => handleMenu('open') },
+    { label: 'Import', icon: 'pi pi-upload', command: () => handleMenu('import') },
+    { label: 'Export', icon: 'pi pi-download', command: () => handleMenu('export') },
+  ];
+  
+  // Only show Save if not a demo project
+  if (!isDemoProject.value) {
+    result.push({ label: 'Save', icon: 'pi pi-save', command: () => handleMenu('save') })
+  }
+  
+  if( currentProjectName.value ){
+    result.push(
+      { label: 'Save As', icon: 'pi pi-copy', command: () => handleMenu('saveas') }, 
+    )
+  }
+  result.push( { separator: true } );
+
+  
+  // Add About entry
+  result.push(
+    { label: 'About', icon: 'pi pi-info-circle', command: () => handleMenu('about') }
+  )
+  
+  // Add Demos submenu at the end
+  result.push({
+    label: 'Demos', 
+    icon: 'pi pi-box',
+    items: demoProjects.map(demo => ({
+      label: demo.name,
+      icon: 'pi pi-file',
+      command: () => loadDemoProject(demo.data)
+    }))
+  })
+
+
+  result.push(
+    { label: 'JSON Viewer', icon: 'pi pi-eye', command: () => handleMenu('json') }, 
+  )
+  
+  
+  return result;
+}) 
+
+// moved to useSimulation composable
+
+const mainMenuElement = ref(null)
+
+function toggleMainMenu(){
+  mainMenuElement.value.toggle(event)
+}
+
+const jsonViewerKeyClicked = (...args  )=>{
+}
+
+// Configuration for initial data
+const INITIAL_NODE_COUNT = 30;
+const INITIAL_EDGE_COUNT = 60;
+
+// US bounds roughly (longitude, latitude)
+const US_BOUNDS = {
+  west: -125.0,
+  east: -65.0,
+  south: 25.0,
+  north: 49.0
+}
+
+const floatingProtocolsPanel = ref(null)
+
+// addNodeClickHandler wrapper for the template
+function addNodeClickHandler() {
+  addNewNode(null, 'city', mapCenter.value)
+}
+
+
+// Generate initial edges for demo
+projectData.value.net.edges = generateRandomEdges(projectData.value.net.nodes, INITIAL_EDGE_COUNT)
+
+
+// Demo projects list
+const demoProjects = [
+  { name: demo1.name, data: demo1 },
+  { name: demo2.name, data: demo2 }
+]
+
+const loadProjectName = ref('') // This one is still needed in App.vue for now
+
+// App version from package.json
+const appVersion = ref(packageJson.version)
+
+
+// Update the most recent log entry with extended info
+function updateLastLog(extendedInfo) {
+  if (applicationLogs.value.length > 0) {
+    const lastLog = applicationLogs.value[applicationLogs.value.length - 1]
+    // Check if the last log is a "Running step" message
+    if (lastLog.message.startsWith('Running step')) {
+      console.log('📝 updateLastLog: Updating last log with simulation state')
+      lastLog.extendedInfo = extendedInfo
+      lastLog.level = 'success' // Change to success since step completed
+    }
+  }
+}
+
+function clearLogs() {
+  applicationLogs.value = []
+}
+
+
+function handleMenu(action) {
+  showMenu.value = false
+  if (action === 'new') {
+    projectNameDialogMode.value = 'new'
+    projectNameDialogInitialValue.value = ''
+    showProjectNameDialog.value = true
+  } else if (action === 'save') {
+    if (!currentProjectName.value) {
+      // hsow dialog to enter project name
+      showProjectNameDialog.value = true
+      projectNameDialogMode.value = 'saveas'
+      projectNameDialogInitialValue.value = ''
+      showProjectNameDialog.value = true
+      return
+    }
+    ProjectStore.saveProject(currentProjectName.value, serializeProjectData())
+    
+  } else if (action === 'open') {
+    // Get all projects sorted by most recently opened
+    const recentProjects = ProjectStore.getRecentProjects(50) // Higher limit for full list
+    loadProjectList.value = recentProjects;
+    showLoadDialog.value = true
+  } else if (action === 'import') {
+    importProject()
+  } else if (action === 'export') {
+    exportProject()
+  } else if (action === 'saveas') {
+    handleSaveAs()
+  } else if (action === 'json') {
+    toggleJsonViewerVisibility()
+  } else if (action === 'about') {
+    showAboutModal.value = true
+  }
+}
+
+function toggleJsonViewerVisibility(){
+  showJsonViewer.value = !showJsonViewer.value
+  localStorage.setItem('showJsonViewer', showJsonViewer.value)
+}
+
+function handleProjectNameConfirm(projectName) {
+  if (projectNameDialogMode.value === 'new') {
+    createNewProject(projectName)
+  } else if (projectNameDialogMode.value === 'saveas') {
+    createSaveAsProject(projectName)
+  }
+  showProjectNameDialog.value = false
+}
+
+function handleProjectNameCancel() {
+  showProjectNameDialog.value = false
+}
+
+function toggleProjectDropdown() {
+  if (!showProjectDropdown.value) {
+    const recentProjects = ProjectStore.getRecentProjects(10)
+    projectListDropdown.value = recentProjects
+      .filter(project => project.name !== currentProjectName.value)
+      .map(project => project.name)
+  }
+  showProjectDropdown.value = !showProjectDropdown.value
+}
+
+function quickOpenProject(name) {
+  showProjectDropdown.value = false
+  openProject(name)
+}
+
+function handleOpenProjectSelect(projectName) {
+  showLoadDialog.value = false
+  openProject(projectName)
+}
+
+function handleOpenProjectClose() {
+  showLoadDialog.value = false
+}
+
+function handleNewProjectFromDialog() {
+  showLoadDialog.value = false
+  handleMenu('new')
+}
+
+function handleImportProjectFromDialog() {
+  showLoadDialog.value = false
+  handleMenu('import')
+}
+
+// compareVersionsMismatch and mapBackendLogLevel moved to utils/backendHelpers.js
+
+// Use handleDeleteProject from useProjectManagement composable  
+const handleDeleteProject = handleDeleteProjectPM
+
+function toggleJsonViewerMode(){
+  jsonViewerMode.value = jsonViewerMode.value === 'full' ? 'minimized' : 'full'
+  localStorage.setItem('jsonViewerMode', jsonViewerMode.value)
+}
+
+
+function validateAndProcessImport(jsonData) {
+  // Validate structure
+  if (!jsonData.name || typeof jsonData.name !== 'string') {
+    alert('Invalid project structure: Missing or invalid "name" property.')
+    return
+  }
+  
+  if (!jsonData.net || typeof jsonData.net !== 'object') {
+    alert('Invalid project structure: Missing or invalid "net" property.')
+    return
+  }
+  
+  const net = jsonData.net
+  if (!Array.isArray(net.nodes)) {
+    alert('Invalid project structure: "net.nodes" must be an array.')
+    return
+  }
+  
+  if (!Array.isArray(net.edges)) {
+    alert('Invalid project structure: "net.edges" must be an array.')
+    return
+  }
+  
+  if (!Array.isArray(net.protocols)) {
+    alert('Invalid project structure: "net.protocols" must be an array.')
+    return
+  }
+  
+  // Check for name conflicts
+  const existingProjects = ProjectStore.listProjects()
+  if (existingProjects.includes(jsonData.name)) {
+    // Show conflict resolution dialog
+    importedProjectData.value = jsonData
+    conflictProjectName.value = jsonData.name
+    showImportConflictDialog.value = true
+  } else {
+    // No conflict, import directly
+    processImport(jsonData, jsonData.name)
+  }
+}
+
+function processImport(jsonData, finalName) {
+  try {
+    // Clear logs when importing project
+    clearLogs()
+    
+    // Create project data with the final name
+    const projectDataToImport = {
+      ...jsonData,
+      name: finalName
+    }
+    
+    // Save the project
+    ProjectStore.saveProject(finalName, projectDataToImport)
+    
+    // Load the imported project (this will also clear logs again, but that's fine)
+    openProject(finalName)
+    
+    addLog('info', `Project imported: ${finalName}`, 'System')
+    alert(`Project "${finalName}" imported successfully!`)
+  } catch (error) {
+    addLog('error', `Failed to import project: ${error.message}`, 'System')
+    alert(`Failed to import project: ${error.message}`)
+  }
+}
+
+function generateUniqueName(baseName) {
+  const existingProjects = ProjectStore.listProjects()
+  let counter = 2
+  let uniqueName = `${baseName} ${counter}`
+  
+  while (existingProjects.includes(uniqueName)) {
+    counter++
+    uniqueName = `${baseName} ${counter}`
+  }
+  
+  return uniqueName
+}
+
+
+function handleSaveAs() {
+  if (!currentProjectName.value) {
+    alert('No project to save. Please create or open a project first.')
+    return
+  }
+  
+  projectNameDialogMode.value = 'saveas'
+  projectNameDialogInitialValue.value = generateCopyName(currentProjectName.value)
+  showProjectNameDialog.value = true
+}
+
+onMounted( async () => {
+  // fetch platform info
+  await api.fetchPlatformInfo()
+  // One-time migration: ensure metadata index exists for existing projects
+  const metadataIndex = ProjectStore.getMetadataIndex()
+  const existingProjects = ProjectStore.listProjects()
+  
+  // If index is empty but projects exist, rebuild it
+  if (Object.keys(metadataIndex).length === 0 && existingProjects.length > 0) {
+    ProjectStore.rebuildMetadataIndex()
+  }
+  
+  // check if recentProjectName is in local storage
+  const recentProjectName = localStorage.getItem('recentProjectName')
+  if (recentProjectName) {
+    openProject(recentProjectName)
+  }
+  
+  // Force update of panel flex values after DOM is ready
+  // This ensures collapsed states from localStorage are properly reflected in the layout
+  await nextTick()
+  panelContainerKey.value++
+  console.log('🔄 Mounted: Panel flex values:', panelFlexValues.value)
+  console.log('🔄 Mounted: Panel collapsed states:', panelCollapsedStates.value)
+
+  startAlivePolling();
+})
+</script>
+
+<template>
+  <div>
+    <div class="topbar">
+      <div class="topbar-title">
+        <img src="./assets/logo.png" alt="CQN Logo" class="topbar-logo">
+        CQN Simulation Builder
+        <span class="version-badge">v{{ appVersion }}</span>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-menu" @mouseleave="showMenu = false; showProjectDropdown = false">
+          <div v-if="currentProjectName" class="project-name-container">
+            <button class="project-name-btn" @click="toggleProjectDropdown" :title="currentProjectName">
+              <span class="project-name-label">{{ currentProjectName }}</span>
+              <svg width="14" height="14" viewBox="0 0 14 14" style="margin-left:4px;vertical-align:middle"><path d="M3 5l4 4 4-4" stroke="#222" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+            </button>
+            <div v-if="showProjectDropdown && projectListDropdown.length" class="dropdown-menu project-dropdown">
+              <div v-for="name in projectListDropdown" :key="name" class="dropdown-item" @click="quickOpenProject(name)">{{ name }}</div>
+            </div>
+          </div>
+          
+          <div class="action-buttons">
+            <button class="menu-btn hamburger-btn" @click="toggleMainMenu" aria-label="Menu">
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect y="6" width="28" height="3.5" rx="1.5" fill="#4345ac"/>
+                <rect y="12.25" width="28" height="3.5" rx="1.5" fill="#4345ac"/>
+                <rect y="18.5" width="28" height="3.5" rx="1.5" fill="#4345ac"/>
+              </svg>
+            </button>
+            <TieredMenu ref="mainMenuElement" id="main_menu" :model="mainMenuItems" :popup="true" />
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="app">
+      <div class="main-panel">
+        <BaseMap 
+          ref="baseMapInstance"
+          :nodes="projectData.net.nodes"
+          :edges="projectData.net.edges"
+          :selected-item="selectedItem"
+          :selected-type="selectedType"
+          :center="mapCenter"
+          :zoom="mapZoom"
+          @select="handleSelect"
+          @map-click="handleMapClickComposable"
+          @edge-created="handleEdgeCreated"
+          @map-state-change="handleMapStateChangeComposable"
+          @delete="deleteSelected"
+          :style="'https://tiles.stadiamaps.com/styles/alidade_smooth.json'"
+        />
+      </div>
+      
+
+
+      <!---------------- RIGHT SIDEBAR -------------->
+      <!-- Sidebar Toggle Button (outside sidebar so it doesn't slide with it) -->
+      <button 
+        v-if="projectData"
+        class="sidebar-toggle-btn" 
+        :class="{ 'sidebar-toggle-btn-hidden': !isRightSidebarVisible }"
+        @click="toggleRightSidebar"
+        :title="isRightSidebarVisible ? 'Hide panel' : 'Show panel'"
+      >
+        <i :class="isRightSidebarVisible ? 'pi pi-chevron-right' : 'pi pi-chevron-left'"></i>
+      </button>
+      
+      <div 
+        class="sidebar sidebar-right" 
+        :class="{ 'sidebar-hidden': !isRightSidebarVisible }"
+        v-if="projectData"
+      >
+        <div class="info-panel">
+            <div style="padding: 1px 4px 0px !important;">
+              <RunnerPanel 
+                id="runnerPanel" 
+                :projectData="projectData" 
+                :simulationStatus="simulationStatus" 
+                :simulationState="{ ...simulationState, hasSimulationRun }"
+                @run="runSimulationWithSteps" 
+                @pause="pauseSimulation"
+                @resume="resumeSimulation"
+                @stop="stopSimulation"
+                @prepareNetworkGraph="prepareNetworkGraph" 
+                @prepareSimulation="prepareSimulation"
+            />
+            </div>
+          <div class="custom-panels-container" :key="panelContainerKey">
+            <!-- First Panel: NodePanel or EdgePanel -->
+            <div 
+              class="custom-panel"
+              :style="{ flex: panelFlexValues.first }"
+            >
+              <!-- NodePanel for selected node -->
+              <NodePanel
+                id="nodePanel" 
+                v-if="selectedType === 'node' && selectedItem"
+                :key="selectedItem && selectedItem.id"
+                :node="selectedItem" 
+                :nodeIndex="selectedNodeIndex"
+                :justCreated="justCreatedNode"
+                :simulationState="{ ...simulationState, hasSimulationRun }"
+                @delete="deleteSelected"
+                @name-edit-complete="justCreatedNode = false"
+                @collapsed-changed="(collapsed) => handlePanelCollapse('node_panel', collapsed)"
+              />
+              <!-- EdgePanel for selected edge -->
+              <EdgePanel 
+                id="edgePanel" 
+                v-else-if="selectedType === 'edge' && selectedItem"
+                :projectData="projectData"
+                :key="selectedItem && selectedItem.id"
+                :edge="selectedItem"
+                :simulationState="{ ...simulationState, hasSimulationRun }"
+                @delete="deleteSelected"
+                @collapsed-changed="(collapsed) => handlePanelCollapse('edge_panel', collapsed)"
+              />
+              <VoidPanel 
+                v-else
+                @collapsed-changed="(collapsed) => handlePanelCollapse('void_panel', collapsed)"
+              >Nothing Selected</VoidPanel>
+            </div>
+            
+            <!-- Node List Panel -->
+            <div 
+              class="custom-panel"
+              :style="{ flex: panelFlexValues.nodeList }"
+            >
+              <NodeListPanel
+                id="nodeListPanel" 
+                :nodes="projectData.net.nodes"
+                :selected-node="selectedItem && selectedType === 'node' ? selectedItem : null"
+                :simulationState="{ ...simulationState, hasSimulationRun }"
+                @select="node => handleSelect(node, 'node')" 
+                @addNewNode="addNodeClickHandler"
+                @collapsed-changed="(collapsed) => handlePanelCollapse('node_list', collapsed)"
+              />
+            </div>
+            
+            <!-- Edge List Panel -->
+            <div 
+              class="custom-panel"
+              :style="{ flex: panelFlexValues.edgeList }"
+            >
+              <EdgeListPanel
+                id="edgeListPanel" 
+                :projectData="projectData" 
+                :edges="projectData.net.edges"
+                :selected-edge="selectedItem && selectedType === 'edge' ? selectedItem : null"
+                :simulationState="{ ...simulationState, hasSimulationRun }"
+                @select="edge => handleSelect(edge, 'edge')"
+                @collapsed-changed="(collapsed) => handlePanelCollapse('edge_list', collapsed)"
+              />
+            </div>
+            
+            <!-- Floating Protocols Panel -->
+            <div 
+              class="custom-panel"
+              :style="{ flex: panelFlexValues.floating }"
+            >
+              <FloatingProtocolsPanel 
+                id="floatingProtocolsPanel" 
+                v-if="api.config.value.protocolTypes?.floating"
+                ref="floatingProtocolsPanel"    
+                :protocols="projectData.net.protocols"
+                :simulationState="{ ...simulationState, hasSimulationRun }"
+                @collapsed-changed="(collapsed) => handlePanelCollapse('floating_protocols', collapsed)"
+              />
+              <div v-else></div>
+            </div>
+          </div>
+
+          
+
+          <!-- Selected Edge Info (fallback) -->
+          <!-- <template v-if="selectedItem && selectedType === 'edge'">
+            <div class="selected-item">
+              <h3>{{ selectedItemInfo.title }}</h3>
+              <div class="item-details">
+                <div v-for="detail in selectedItemInfo.details" :key="detail.label" class="detail-row">
+                  <span class="detail-label">{{ detail.label }}:</span>
+                  <span class="detail-value">{{ detail.value }}</span>
+                </div>
+              </div>
+            </div>
+          </template> -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs Panel at bottom -->
+    <div class="logs-panel-container">
+      <LogsPanel 
+        id="logsPanel"
+        :logs="applicationLogs"
+        :max-logs="50"
+        :show-timestamps="true"
+        :allow-clear="true"
+        @clear-logs="clearLogs"
+        :collapsable="true"
+      />
+    </div>
+
+    <!-- Open Project Dialog Component -->
+    <OpenProjectDialog
+      :show="showLoadDialog"
+      :projects="loadProjectList"
+      @select-project="handleOpenProjectSelect"
+      @close="handleOpenProjectClose"
+      @delete-project="handleDeleteProject"
+      @new-project="handleNewProjectFromDialog"
+      @import-project="handleImportProjectFromDialog"
+    />
+
+    <!-- Import Conflict Dialog Component -->
+    <ImportConflictDialog
+      :show="showImportConflictDialog"
+      :project-name="conflictProjectName"
+      @overwrite="handleImportConflictOverwrite"
+      @new-name="handleImportConflictNewName"
+      @cancel="cancelImportConflict"
+    />
+
+    <!-- Project Name Dialog Component -->
+    <ProjectNameDialog
+      :show="showProjectNameDialog"
+      :title="projectNameDialogMode === 'new' ? 'New Project' : 'Save As'"
+      :confirm-button-text="projectNameDialogMode === 'new' ? 'Create' : 'Save'"
+      :initial-value="projectNameDialogInitialValue"
+      :mode="projectNameDialogMode"
+      @confirm="handleProjectNameConfirm"
+      @cancel="handleProjectNameCancel"
+    />
+
+    <!-- About Modal Component -->
+    <AboutModal
+      :show="showAboutModal"
+      @close="showAboutModal = false"
+    />
+
+    <div v-if="showJsonViewer" class="json-viewer-box">
+      <div class="json-viewer-header" style="display: flex; align-items: center; justify-content: space-between;">
+        <h3 style="cursor: pointer; text-transform: capitalize;" @click="toggleJsonViewerMode">{{jsonViewerMode}}</h3>
+        <!-- close button -->
+        <button class="menu-btn hamburger-btn" @click="toggleJsonViewerVisibility" aria-label="Close">
+          <i class="pi pi-times"></i>
+        </button>
+      </div>
+      <JsonViewer :value="jsonViewerMode === 'full' ? projectData : minimizedProjectData" expanded :expandDepth="10" copyable boxed sort theme="light"  @onKeyClick="jsonViewerKeyClicked" />
+    </div>
+
+
+    <!-- Floating result windows -->
+    <ResultsView
+      v-for="window in resultWindows"
+      :key="window.id"
+      :windowId="window.id"
+      :itemDetails="{ type: window.type, item: window.item, context: window.context }"
+      :position="window.position"
+      :size="window.size"
+      :zIndex="window.zIndex"
+      @close="closeResultWindow(window.id)"
+      @bring-to-front="bringWindowToFront(window.id)"
+      @update-position="updateWindowPosition(window.id, $event)"
+      @update-size="updateWindowSize(window.id, $event)"
+    />
+  </div>
+</template>
+
+<!-- Styles extracted to assets/app.css and imported via main.js -->

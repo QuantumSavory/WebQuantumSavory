@@ -1,0 +1,264 @@
+@import 'primeicons/primeicons.css';
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: #213547;
+  background-color: #ffffff;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --p-tooltip-background: #fff !important;
+  --p-tooltip-max-width: 500px !important;
+  --p-tooltip-color: #000 !important;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px; /* for horizontal scrollbar */
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #00000060;
+  border-radius: 4px;
+}
+
+/* For Firefox */
+* {
+  scrollbar-width: thin; /* makes it smaller */
+  scrollbar-color: #00000060 transparent; /* thumb color | track color */
+}
+
+html {
+  font-size: 13px;
+}
+
+body {
+  height: 100vh;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  
+}
+
+input{
+  border: solid 1px #efefef;
+  border-radius: 3px;
+  height: 22px;
+  padding: 0 15px;
+}
+select{
+  border: solid 1px #efefef;
+  border-radius: 3px;
+  height: 22px;
+}
+
+button {
+  border-radius: 4px;
+  height: 25px;
+  padding: 4px 15px;
+
+  border: solid 1px #4345ac;
+  color: #4345ac;
+  background: white;
+  cursor: pointer;
+}
+button.primary {
+  background: #4345ac;
+  color: white;
+}
+
+button:hover{
+  border-color: #000;
+  color: white;
+  background: #4345ac;
+  transition: all 0.15s;
+}
+
+button.noborder {
+  border: solid 1px transparent;
+  background: transparent;
+  padding: 0px;
+  cursor: pointer;
+  border-radius: 0px;
+  color: #87879e;
+}
+
+button.noborder:hover{
+  color: #4345ac;
+}
+
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+h1 {
+  font-size: 3.2rem;
+  line-height: 1.1;
+}
+
+.card {
+  padding: 2em;
+}
+
+.panel{
+  background: #fff;
+  border-radius: 8px;
+  padding: 5px 3px 1.25rem 1.1rem;
+  box-shadow: 0 2px 4px rgba(66, 62, 112, 0.6);
+  min-width: 20rem;
+  position: relative;
+  height: 100%;
+  overflow-y: hidden;
+}
+
+.panel.collapsed{
+  padding-bottom: 5px;
+}
+
+.panel-title {
+  color: #222;
+  font-size: 1rem;
+  font-weight: 600;
+  border-bottom: solid 1px #efefef;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+.panel-title.collapsable {
+  cursor: pointer;
+}
+
+.panel.collapsed .panel-title{
+  border-bottom: 1px transparent;
+}
+
+.panel-title-collapsable:hover{
+  font-weight: 700;
+}
+
+.panel-content{
+  padding-top: 10px;
+  height: calc(100% - 15px);
+  overflow-y: scroll;
+  padding-right: 2px;
+}
+
+.panel-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #2b2b2b;
+  margin-bottom: 3px;
+  margin-top: 5px;
+  letter-spacing: 1px;
+  border-bottom: solid 1px #999;
+  padding-bottom: 3px;
+}
+
+
+.maplibregl-ctrl-attrib.maplibregl-compact{
+  display: none;
+}
+
+.p-menu, .p-tieredmenu{
+  z-index: 2001 !important;
+}
+
+.p-tooltip-top {
+  z-index: 2001 !important;
+}
+
+.p-tooltip-top {
+  transform: translateY(-5px);
+}
+
+.p-tooltip-text {
+  white-space: normal !important;
+  box-shadow: 1px 2px 10px #00003090 !important;
+  max-width: 300px !important;
+  font-size: 0.9rem !important;
+}
+
+.TL_word{
+  display: none;
+}
+.code_header{
+  display: none !important;
+}
+.code_area {
+  margin: 0px !important;
+  padding: 10px !important;
+}
+.code_area textarea{
+  padding: 10px !important;
+  word-wrap: break-word !important;
+}
+
+.p-tooltip-text > pre{
+  color: #f00;
+  overflow: auto;
+  max-height: 200px;
+}
+
+.reduce-y-tooltip{
+  transform: translateY(3px);
+}
+
+.default-theme.splitpanes .splitpanes__pane{
+  background-color: unset !important;
+  padding: 1px 4px 4px !important;
+}
+
+.default-theme.splitpanes .splitpanes__splitter{
+  background-color: #ffffff00 !important;
+  border-top: transparent !important;
+  border-bottom: transparent !important;
+}
+.default-theme.splitpanes .splitpanes__splitter:before, .default-theme.splitpanes .splitpanes__splitter:after{
+  background-color: transparent !important;
+  width: calc(100% - 20px) !important;
+  margin-bottom: -1px !important;
+  margin-top: -1px !important;
+  height: 2px !important;
+}
+
+.default-theme.splitpanes .splitpanes__splitter:hover:before, .default-theme.splitpanes .splitpanes__splitter:hover:after{
+  background-color: #4345ac !important;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #ffffff;
+  }
+}
