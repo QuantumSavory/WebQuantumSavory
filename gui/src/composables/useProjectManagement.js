@@ -23,7 +23,8 @@ export function useProjectManagement(
   getSimulationStatus,
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
-  TIME_STEP
+  TIME_STEP,
+  markAsSaved
 ) {
   async function openProject(name) {
     const platformInfo = await api.getPlatformInfo()
@@ -60,6 +61,11 @@ export function useProjectManagement(
       
       addLog('info', `Project opened: ${name}`, 'System')
       getSimulationStatus(false)
+      
+      // Mark project as saved after loading
+      if (markAsSaved && typeof markAsSaved === 'function') {
+        markAsSaved()
+      }
     } else {
       alert('Failed to load project: ' + name)
     }
@@ -88,6 +94,11 @@ export function useProjectManagement(
     addLog('info', `Demo project loaded: ${data.name}`, 'System')
     addLog('warning', 'This is a demo project. Use "Save As" to create your own copy.', 'System')
     getSimulationStatus(false)
+    
+    // Mark demo project as saved after loading
+    if (markAsSaved && typeof markAsSaved === 'function') {
+      markAsSaved()
+    }
   }
 
   function createNewProject(projectName) {
@@ -106,11 +117,21 @@ export function useProjectManagement(
     
     ProjectStore.saveProject(currentProjectName.value, serializeProjectData())
     addLog('info', `New project created: ${projectName}`, 'System')
+    
+    // Mark project as saved after creating
+    if (markAsSaved && typeof markAsSaved === 'function') {
+      markAsSaved()
+    }
   }
 
   function saveProject() {
     if (!currentProjectName.value) return
     ProjectStore.saveProject(currentProjectName.value, serializeProjectData())
+    
+    // Mark project as saved after saving
+    if (markAsSaved && typeof markAsSaved === 'function') {
+      markAsSaved()
+    }
   }
 
   function createSaveAsProject(projectName) {
@@ -125,6 +146,11 @@ export function useProjectManagement(
       
       localStorage.setItem('recentProjectName', projectName)
       addLog('info', `Project saved as: ${projectName}`, 'System')
+      
+      // Mark project as saved after save as
+      if (markAsSaved && typeof markAsSaved === 'function') {
+        markAsSaved()
+      }
     } catch (error) {
       addLog('error', `Failed to save project: ${error.message}`, 'System')
       alert(`Failed to save project: ${error.message}`)

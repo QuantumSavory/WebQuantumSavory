@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref, computed, nextTick, onMounted } from 'vue'
+import { reactive, ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import BaseMap from './components/map/BaseMap.vue'
 import Node from './models/Node'
 import Edge from './models/Edge'
@@ -23,6 +23,7 @@ import ProjectNameDialog from './components/ProjectNameDialog.vue'
 import ImportConflictDialog from './components/ImportConflictDialog.vue'
 import OpenProjectDialog from './components/OpenProjectDialog.vue'
 import AboutModal from './components/AboutModal.vue'
+import UnsavedChangesDialog from './components/UnsavedChangesDialog.vue'
 import packageJson from '../package.json'
 import VoidPanel from './components/panels/VoidPanel.vue'
 import ResultsView from './components/panels/ResultsView.vue'
@@ -38,6 +39,7 @@ import { useImportExport } from './composables/useImportExport.js'
 import { useDialogs } from './composables/useDialogs.js'
 import { useAppState } from './composables/useAppState.js'
 import { useProjectHandlers } from './composables/useProjectHandlers.js'
+import { useUnsavedChanges } from './composables/useUnsavedChanges.js'
 
 // Import utils
 import { validatePayload, generateRandomNodes, generateRandomEdges, getNodeById, getNodeBySlotId } from './utils/projectHelpers.js'
@@ -405,6 +407,9 @@ const {
   toggleProjectDropdown: toggleProjectDropdownState
 } = useAppState(projectData, selectedItem, selectedType, mapCenter, mapZoom, applicationLogs, minimizedProjectData)
 
+// Create a ref for markAsSaved that will be set after useUnsavedChanges is initialized
+const markAsSavedRef = ref(null)
+
 // Initialize project management composable (requires dependencies from above)
 const {
   openProject,
@@ -430,8 +435,24 @@ const {
   getSimulationStatus,
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
-  TIME_STEP
+  TIME_STEP,
+  () => markAsSavedRef.value?.() // Pass a function that calls the ref
 )
+
+// Initialize unsaved changes tracking (requires serializeProjectData from useProjectManagement)
+const {
+  hasUnsavedChanges,
+  markAsSaved,
+  markAsUnsaved,
+  clearSnapshot
+} = useUnsavedChanges(serializeProjectData)
+
+// Update the ref so useProjectManagement can call markAsSaved
+markAsSavedRef.value = markAsSaved
+
+// Unsaved changes dialog state
+const showUnsavedChangesDialog = ref(false)
+const pendingAction = ref(null)
 
 // Initialize import/export composable
 const {
@@ -549,7 +570,15 @@ const mainMenuItems = computed(() => {
     items: demoProjects.map(demo => ({
       label: demo.name,
       icon: 'pi pi-file',
-      command: () => loadDemoProject(demo.data)
+      command: () => {
+        // Check for unsaved changes before loading demo
+        if (hasUnsavedChanges()) {
+          pendingAction.value = { type: 'demo', demoData: demo.data }
+          showUnsavedChangesDialog.value = true
+        } else {
+          loadDemoProject(demo.data)
+        }
+      }
     }))
   })
 
@@ -630,6 +659,12 @@ function clearLogs() {
 function handleMenu(action) {
   showMenu.value = false
   if (action === 'new') {
+    // Check for unsaved changes before creating new project
+    if (hasUnsavedChanges()) {
+      pendingAction.value = { type: 'new' }
+      showUnsavedChangesDialog.value = true
+      return
+    }
     projectNameDialogMode.value = 'new'
     projectNameDialogInitialValue.value = ''
     showProjectNameDialog.value = true
@@ -643,13 +678,26 @@ function handleMenu(action) {
       return
     }
     ProjectStore.saveProject(currentProjectName.value, serializeProjectData())
+    markAsSaved()
     
   } else if (action === 'open') {
+    // Check for unsaved changes before opening project
+    if (hasUnsavedChanges()) {
+      pendingAction.value = { type: 'open' }
+      showUnsavedChangesDialog.value = true
+      return
+    }
     // Get all projects sorted by most recently opened
     const recentProjects = ProjectStore.getRecentProjects(50) // Higher limit for full list
     loadProjectList.value = recentProjects;
     showLoadDialog.value = true
   } else if (action === 'import') {
+    // Check for unsaved changes before importing
+    if (hasUnsavedChanges()) {
+      pendingAction.value = { type: 'import' }
+      showUnsavedChangesDialog.value = true
+      return
+    }
     importProject()
   } else if (action === 'export') {
     exportProject()
@@ -672,6 +720,15 @@ function handleProjectNameConfirm(projectName) {
     createNewProject(projectName)
   } else if (projectNameDialogMode.value === 'saveas') {
     createSaveAsProject(projectName)
+    // If there's a pending action (from unsaved changes dialog), execute it
+    if (pendingAction.value) {
+      const action = pendingAction.value
+      pendingAction.value = null
+      // Execute the pending action after a short delay to ensure project is saved
+      nextTick(() => {
+        executePendingAction(action)
+      })
+    }
   }
   showProjectNameDialog.value = false
 }
@@ -692,11 +749,23 @@ function toggleProjectDropdown() {
 
 function quickOpenProject(name) {
   showProjectDropdown.value = false
+  // Check for unsaved changes before opening project
+  if (hasUnsavedChanges()) {
+    pendingAction.value = { type: 'open', projectName: name }
+    showUnsavedChangesDialog.value = true
+    return
+  }
   openProject(name)
 }
 
 function handleOpenProjectSelect(projectName) {
   showLoadDialog.value = false
+  // Check for unsaved changes before opening project
+  if (hasUnsavedChanges()) {
+    pendingAction.value = { type: 'open', projectName: projectName }
+    showUnsavedChangesDialog.value = true
+    return
+  }
   openProject(projectName)
 }
 
@@ -816,6 +885,74 @@ function handleSaveAs() {
   showProjectNameDialog.value = true
 }
 
+// Handle unsaved changes dialog actions
+function handleUnsavedChangesSave() {
+  showUnsavedChangesDialog.value = false
+  const action = pendingAction.value
+  pendingAction.value = null
+  
+  // Save the project first
+  if (currentProjectName.value) {
+    ProjectStore.saveProject(currentProjectName.value, serializeProjectData())
+    markAsSaved()
+  } else {
+    // If no project name, show save as dialog first
+    handleSaveAs()
+    // Store the pending action to execute after save
+    pendingAction.value = action
+    return
+  }
+  
+  // Execute the pending action
+  executePendingAction(action)
+}
+
+function handleUnsavedChangesDiscard() {
+  showUnsavedChangesDialog.value = false
+  const action = pendingAction.value
+  pendingAction.value = null
+  
+  // Mark as saved (discard changes)
+  markAsSaved()
+  
+  // Execute the pending action
+  executePendingAction(action)
+}
+
+function handleUnsavedChangesCancel() {
+  showUnsavedChangesDialog.value = false
+  pendingAction.value = null
+}
+
+function executePendingAction(action) {
+  if (!action) return
+  
+  switch (action.type) {
+    case 'new':
+      projectNameDialogMode.value = 'new'
+      projectNameDialogInitialValue.value = ''
+      showProjectNameDialog.value = true
+      break
+    case 'open':
+      if (action.projectName) {
+        // Opening specific project from dropdown or dialog
+        openProject(action.projectName)
+      } else {
+        // Opening project list dialog
+        const recentProjects = ProjectStore.getRecentProjects(50)
+        loadProjectList.value = recentProjects
+        showLoadDialog.value = true
+      }
+      break
+    case 'import':
+      importProject()
+      break
+    case 'demo':
+      loadDemoProject(action.demoData)
+      break
+  }
+}
+
 onMounted( async () => {
   // fetch platform info
   await api.fetchPlatformInfo()
@@ -842,6 +979,25 @@ onMounted( async () => {
   console.log('🔄 Mounted: Panel collapsed states:', panelCollapsedStates.value)
 
   startAlivePolling();
+  
+  // Add beforeunload handler to warn about unsaved changes
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+// Handle browser beforeunload event to warn about unsaved changes
+function handleBeforeUnload(event) {
+  if (hasUnsavedChanges()) {
+    // Modern browsers ignore the message but still show a dialog
+    event.preventDefault()
+    // For older browsers
+    event.returnValue = ''
+    return ''
+  }
+}
+
+// Clean up beforeunload handler on unmount
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 </script>
 
@@ -1076,6 +1232,14 @@ onMounted( async () => {
       :mode="projectNameDialogMode"
       @confirm="handleProjectNameConfirm"
       @cancel="handleProjectNameCancel"
+    />
+
+    <!-- Unsaved Changes Dialog Component -->
+    <UnsavedChangesDialog
+      :show="showUnsavedChangesDialog"
+      @save="handleUnsavedChangesSave"
+      @discard="handleUnsavedChangesDiscard"
+      @cancel="handleUnsavedChangesCancel"
     />
 
     <!-- About Modal Component -->
