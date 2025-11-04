@@ -759,8 +759,8 @@
     state = Cqn.prepare_simulation(state, simulation_name)
     @test haskey(Cqn.STATE, simulation_name)
     
-    # Make the simulation stale by setting last_active_time to 31 minutes ago
-    state.simulation_last_active_time = Dates.now() - Dates.Minute(31)
+    # Make the simulation stale by setting last_active_time to AUTO_PURGE_MINUTES + 1 minutes ago
+    state.simulation_last_active_time = Dates.now() - Dates.Minute(Cqn.AUTO_PURGE_MINUTES + 1)
     Cqn.STATE[simulation_name] = state
     
     # Verify simulation exists before cleanup
@@ -800,8 +800,8 @@
     state = Cqn.prepare_simulation(state, simulation_name)
     @test haskey(Cqn.STATE, simulation_name)
     
-    # Make the simulation stale by setting last_active_time to 31 minutes ago
-    state.simulation_last_active_time = Dates.now() - Dates.Minute(31)
+    # Make the simulation stale by setting last_active_time to AUTO_PURGE_MINUTES + 1 minutes ago
+    state.simulation_last_active_time = Dates.now() - Dates.Minute(Cqn.AUTO_PURGE_MINUTES + 1)
     
     # Start simulation in background (very long time)
     state.is_running = true
@@ -831,6 +831,104 @@
     s2 = Cqn.STATE[simulation_name]
     @test s2.execution_time_exceeded == false
     @test s2.auto_purged == true
+    
+    # Clean up
+    Cqn.destroy_simulation(simulation_name)
+    @test !haskey(Cqn.STATE, simulation_name)
+  end
+
+  @testset "Cleanup Stale Simulations - Auto-Destroy of Purged Simulation Test" begin
+    # Load payload3 for testing
+    test_payload3 = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    
+    # Create and setup a simulation
+    simulation_name = "cleanup_test_autodestroy_purged"
+    test_payload3["name"] = simulation_name
+    
+    # Validate payload first (this adds the graph_info structure)
+    validation_result = Cqn.validate_payload(test_payload3)
+    
+    # Parse the network graph
+    state = Cqn.parse_network_graph(validation_result)
+    @test haskey(Cqn.STATE, simulation_name)
+    @test state.simulation_last_active_time !== nothing
+    
+    # Prepare the simulation
+    state = Cqn.prepare_simulation(state, simulation_name)
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # STEP 1: Make the simulation stale for auto-purge (AUTO_PURGE_MINUTES + 1 minutes ago)
+    state.simulation_last_active_time = Dates.now() - Dates.Minute(Cqn.AUTO_PURGE_MINUTES + 1)
+    Cqn.STATE[simulation_name] = state
+    
+    # Verify simulation exists before cleanup
+    @test haskey(Cqn.STATE, simulation_name)
+    @test state.auto_purged == false
+    
+    # Call cleanup function - should auto-purge the simulation
+    Cqn.cleanup_stale_simulations_once()
+    
+    # Verify simulation was auto-purged (blocked but not destroyed)
+    @test haskey(Cqn.STATE, simulation_name)
+    purged_state = Cqn.STATE[simulation_name]
+    @test purged_state.auto_purged == true
+    @test purged_state.execution_time_exceeded == false
+    @test purged_state.payload === nothing  # Resources cleared
+    @test purged_state.graph === nothing
+    @test purged_state.network === nothing
+    @test purged_state.simulation === nothing
+    
+    # STEP 2: Make the purged simulation stale for auto-destroy (AUTO_DESTROY_MINUTES + 1 minutes ago)
+    purged_state.simulation_last_active_time = Dates.now() - Dates.Minute(Cqn.AUTO_DESTROY_MINUTES + 1)
+    Cqn.STATE[simulation_name] = purged_state
+    
+    # Verify simulation still exists before auto-destroy cleanup
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Call cleanup function again - should auto-destroy the purged simulation
+    Cqn.cleanup_stale_simulations_once()
+    
+    # Verify simulation was completely destroyed (removed from STATE)
+    @test !haskey(Cqn.STATE, simulation_name)
+  end
+
+  @testset "Cleanup Stale Simulations - Auto-Destroy of Timed Out Simulation Test" begin
+    # Test that timed-out simulations (execution_time_exceeded=true) also get auto-destroyed
+    test_payload3 = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    
+    # Create and setup a simulation
+    simulation_name = "cleanup_test_autodestroy_timeout"
+    test_payload3["name"] = simulation_name
+    
+    # Validate payload first (this adds the graph_info structure)
+    validation_result = Cqn.validate_payload(test_payload3)
+    
+    # Parse the network graph
+    state = Cqn.parse_network_graph(validation_result)
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Prepare the simulation
+    state = Cqn.prepare_simulation(state, simulation_name)
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Block the simulation due to timeout
+    Cqn.block_simulation(state; reason=:timeout, max_minutes=Cqn.MAX_SIM_RUNTIME_MINUTES)
+    @test state.execution_time_exceeded == true
+    @test state.auto_purged == false
+    @test state.payload === nothing
+    
+    # Make the blocked simulation stale for auto-destroy (AUTO_DESTROY_MINUTES + 1 minutes ago)
+    state.simulation_last_active_time = Dates.now() - Dates.Minute(Cqn.AUTO_DESTROY_MINUTES + 1)
+    Cqn.STATE[simulation_name] = state
+    
+    # Verify simulation still exists before auto-destroy cleanup
+    @test haskey(Cqn.STATE, simulation_name)
+    
+    # Call cleanup function - should auto-destroy the timed-out simulation
+    Cqn.cleanup_stale_simulations_once()
+    
+    # Verify simulation was completely destroyed (removed from STATE)
+    @test !haskey(Cqn.STATE, simulation_name)
   end
 
   @testset "Block Simulation Behavior" begin

@@ -1,5 +1,6 @@
 
 const AUTO_PURGE_MINUTES = 30
+const AUTO_DESTROY_MINUTES = 300
 
 function cleanup_stale_simulations_once()
     # Get all simulation names to avoid mutating while iterating
@@ -12,6 +13,19 @@ function cleanup_stale_simulations_once()
                 
                 # Skip if running or no last active time set
                 if state.is_running || state.simulation_last_active_time === nothing
+                    continue
+                end
+
+                # Check auto-destroy first (300 minutes) - applies to all simulations including purged ones
+                if Dates.now() - state.simulation_last_active_time > Dates.Minute(AUTO_DESTROY_MINUTES)
+                    @info "Auto-destroying stale simulation: $simulation_name"
+                    @log_event state Logging.Info "Destroying simulation $simulation_name after $AUTO_DESTROY_MINUTES minutes of inactivity"
+                    Cqn.destroy_simulation(simulation_name)
+                    continue
+                end
+                
+                # Skip auto-purge check if already purged or timed out
+                if state.execution_time_exceeded || state.auto_purged
                     continue
                 end
                 
