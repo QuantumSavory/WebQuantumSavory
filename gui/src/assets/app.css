@@ -422,38 +422,19 @@ button:disabled:hover {
 .project-name-container {
   display: flex;
   align-items: center;
-  position: relative;
   margin-left: 0;
-}
-.project-name-btn {
-  background: #fff;
-  border: none;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.6);
   border-radius: 4px;
-  padding: 4px 16px 4px 10px;
-  font-size: 1rem;
-  cursor: pointer;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  transition: border 0.15s;
-  margin: 0;
-}
-.project-name-btn:hover {
-  border-color: #2196f3;
+  min-height: 32px;
 }
 .project-name-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  display: inline-block;
-  vertical-align: middle;
-}
-.project-dropdown {
-  top: 32px;
-  left: 0;
-  right: auto;
-  min-width: 140px;
-  margin-top: 0px;
+  font-weight: 600;
+  color: #2d2d2d;
+  max-width: 300px;
 }
 .json-viewer-box{
   position: absolute;

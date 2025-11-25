@@ -1,5 +1,4 @@
 import { ref, computed } from 'vue'
-import ProjectStore from '../models/ProjectStore.js'
 
 /**
  * useAppState - Composable for App.vue state and basic handlers
@@ -21,8 +20,6 @@ export function useAppState(
   const loadProjectList = ref([])
   const currentProjectName = ref('')
   const isDemoProject = ref(false)
-  const showProjectDropdown = ref(false)
-  const projectListDropdown = ref([])
   const showJsonViewer = ref(localStorage.getItem('showJsonViewer') === 'true')
   const jsonViewerMode = ref(localStorage.getItem('jsonViewerMode') || 'full')
   const showImportConflictDialog = ref(false)
@@ -68,16 +65,6 @@ export function useAppState(
     localStorage.setItem('jsonViewerMode', jsonViewerMode.value)
   }
 
-  function toggleProjectDropdown() {
-    if (!showProjectDropdown.value) {
-      const recentProjects = ProjectStore.getRecentProjects(10)
-      projectListDropdown.value = recentProjects
-        .filter(project => project.name !== currentProjectName.value)
-        .map(project => project.name)
-    }
-    showProjectDropdown.value = !showProjectDropdown.value
-  }
-
   return {
     // State
     showMenu,
@@ -86,8 +73,6 @@ export function useAppState(
     loadProjectList,
     currentProjectName,
     isDemoProject,
-    showProjectDropdown,
-    projectListDropdown,
     showJsonViewer,
     jsonViewerMode,
     showImportConflictDialog,
@@ -104,8 +89,7 @@ export function useAppState(
     
     // Handlers
     toggleJsonViewerVisibility,
-    toggleJsonViewerMode,
-    toggleProjectDropdown
+    toggleJsonViewerMode
   }
 }
 

@@ -20,7 +20,14 @@
             />
           </template>
           <template v-else>
-            <span @click="startEditName" class="node-name-display" title="Click to edit">{{ props.node.name }}</span>
+            <span 
+              @click="startEditName" 
+              class="node-name-display" 
+              :class="{ 'node-name-display--disabled': isNodeEditingLocked }"
+              :title="isNodeEditingLocked ? 'Reset the simulation to edit node names' : 'Click to edit'"
+            >
+              {{ props.node.name }}
+            </span>
           </template>
           <div class="" >
             <button class="options-btn noborder" @mouseover="showOptionsMenu" aria-label="Menu" style="font-weight: bold; color: #000;">
@@ -60,7 +67,8 @@
                     @click="switchSlotType(slot)" 
                     :registerSlot="slot" 
                     :node="props.node"
-                    style="cursor: pointer;" 
+                    :class="{ 'slot-type-icon--disabled': isNodeEditingLocked }"
+                    :style="{ cursor: isNodeEditingLocked ? 'not-allowed' : 'pointer' }" 
                   />
                 </div>
                 <div class="slot-cell bg-noise-cell">
@@ -349,8 +357,18 @@ function hideOptionsMenu(event){
 
 
 // Editable node name logic
+const isNodeEditingLocked = computed(() => props.simulationState?.hasSimulationRun || false)
 const editingName = ref(false)
 const nameInput = ref('')
+
+watch(isNodeEditingLocked, (locked) => {
+  if (locked && editingName.value) {
+    editingName.value = false
+    nameInput.value = props.node.name
+  }
+})
+const NODE_NAME_LOCK_MESSAGE = 'Cannot rename nodes after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.'
+const SLOT_TYPE_LOCK_MESSAGE = 'Cannot change slot types after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.'
 
 // Options dropdown logic
 const showOptionsDropdown = ref(false)
@@ -552,6 +570,10 @@ onUnmounted(() => {
 })
 
 function startEditName() {
+  if (isNodeEditingLocked.value) {
+    alert(NODE_NAME_LOCK_MESSAGE)
+    return
+  }
   nameInput.value = props.node.name
   editingName.value = true
   setTimeout(() => {
@@ -574,6 +596,10 @@ function handleNameKey(e) {
 }
 
 function switchSlotType(slot) {
+  if (isNodeEditingLocked.value) {
+    alert(SLOT_TYPE_LOCK_MESSAGE)
+    return
+  }
   if (slot.type == 'Qubit') {
     slot.type = 'Qumode'
   } else if (slot.type == 'Qumode') {
@@ -627,6 +653,19 @@ if (props.justCreated) {
 
 .node-name-display:hover {
   border-bottom: solid 1px #000;
+}
+
+.node-name-display--disabled {
+  cursor: not-allowed;
+  color: #777;
+}
+
+.node-name-display--disabled:hover {
+  border-bottom: none;
+}
+
+.slot-type-icon--disabled {
+  opacity: 0.4;
 }
 
 .node-name-input {

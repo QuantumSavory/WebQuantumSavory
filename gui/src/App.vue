@@ -38,7 +38,6 @@ import { useProjectManagement } from './composables/useProjectManagement.js'
 import { useImportExport } from './composables/useImportExport.js'
 import { useDialogs } from './composables/useDialogs.js'
 import { useAppState } from './composables/useAppState.js'
-import { useProjectHandlers } from './composables/useProjectHandlers.js'
 import { useUnsavedChanges } from './composables/useUnsavedChanges.js'
 
 // Import utils
@@ -213,6 +212,7 @@ const stopPollingForSim = () => {}
 const {
   resultWindows,
   closeResultWindow,
+  closeAllResultWindows,
   bringWindowToFront,
   updateWindowPosition,
   updateWindowSize,
@@ -389,8 +389,6 @@ const {
   loadProjectList,
   currentProjectName,
   isDemoProject,
-  showProjectDropdown,
-  projectListDropdown,
   showJsonViewer,
   jsonViewerMode,
   showImportConflictDialog,
@@ -403,8 +401,7 @@ const {
   selectedNodeIndex,
   selectedItemInfo,
   toggleJsonViewerVisibility: toggleJsonViewerVisibilityState,
-  toggleJsonViewerMode: toggleJsonViewerModeState,
-  toggleProjectDropdown: toggleProjectDropdownState
+  toggleJsonViewerMode: toggleJsonViewerModeState
 } = useAppState(projectData, selectedItem, selectedType, mapCenter, mapZoom, applicationLogs, minimizedProjectData)
 
 // Create a ref for markAsSaved that will be set after useUnsavedChanges is initialized
@@ -418,7 +415,6 @@ const {
   createSaveAsProject,
   saveProject,
   handleDeleteProject: handleDeleteProjectPM,
-  toggleProjectDropdown: toggleProjectDropdownPM,
   serializeProjectData,
   deserializeProjectData,
   generateCopyName
@@ -436,7 +432,11 @@ const {
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
   TIME_STEP,
-  () => markAsSavedRef.value?.() // Pass a function that calls the ref
+  () => markAsSavedRef.value?.(), // Pass a function that calls the ref
+  resetSimulation,
+  stopPolling,
+  stopAlivePolling,
+  closeAllResultWindows
 )
 
 // Initialize unsaved changes tracking (requires serializeProjectData from useProjectManagement)
@@ -737,27 +737,6 @@ function handleProjectNameCancel() {
   showProjectNameDialog.value = false
 }
 
-function toggleProjectDropdown() {
-  if (!showProjectDropdown.value) {
-    const recentProjects = ProjectStore.getRecentProjects(10)
-    projectListDropdown.value = recentProjects
-      .filter(project => project.name !== currentProjectName.value)
-      .map(project => project.name)
-  }
-  showProjectDropdown.value = !showProjectDropdown.value
-}
-
-function quickOpenProject(name) {
-  showProjectDropdown.value = false
-  // Check for unsaved changes before opening project
-  if (hasUnsavedChanges()) {
-    pendingAction.value = { type: 'open', projectName: name }
-    showUnsavedChangesDialog.value = true
-    return
-  }
-  openProject(name)
-}
-
 function handleOpenProjectSelect(projectName) {
   showLoadDialog.value = false
   // Check for unsaved changes before opening project
@@ -1010,15 +989,9 @@ onUnmounted(() => {
         <span class="version-badge">v{{ appVersion }}</span>
       </div>
       <div class="topbar-right">
-        <div class="topbar-menu" @mouseleave="showMenu = false; showProjectDropdown = false">
+        <div class="topbar-menu" @mouseleave="showMenu = false">
           <div v-if="currentProjectName" class="project-name-container">
-            <button class="project-name-btn" @click="toggleProjectDropdown" :title="currentProjectName">
-              <span class="project-name-label">{{ currentProjectName }}</span>
-              <svg width="14" height="14" viewBox="0 0 14 14" style="margin-left:4px;vertical-align:middle"><path d="M3 5l4 4 4-4" stroke="#222" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-            </button>
-            <div v-if="showProjectDropdown && projectListDropdown.length" class="dropdown-menu project-dropdown">
-              <div v-for="name in projectListDropdown" :key="name" class="dropdown-item" @click="quickOpenProject(name)">{{ name }}</div>
-            </div>
+            <span class="project-name-label" :title="currentProjectName">{{ currentProjectName }}</span>
           </div>
           
           <div class="action-buttons">

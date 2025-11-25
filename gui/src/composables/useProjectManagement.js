@@ -24,9 +24,29 @@ export function useProjectManagement(
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
   TIME_STEP,
-  markAsSaved
+  markAsSaved,
+  resetSimulation,
+  stopPolling,
+  stopAlivePolling,
+  closeAllResultWindows
 ) {
+  function resetUiStateForProjectChange() {
+    if (typeof stopPolling === 'function') {
+      stopPolling()
+    }
+    if (typeof stopAlivePolling === 'function') {
+      stopAlivePolling()
+    }
+    if (typeof resetSimulation === 'function') {
+      resetSimulation()
+    }
+    if (typeof closeAllResultWindows === 'function') {
+      closeAllResultWindows()
+    }
+  }
+
   async function openProject(name) {
+    resetUiStateForProjectChange()
     const platformInfo = await api.getPlatformInfo()
     
     const data = ProjectStore.loadProject(name)
@@ -72,6 +92,7 @@ export function useProjectManagement(
   }
 
   async function loadDemoProject(demoData) {
+    resetUiStateForProjectChange()
     const platformInfo = await api.getPlatformInfo()
     const data = JSON.parse(JSON.stringify(demoData))
     data.platformInfo = platformInfo
@@ -102,6 +123,7 @@ export function useProjectManagement(
   }
 
   function createNewProject(projectName) {
+    resetUiStateForProjectChange()
     clearLogs()
     
     currentProjectName.value = projectName
@@ -186,14 +208,6 @@ export function useProjectManagement(
       alert(`Failed to delete project: ${error.message}`)
     }
   }
-
-  function toggleProjectDropdown() {
-    const recentProjects = ProjectStore.getRecentProjects(10)
-    return recentProjects
-      .filter(project => project.name !== currentProjectName.value)
-      .map(project => project.name)
-  }
-
 
   function serializeProjectData() {
     const platformInfo = api.getPlatformInfo()
@@ -317,7 +331,6 @@ export function useProjectManagement(
     createSaveAsProject,
     saveProject,
     handleDeleteProject,
-    toggleProjectDropdown,
     serializeProjectData,
     deserializeProjectData,
     compareVersionsMismatch,

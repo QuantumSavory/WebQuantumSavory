@@ -106,6 +106,9 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
       projectData.value.net.edges = projectData.value.net.edges.filter(edge => edge !== item)
       addLog('warning', `Deleted edge: ${edgeName}`, 'Map')
     }
+
+    // Clear the current selection so the UI reflects that nothing is selected anymore
+    handleSelectLocal(null, null)
   }
 
   function handleEdgeCreated(edge) {

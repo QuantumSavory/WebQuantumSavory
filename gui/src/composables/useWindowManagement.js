@@ -38,6 +38,13 @@ export function useWindowManagement() {
     unregisterWindowRef(windowId)
   }
 
+  function closeAllResultWindows() {
+    resultWindows.value = []
+    windowRefs.clear()
+    nextWindowId = 1
+    nextWindowZIndex = 1000
+  }
+
   function bringWindowToFront(windowId) {
     const window = resultWindows.value.find(w => w.id === windowId)
     if (window) {
@@ -96,6 +103,7 @@ export function useWindowManagement() {
   return {
     resultWindows,
     closeResultWindow,
+    closeAllResultWindows,
     bringWindowToFront,
     updateWindowPosition,
     updateWindowSize,
