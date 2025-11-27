@@ -41,6 +41,7 @@
             targetNodeName: props.edge.target.name
           }"
           :simulationState="props.simulationState"
+          :isVirtualEdge="props.edge.isLogic"
         />
       </section>
     </template>

@@ -55,13 +55,39 @@ const props = defineProps({
     type: Object,
     required: false,
     default: () => ({})
+  },
+  isVirtualEdge: {
+    type: Boolean,
+    required: false,
+    default: false
   }
 })
 
 const protocolTypes = ref( [] )
 const addProtocolMenu = ref(null)
 const selectedProtocol = ref(null)
-const items = ref( [] );
+
+// Computed property for menu items that filters based on virtual edge status
+const items = computed(() => {
+  if (!protocolTypes.value || !protocolTypes.value.length) {
+    return []
+  }
+  
+  let filteredTypes = protocolTypes.value
+  
+  // If this is a virtual edge, only show protocols with virtual: true
+  if (props.isVirtualEdge) {
+    filteredTypes = protocolTypes.value.filter(type => type.virtual === true)
+  }
+  
+  return filteredTypes.map(type => ({
+    label: getProtocolTypeSimpleName(type.type),
+    value: type.type, 
+    command: () => {
+      handleAddProtocol(type.type)
+    }
+  }))
+})
 
 
 function deleteProtocol( protocol ){
@@ -145,13 +171,6 @@ function handleAddProtocol( protocolTypeId) {
 
 onMounted(() => {
   protocolTypes.value = api.config.value.protocolTypes?.[props.protocolGroupName];
-  items.value = protocolTypes.value.map(type => ({
-    label: getProtocolTypeSimpleName(type.type),
-    value: type.type, 
-    command: ()=>{
-      handleAddProtocol(type.type)
-    }
-  }));
 })
 
 const emit = defineEmits(['select'])
