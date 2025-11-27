@@ -646,7 +646,16 @@ route("/prepare_simulation", method="POST") do
     throw(validation_error("Network not found in simulation $simulation_name"))
   end
 
-  state = Cqn.prepare_simulation(state, simulation_name)
+  # Prepare the simulation, logging unexpected errors to the simulation's log stream
+  try
+    state = Cqn.prepare_simulation(state, simulation_name)
+  catch e
+    # Log a human-readable message into the simulation logs for frontend display
+    @log_event state Logging.Error "Error preparing simulation $simulation_name: $(e)" error_type=string(typeof(e))
+
+    # Rethrow so that safe_route_handler can still produce a proper HTTP error response
+    throw(validation_error("Error preparing simulation $simulation_name: $(e)", Dict("error" => string(e))))
+  end
 
   json(Cqn.serialize_state(state))
 end
