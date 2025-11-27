@@ -26,6 +26,9 @@ SwagUI = "bf05d729-34b2-4f1f-a2f1-2452bece7ebc"
 SwaggerMarkdown = "1b6eb727-ad4b-44eb-9669-b9596a6e760f"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
+[sources]
+QuantumSavory = {rev = "master", url = "https://github.com/QuantumSavory/QuantumSavory.jl.git"}
+
 [compat]
 Base64 = "1.11.0"
 CairoMakie = "0.14.0"

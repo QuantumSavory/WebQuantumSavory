@@ -27,11 +27,12 @@ function test_code(code_string::String)
 
         # Evaluate in sandbox
         evaluation_result = Base.eval(sandbox, parsed)
-        @show evaluation_result
 
-        @show @invokelatest methods(evaluation_result)
-
-        if count(@invokelatest methods(evaluation_result)) == 0
+        # For our purposes we only need to know whether the evaluation result
+        # is callable (i.e. a function). Avoid introspecting `methods` on the
+        # result, which can run into world-age related edge cases in newer
+        # Julia versions, and just validate the type directly.
+        if !(evaluation_result isa Function)
             return (false, nothing, "Evaluation result is not a function")
         end
 

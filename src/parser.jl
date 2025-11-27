@@ -206,7 +206,18 @@ function get_protocol_types()
       group = "floating"
     end
 
-    push!(result, Dict("type" => string(pt.type), "doc" => string(pt.doc), "group" => group, "parameters" => pts |> parse_pt_type))
+    virtual = if group == "edge"
+      try 
+        QuantumSavory.ProtocolZoo.permits_virtual_edge(pt.type)
+      catch e
+        @warn "Error checking if protocol type $(pt.type) permits virtual edge" error=e
+        false
+      end
+    else
+      nothing
+    end
+
+    push!(result, Dict("type" => string(pt.type), "doc" => string(pt.doc), "group" => group, "parameters" => pts |> parse_pt_type, "virtual" => virtual))
   end
 
   result
