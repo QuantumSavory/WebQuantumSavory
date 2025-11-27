@@ -1,7 +1,7 @@
 name = "Cqn"
 uuid = "48df8126-4cc7-4f2c-981c-8da4b1920261"
-authors = ["Genie <e@essenciary.com>"]
 version = "1.4.10"
+authors = ["Genie <e@essenciary.com>"]
 
 [deps]
 Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
@@ -25,6 +25,9 @@ SearchLightSQLite = "21a827c4-482a-11ea-3a19-4d2243a4a2c5"
 SwagUI = "bf05d729-34b2-4f1f-a2f1-2452bece7ebc"
 SwaggerMarkdown = "1b6eb727-ad4b-44eb-9669-b9596a6e760f"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+
+[sources]
+QuantumSavory = {rev = "master", url = "https://github.com/QuantumSavory/QuantumSavory.jl.git"}
 
 [compat]
 Base64 = "1.11.0"
