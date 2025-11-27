@@ -3,7 +3,7 @@ import { api } from '../utils/ApiConnector'
 /**
  * usePolling - Composable for simulation polling operations
  */
-export function usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim, refreshAllWindows, checkAndHideInvalidEntangledStates) {
+export function usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim, refreshAllWindows, checkAndHideInvalidEntangledStates, showAlert) {
   
   function startPolling() {
     console.log('🚀 startPolling: Starting simulation polling')
@@ -96,7 +96,9 @@ export function usePolling(simulationState, simulationStatus, projectData, minim
 
               prepareNetworkGraphSim(false);
 
-              alert('Simulation execution time exceeded');
+              if (showAlert && typeof showAlert === 'function') {
+                showAlert('Simulation Error', 'Simulation execution time exceeded')
+              }
               console.log('📋 destroySimulation: Response', response)
               return;
             }
@@ -181,7 +183,9 @@ export function usePolling(simulationState, simulationStatus, projectData, minim
         addLog('error', 'Simulation purged after long inactivity', 'Backend');
         prepareNetworkGraphSim(false);
         stopAlivePolling();
-        alert('Simulation purged after long inactivity');
+        if (showAlert && typeof showAlert === 'function') {
+          showAlert('Simulation Stopped', 'Simulation purged after long inactivity')
+        }
         return;
       }
     }

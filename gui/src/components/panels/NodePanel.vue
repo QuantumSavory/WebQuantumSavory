@@ -47,7 +47,7 @@
             <div v-if="batchEditMode" class="slot-cell checkbox-header"></div>
             <div class="slot-cell type-header"></div>
             <div class="slot-cell bg-noise-header">BG Noise</div>
-            <div class="slot-cell last-op-header">Last Op</div>
+            <!-- <div class="slot-cell last-op-header">Last Op</div> -->
           </div>
           
           <!-- Slots List -->
@@ -76,9 +76,9 @@
                     <option v-for="opt in bgNoiseOptions" :key="opt.type" :value="opt.type">{{ opt.type == 'default' ? 'No background noise' : opt.type }}</option>
                   </select>
                 </div>
-                <div class="slot-cell last-op-cell">
+                <!-- <div class="slot-cell last-op-cell">
                   {{slot.lastOperationTime}}
-                </div>
+                </div> -->
                 <SlotEditor 
                   :registerSlot="slot"
                   :node="props.node"

@@ -297,6 +297,7 @@ onMounted(() => {
 
 .symbol-content {
   display: inline-block;
+  font-family: sans-serif;
 }
 
 .symbol-button.subscript-char .symbol-content {

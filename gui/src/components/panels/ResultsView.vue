@@ -25,16 +25,22 @@
 
     <!-- Window Content -->
     <div class="window-content">
+      <!-- Loading State -->
+      <div v-if="loading" class="loading-container">
+        <div class="spinner"></div>
+        <div class="loading-message">Waiting for the plot to be generated</div>
+      </div>
+      
       <!-- PNG View -->
-      <div v-if="currentView === 'png'" class="image-container">
+      <div v-else-if="currentView === 'png'" class="image-container">
         <img v-if="imgSrc" :src="'data:image/png;base64,'+imgSrc" :alt="imageAlt" />
-        <div v-else class="no-content">No image to display</div>
+        <div v-else class="no-content">There is no valid plot currently</div> 
       </div>
       
       <!-- HTML View -->
       <div v-else-if="currentView === 'html'" class="html-container">
         <div v-if="htmlContent" v-html="htmlContent"></div>
-        <div v-else class="no-content">No HTML content to display</div>
+        <div v-else class="no-content">There is no valid content currently</div>
       </div>
     </div>
 
@@ -81,6 +87,7 @@ const emit = defineEmits(['close', 'bring-to-front', 'update-position', 'update-
 
 const imgSrc = ref(null)
 const htmlContent = ref(null)
+const loading = ref(true)
 const currentView = ref('png') // 'png' or 'html'
 const imageAlt = computed(() => `${props.itemDetails.type} results`)
 
@@ -144,30 +151,40 @@ const windowStyle = computed(() => ({
 
 // Fetch results on mount
 async function fetchResults() {
+  loading.value = true
   console.log('fetchResults', props.itemDetails.type, props.itemDetails.item)
-  let response = null
-  if (props.itemDetails.type === 'protocol') {
-    response = await api.getProtocolResults(props.itemDetails.item)
-  } else if (props.itemDetails.type === 'slot') {
-    response = await api.getSlotResults(props.itemDetails.item)
-  }
   
-  // Set PNG content
-  imgSrc.value = response?.png_base64
-  
-  // Set HTML content if available
-  if (response?.html_base64) {
-    try {
-      // Decode base64 HTML content
-      const htmlString = atob(response.html_base64)
-      htmlContent.value = htmlString
-      console.log('HTML content loaded successfully')
-    } catch (error) {
-      console.error('Error decoding HTML content:', error)
+  try {
+    let response = null
+    if (props.itemDetails.type === 'protocol') {
+      response = await api.getProtocolResults(props.itemDetails.item)
+    } else if (props.itemDetails.type === 'slot') {
+      response = await api.getSlotResults(props.itemDetails.item)
+    }
+    
+    // Set PNG content
+    imgSrc.value = response?.png_base64
+    
+    // Set HTML content if available
+    if (response?.html_base64) {
+      try {
+        // Decode base64 HTML content
+        const htmlString = atob(response.html_base64)
+        htmlContent.value = htmlString
+        console.log('HTML content loaded successfully')
+      } catch (error) {
+        console.error('Error decoding HTML content:', error)
+        htmlContent.value = null
+      }
+    } else {
       htmlContent.value = null
     }
-  } else {
+  } catch (error) {
+    console.error('Error fetching results:', error)
+    imgSrc.value = null
     htmlContent.value = null
+  } finally {
+    loading.value = false
   }
 }
 
@@ -444,6 +461,36 @@ defineExpose({
   padding: 40px;
   color: #999;
   font-style: italic;
+  text-align: center;
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  min-height: 100%;
+}
+
+.spinner {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #007bff;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-message {
+  color: #666;
+  font-size: 0.9rem;
   text-align: center;
 }
 

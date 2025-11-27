@@ -412,6 +412,8 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         simulationStatus.value.status = 'stopped'
         simulationStatus.value.message = 'No simulation running'
         simulationStatus.value.state = null
+        // Reset slot states to false since simulation doesn't exist
+        resetSlotStates()
         if (addLogs && !updatePreviousLog) {
           addLog('info', 'No simulation currently running', 'Backend')
         }

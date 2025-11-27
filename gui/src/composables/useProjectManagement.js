@@ -47,6 +47,16 @@ export function useProjectManagement(
 
   async function openProject(name) {
     resetUiStateForProjectChange()
+    
+    // Destroy any existing simulation for this project to ensure clean state
+    try {
+      await api.destroySimulation(name)
+      addLog('info', `Cleaned up existing simulation for: ${name}`, 'System')
+    } catch (error) {
+      // Non-blocking: continue loading project even if destroy fails
+      console.warn('Failed to destroy simulation on project load:', error)
+    }
+    
     const platformInfo = await api.getPlatformInfo()
     
     const data = ProjectStore.loadProject(name)
@@ -93,8 +103,18 @@ export function useProjectManagement(
 
   async function loadDemoProject(demoData) {
     resetUiStateForProjectChange()
-    const platformInfo = await api.getPlatformInfo()
+    
+    // Destroy any existing simulation for this demo project to ensure clean state
     const data = JSON.parse(JSON.stringify(demoData))
+    try {
+      await api.destroySimulation(data.name)
+      addLog('info', `Cleaned up existing simulation for demo: ${data.name}`, 'System')
+    } catch (error) {
+      // Non-blocking: continue loading project even if destroy fails
+      console.warn('Failed to destroy simulation on demo project load:', error)
+    }
+    
+    const platformInfo = await api.getPlatformInfo()
     data.platformInfo = platformInfo
     
     clearLogs()
@@ -219,7 +239,18 @@ export function useProjectManagement(
       },
       platformInfo: platformInfo,
       net: {
-        nodes: projectData.value.net.nodes.map(n => n.toJSON ? n.toJSON() : n),
+        nodes: projectData.value.net.nodes.map(n => {
+          const nodeJson = n.toJSON ? n.toJSON() : n
+          // Ensure slots have isLocked and assignment set to false when saving
+          if (nodeJson.data && nodeJson.data.slots && Array.isArray(nodeJson.data.slots)) {
+            nodeJson.data.slots = nodeJson.data.slots.map(slot => ({
+              ...slot,
+              isLocked: false,
+              assignment: false
+            }))
+          }
+          return nodeJson
+        }),
         edges: projectData.value.net.edges.map(e => ({
           id: e.id,
           source: e.source.id || e.source,

@@ -24,6 +24,7 @@ import ImportConflictDialog from './components/ImportConflictDialog.vue'
 import OpenProjectDialog from './components/OpenProjectDialog.vue'
 import AboutModal from './components/AboutModal.vue'
 import UnsavedChangesDialog from './components/UnsavedChangesDialog.vue'
+import AlertModal from './components/AlertModal.vue'
 import packageJson from '../package.json'
 import VoidPanel from './components/panels/VoidPanel.vue'
 import ResultsView from './components/panels/ResultsView.vue'
@@ -298,13 +299,24 @@ const {
   processIntermediateResults: processIntermediateResultsSim
 } = useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPollingForSim, applicationLogs, refreshAllWindows, checkAndHideInvalidEntangledStates)
 
+// Alert modal function
+function showAlert(title, message) {
+  alertModalTitle.value = title
+  alertModalMessage.value = message
+  showAlertModal.value = true
+}
+
+function closeAlertModal() {
+  showAlertModal.value = false
+}
+
 // Initialize polling composable
 const {
   startPolling: startPollingComposable,
   stopPolling: stopPollingComposable, 
   startAlivePolling,
   stopAlivePolling,
-} = usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim, refreshAllWindows, checkAndHideInvalidEntangledStates)
+} = usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim, refreshAllWindows, checkAndHideInvalidEntangledStates, showAlert)
 
 // Create local wrappers to use composable functions
 function startPolling() {
@@ -453,6 +465,11 @@ markAsSavedRef.value = markAsSaved
 // Unsaved changes dialog state
 const showUnsavedChangesDialog = ref(false)
 const pendingAction = ref(null)
+
+// Alert modal state
+const showAlertModal = ref(false)
+const alertModalTitle = ref('Alert')
+const alertModalMessage = ref('')
 
 // Initialize import/export composable
 const {
@@ -1219,6 +1236,14 @@ onUnmounted(() => {
     <AboutModal
       :show="showAboutModal"
       @close="showAboutModal = false"
+    />
+
+    <!-- Alert Modal Component -->
+    <AlertModal
+      :show="showAlertModal"
+      :title="alertModalTitle"
+      :message="alertModalMessage"
+      @close="closeAlertModal"
     />
 
     <div v-if="showJsonViewer" class="json-viewer-box">
