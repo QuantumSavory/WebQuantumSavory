@@ -30,7 +30,7 @@ function extractErrorMessage(response, fallback = 'Unknown error') {
  * useSimulation - Composable for simulation state and operations
  * Extracted from App.vue to improve code organization
  */
-export function useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPolling, applicationLogs, refreshAllWindows, checkAndHideInvalidEntangledStates) {
+export function useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPolling, applicationLogs, refreshAllWindows, checkAndHideInvalidEntangledStates, clearAllPlots) {
   // Helper for updateLastLog
   const updateLastLogLocal = getUpdateLastLogFunc(applicationLogs)
   
@@ -422,6 +422,11 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
 
     await prepareNetworkGraph()
     resetSimulation()
+    
+    // Clear all plot windows after resetting slot states
+    if (clearAllPlots && typeof clearAllPlots === 'function') {
+      clearAllPlots()
+    }
   }
 
   // Get simulation status from backend

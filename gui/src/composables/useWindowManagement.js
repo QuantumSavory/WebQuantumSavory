@@ -100,6 +100,21 @@ export function useWindowManagement() {
     })
   }
 
+  /**
+   * Clear all plot content in open result windows
+   */
+  function clearAllPlots() {
+    windowRefs.forEach((ref, windowId) => {
+      if (ref && typeof ref.clearPlot === 'function') {
+        try {
+          ref.clearPlot()
+        } catch (error) {
+          console.error(`Error clearing plot for window ${windowId}:`, error)
+        }
+      }
+    })
+  }
+
   return {
     resultWindows,
     closeResultWindow,
@@ -109,6 +124,7 @@ export function useWindowManagement() {
     updateWindowSize,
     registerWindowRef,
     unregisterWindowRef,
-    refreshAllWindows
+    refreshAllWindows,
+    clearAllPlots
   }
 }

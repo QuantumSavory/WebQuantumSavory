@@ -80,6 +80,11 @@ const props = defineProps({
   zIndex: {
     type: Number,
     required: true
+  },
+  projectData: {
+    type: Object,
+    required: false,
+    default: null
   }
 })
 
@@ -149,8 +154,49 @@ const windowStyle = computed(() => ({
   zIndex: props.zIndex
 }))
 
+// Get the slot object for this window (if it's a slot type)
+function getSlot() {
+  if (props.itemDetails.type !== 'slot' || !props.projectData || !props.projectData.net) {
+    return null
+  }
+  const slotId = props.itemDetails.item?.id || props.itemDetails.item
+  if (!slotId) {
+    return null
+  }
+  // projectData is already the value, not a ref, so we access it directly
+  const node = props.projectData.net.nodes.find(node => 
+    node.data.slots.find(slot => slot.id === slotId)
+  )
+  if (!node) {
+    return null
+  }
+  return node.data.slots.find(slot => slot.id === slotId) || null
+}
+
+// Check if slot is assigned
+function isSlotAssigned() {
+  const slot = getSlot()
+  return slot ? slot.assignment === true : false
+}
+
+// Clear plot content
+function clearPlot() {
+  imgSrc.value = null
+  htmlContent.value = null
+  loading.value = false
+}
+
 // Fetch results on mount
 async function fetchResults() {
+  // For slot types, check if slot is assigned before fetching
+  if (props.itemDetails.type === 'slot') {
+    if (!isSlotAssigned()) {
+      console.log('Slot is not assigned, clearing plot')
+      clearPlot()
+      return
+    }
+  }
+  
   loading.value = true
   console.log('fetchResults', props.itemDetails.type, props.itemDetails.item)
   
@@ -160,6 +206,14 @@ async function fetchResults() {
       response = await api.getProtocolResults(props.itemDetails.item)
     } else if (props.itemDetails.type === 'slot') {
       response = await api.getSlotResults(props.itemDetails.item)
+      
+      // After fetching, check again if slot is still assigned
+      // If not, clear the plot
+      if (!isSlotAssigned()) {
+        console.log('Slot became unassigned during fetch, clearing plot')
+        clearPlot()
+        return
+      }
     }
     
     // Set PNG content
@@ -329,6 +383,33 @@ watch(() => props.size, (newSize) => {
   localSize.value = { ...newSize }
 }, { deep: true })
 
+// Watch for slot assignment changes (for slot type windows)
+watch(() => {
+  if (props.itemDetails.type === 'slot' && props.projectData && props.projectData.net) {
+    const slot = getSlot()
+    return slot ? slot.assignment : false
+  }
+  return null
+}, (isAssigned, wasAssigned) => {
+  // If slot becomes unassigned, clear the plot
+  if (props.itemDetails.type === 'slot' && wasAssigned === true && isAssigned === false) {
+    console.log('Slot assignment changed to false, clearing plot')
+    clearPlot()
+  }
+}, { immediate: false })
+
+// Watch projectData deeply to catch slot assignment changes
+// This ensures we detect changes even when the slot object reference doesn't change
+watch(() => props.projectData, () => {
+  if (props.itemDetails.type === 'slot' && props.projectData && props.projectData.net) {
+    const slot = getSlot()
+    if (slot && !slot.assignment && (imgSrc.value || htmlContent.value)) {
+      console.log('Detected slot is unassigned, clearing plot')
+      clearPlot()
+    }
+  }
+}, { deep: true })
+
 onMounted(() => {
   fetchResults()
   document.addEventListener('keydown', handleGlobalKeydown)
@@ -342,9 +423,10 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', stopResize)
 })
 
-// Expose fetchResults method so parent can call it to refresh content
+// Expose methods so parent can call them
 defineExpose({
-  fetchResults
+  fetchResults,
+  clearPlot
 })
 </script>
 

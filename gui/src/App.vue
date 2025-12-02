@@ -219,7 +219,8 @@ const {
   updateWindowSize,
   registerWindowRef,
   unregisterWindowRef,
-  refreshAllWindows
+  refreshAllWindows,
+  clearAllPlots
 } = useWindowManagement()
 
 /**
@@ -297,7 +298,7 @@ const {
   stopSimulation: stopSimulationSim,
   getSimulationStatus: getSimulationStatusSim,
   processIntermediateResults: processIntermediateResultsSim
-} = useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPollingForSim, applicationLogs, refreshAllWindows, checkAndHideInvalidEntangledStates)
+} = useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPollingForSim, applicationLogs, refreshAllWindows, checkAndHideInvalidEntangledStates, clearAllPlots)
 
 // Alert modal function
 function showAlert(title, message) {
@@ -1276,6 +1277,7 @@ onUnmounted(() => {
       :position="window.position"
       :size="window.size"
       :zIndex="window.zIndex"
+      :projectData="projectData"
       @close="closeResultWindow(window.id)"
       @bring-to-front="bringWindowToFront(window.id)"
       @update-position="updateWindowPosition(window.id, $event)"
