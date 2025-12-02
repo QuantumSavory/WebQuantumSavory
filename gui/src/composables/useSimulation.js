@@ -15,6 +15,17 @@ function getUpdateLastLogFunc(applicationLogs) {
   }
 }
 
+// Helper function to extract error message from API response
+// Handles different response formats: message, error, details.error, detail
+function extractErrorMessage(response, fallback = 'Unknown error') {
+  if (!response) return fallback
+  return response.message || 
+         response.error || 
+         response.details?.error || 
+         response.detail || 
+         fallback
+}
+
 /**
  * useSimulation - Composable for simulation state and operations
  * Extracted from App.vue to improve code organization
@@ -156,10 +167,11 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
     }
     const response = await api.parseNetworkGraph(minimizedProjectData.value)
     if (response.success === false) {
+      const errorMsg = extractErrorMessage(response, 'Failed to parse network graph')
       addLog('error', 'Failed to parse network graph', 'Backend', JSON.stringify(response, null, 2))
       simulationStatus.value = {
         status: 'error',
-        message: response.message
+        message: errorMsg
       }
     } else {
       simulationState.value.isParsed = true
@@ -185,10 +197,11 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
     }
     const response = await api.prepareSimulation(minimizedProjectData.value)
     if (response.success === false) {
+      const errorMsg = extractErrorMessage(response, 'Failed to prepare simulation')
       addLog('error', 'Failed to prepare simulation', 'Backend', JSON.stringify(response, null, 2))
       simulationStatus.value = {
         status: 'error',
-        message: response.message
+        message: errorMsg
       }
     } else {
       simulationState.value.isPrepared = true
@@ -232,7 +245,10 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         addLog('info', 'Parsing network graph...', 'Backend')
         const parseResponse = await api.parseNetworkGraph(minimizedProjectData.value)
         if (parseResponse.success === false) {
-          throw new Error(`Failed to parse network graph: ${parseResponse.message}`)
+          const errorMsg = extractErrorMessage(parseResponse, 'Failed to parse network graph')
+          const error = new Error(`Failed to parse network graph: ${errorMsg}`)
+          error.response = parseResponse
+          throw error
         }
         simulationState.value.isParsed = true
         console.log('✅ runSimulation: Network graph parsed')
@@ -243,7 +259,10 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         addLog('info', 'Preparing simulation...', 'Backend')
         const prepareResponse = await api.prepareSimulation(minimizedProjectData.value)
         if (prepareResponse.success === false) {
-          throw new Error(`Failed to prepare simulation: ${prepareResponse.message}`)
+          const errorMsg = extractErrorMessage(prepareResponse, 'Failed to prepare simulation')
+          const error = new Error(`Failed to prepare simulation: ${errorMsg}`)
+          error.response = prepareResponse
+          throw error
         }
         simulationState.value.isPrepared = true
         console.log('✅ runSimulation: Simulation prepared')
@@ -268,7 +287,9 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         status: 'error',
         message: error.message
       }
-      addLog('error', `Simulation failed: ${error.message}`, 'Backend')
+      // Include full response details in extendedInfo for expandable error logs
+      const extendedInfo = error.response ? JSON.stringify(error.response, null, 2) : null
+      addLog('error', `Simulation failed: ${error.message}`, 'Backend', extendedInfo)
     }
   }
 
@@ -280,7 +301,10 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
       console.log('📋 pauseSimulation: Response', response)
       
       if (response.success === false) {
-        throw new Error(`Failed to pause simulation: ${response.message}`)
+        const errorMsg = extractErrorMessage(response, 'Failed to pause simulation')
+        const error = new Error(`Failed to pause simulation: ${errorMsg}`)
+        error.response = response
+        throw error
       }
       
       stopPolling()
@@ -298,7 +322,8 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
       addLog('info', 'Simulation paused', 'Backend')
     } catch (error) {
       console.error('❌ pauseSimulation: Failed to pause', error)
-      addLog('error', `Failed to pause: ${error.message}`, 'Backend')
+      const extendedInfo = error.response ? JSON.stringify(error.response, null, 2) : null
+      addLog('error', `Failed to pause: ${error.message}`, 'Backend', extendedInfo)
     }
   }
 
@@ -347,7 +372,8 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         status: 'error',
         message: error.message
       }
-      addLog('error', `Failed to resume: ${error.message}`, 'Backend')
+      const extendedInfo = error.response ? JSON.stringify(error.response, null, 2) : null
+      addLog('error', `Failed to resume: ${error.message}`, 'Backend', extendedInfo)
     }
   }
 
@@ -359,7 +385,10 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         console.log('📋 pauseSimulation: Response', response)
         
         if (response.success === false) {
-          throw new Error(`Failed to pause simulation: ${response.message}`)
+          const errorMsg = extractErrorMessage(response, 'Failed to pause simulation')
+          const error = new Error(`Failed to pause simulation: ${errorMsg}`)
+          error.response = response
+          throw error
         }
         
         stopPolling()
@@ -367,7 +396,8 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         const currentStatus = await api.getSimulationStatus(minimizedProjectData.value)
       } catch (error) {
         console.error('❌ stopSimulation: Failed to pause', error)
-        addLog('error', `Failed to pause: ${error.message}`, 'Backend')
+        const extendedInfo = error.response ? JSON.stringify(error.response, null, 2) : null
+        addLog('error', `Failed to pause: ${error.message}`, 'Backend', extendedInfo)
       }
     }
 
@@ -376,14 +406,18 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
       console.log('📋 destroySimulation: Response', response)
       
       if (response.success === false) {
-        throw new Error(`Failed to destroy simulation: ${response.message}`)
+        const errorMsg = extractErrorMessage(response, 'Failed to destroy simulation')
+        const error = new Error(`Failed to destroy simulation: ${errorMsg}`)
+        error.response = response
+        throw error
       } else {
         console.log('✅ stopSimulation: Simulation destroyed')
         addLog('info', 'Simulation destroyed', 'Backend')
       }
     } catch (error) {
       console.error('❌ stopSimulation: Failed to destroy', error)
-      addLog('error', `Failed to destroy: ${error.message}`, 'Backend')
+      const extendedInfo = error.response ? JSON.stringify(error.response, null, 2) : null
+      addLog('error', `Failed to destroy: ${error.message}`, 'Backend', extendedInfo)
     }
 
     await prepareNetworkGraph()
