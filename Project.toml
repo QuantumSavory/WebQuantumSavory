@@ -31,7 +31,7 @@ QuantumSavory = {rev = "master", url = "https://github.com/QuantumSavory/Quantum
 
 [compat]
 Base64 = "1.11.0"
-CairoMakie = "0.14.0"
+CairoMakie = "0.15.0"
 ConcurrentSim = "1.5.0"
 Dates = "1.11.0"
 Genie = "5.33.8"
