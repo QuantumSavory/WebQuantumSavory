@@ -2,10 +2,27 @@
 import { ref, readonly } from 'vue'
 import { generateUUid } from './Utils.js'
 
+function normalizeBaseUrl(baseUrl) {
+  return baseUrl.replace(/\/$/, '')
+}
+
+function getDefaultBaseUrl() {
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
+  if (configuredBaseUrl) {
+    return normalizeBaseUrl(configuredBaseUrl)
+  }
+
+  if (import.meta.env.PROD && typeof window !== 'undefined') {
+    return window.location.origin
+  }
+
+  return 'http://localhost:8000'
+}
+
 export class ApiConnector {
   
-  constructor(baseUrl='http://localhost:8000') {
-    this.baseUrl = baseUrl
+  constructor(baseUrl = getDefaultBaseUrl()) {
+    this.baseUrl = normalizeBaseUrl(baseUrl)
     this._config  = ref({})
     this._platformInfo = ref(null)
     this._loading = ref(false)

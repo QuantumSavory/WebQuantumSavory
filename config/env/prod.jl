@@ -1,7 +1,7 @@
 using Genie, Logging
 
 Genie.Configuration.config!(
-  server_port                     = 8000,
+  server_port                     = parse(Int, get(ENV, "PORT", "8000")),
   server_host                     = get(ENV, "HOST", (Sys.iswindows() ? "127.0.0.1" : "0.0.0.0")),
   log_level                       = Logging.Error,
   log_to_file                     = false,
