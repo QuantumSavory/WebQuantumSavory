@@ -24,9 +24,15 @@ A Julia-based web API for quantum network operations, built with the Genie web f
 
 The server will start on `http://localhost:8000` by default.
 
+In production, the Genie server port can be set with `PORT` and the host with `HOST`.
+
 ## UI Access
 
 The user interface is available at `http://localhost:8000`.
+
+For the bundled UI, API requests default to the current browser origin in production, which keeps the
+frontend aligned with the Genie server automatically. If you need to point the built UI at a different
+API host, set `VITE_API_BASE_URL` when running `npm run build`.
 
 ## API Overview
 
