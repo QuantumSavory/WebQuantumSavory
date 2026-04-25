@@ -25,7 +25,7 @@
 
 <script setup>
 
-import { defineProps, defineEmits, onMounted, computed, ref } from 'vue'
+import { defineProps, defineEmits, computed, ref } from 'vue'
 import ProtocolEditor from './ProtocolEditor.vue'
 import Menu from 'primevue/menu';
 import { api } from '../../utils/ApiConnector'
@@ -63,7 +63,7 @@ const props = defineProps({
   }
 })
 
-const protocolTypes = ref( [] )
+const protocolTypes = computed(() => api.config.value.protocolTypes?.[props.protocolGroupName] || [])
 const addProtocolMenu = ref(null)
 const selectedProtocol = ref(null)
 
@@ -168,10 +168,6 @@ function handleAddProtocol( protocolTypeId) {
    handleSelect(newProtocol);
 }
 
-
-onMounted(() => {
-  protocolTypes.value = api.config.value.protocolTypes?.[props.protocolGroupName];
-})
 
 const emit = defineEmits(['select'])
 

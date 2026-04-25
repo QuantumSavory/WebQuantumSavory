@@ -503,7 +503,7 @@ function _instantiate_noise(noise_def)
   end
 
   # Object form: { type: String, parameters: [ { name, value } ] }
-  if isa(noise_def, Dict) || startswith(string(typeof(noise_def)), "JSON3.Object")
+  if isa(noise_def, AbstractDict) || startswith(string(typeof(noise_def)), "JSON3.Object")
     tstr = get(noise_def, "type", nothing)
     tstr === nothing && error("Noise object missing 'type'")
     
