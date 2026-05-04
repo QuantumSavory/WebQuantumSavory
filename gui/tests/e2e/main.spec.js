@@ -56,8 +56,11 @@ test.describe.serial('Main Workflow', () => {
     await page.waitForTimeout(1000);
     await expect(page.locator('.project-name-label')).toContainText('Edge Test Project');
 
-    // Wait for floatingProtocols panel to be visible
-    await expect(page.locator('#floatingProtocolsPanel')).toBeVisible();
+    // Current QuantumSavory may expose no floating protocol types.
+    const floatingProtocolsPanel = page.locator('#floatingProtocolsPanel');
+    if (await floatingProtocolsPanel.count()) {
+      await expect(floatingProtocolsPanel).toBeVisible();
+    }
   });
 
   // Test 2: Create Nodes
@@ -123,9 +126,12 @@ test.describe.serial('Main Workflow', () => {
     await page.click('#edgeListPanel .panel-title-text');
     await expect(page.locator('#edgeListPanel .panel-content')).not.toBeVisible();
     
-    // Click the "Floating Protocols" panel title to collapse, confirm it collapses
-    await page.click('#floatingProtocolsPanel .panel-title-text');
-    await expect(page.locator('#floatingProtocolsPanel .panel-content')).not.toBeVisible();
+    const floatingProtocolsPanel = page.locator('#floatingProtocolsPanel');
+    if (await floatingProtocolsPanel.count()) {
+      // Click the "Floating Protocols" panel title to collapse, confirm it collapses
+      await floatingProtocolsPanel.locator('.panel-title-text').click();
+      await expect(floatingProtocolsPanel.locator('.panel-content')).not.toBeVisible();
+    }
   });
 
   // Test 5: Create Slots in Nodes

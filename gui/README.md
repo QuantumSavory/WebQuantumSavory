@@ -7,11 +7,19 @@ A Vue 3 + Vite application for interactive quantum network visualization and sim
 ### Prerequisites
 - Node.js (v16 or higher)
 - npm
+- Playwright browser dependencies:
+  ```bash
+  sudo apt-get update
+  sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libxdamage1 libxkbcommon0 libasound2 libcups2 libcairo2 libpango-1.0-0 xvfb
+  ```
 
 ### Getting Started
 ```bash
 # Install dependencies
 npm install
+
+# Install the Chromium browser used by Playwright
+npx playwright install chromium
 
 # Start development server
 npm run dev
@@ -31,9 +39,12 @@ This project uses Playwright for automated end-to-end testing.
 ```bash
 # Run all e2e tests
 npm run test
+
+# On a host without an attached display
+xvfb-run -a npm run test
 ```
 
-The e2e tests automatically start the Vite dev server and run tests in the browser.
+The e2e tests automatically start the Vite dev server and run tests in Chromium. They also expect the backend API to be running at `http://localhost:8000`.
 
 ### Test Structure
 - Tests are located in `tests/e2e/`

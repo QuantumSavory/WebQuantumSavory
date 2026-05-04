@@ -528,16 +528,16 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
 end
 
 function pause_simulation(state::State)
+  if !state.is_running
+    throw(validation_error("Simulation is not running"))
+  end
+
   if state.simulation === nothing
     throw(validation_error("Simulation not prepared"))
   end
 
   if state.simulation_paused
     throw(validation_error("Simulation already paused"))
-  end
-  
-  if !state.is_running
-    throw(validation_error("Simulation is not running"))
   end
   
   state.simulation_paused = true

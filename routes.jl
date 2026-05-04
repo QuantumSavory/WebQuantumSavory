@@ -1656,11 +1656,10 @@ end
       '500':
         description: Internal server error or not in dev mode
 """
-# Dev-only endpoint for test support
+# Dev/test-only endpoint for test support
 route("/dev/manipulate_state", method="POST") do
-  # Only allow in dev environment
-  if ! Genie.Configuration.isdev()
-    throw(server_error("This endpoint is only available in dev environment"))
+  if !(Genie.Configuration.isdev() || Genie.Configuration.istest())
+    throw(server_error("This endpoint is only available in dev or test environment"))
   end
 
   payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
