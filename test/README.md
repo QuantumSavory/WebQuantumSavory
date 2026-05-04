@@ -21,11 +21,11 @@ The tests use the sample payload from `mock/payload2.json` which contains a samp
 
 1. Make sure the main project dependencies are installed:
    ```bash
-   julia --project=.. -e 'using Pkg; Pkg.instantiate()'
+   julia --project=. -e 'using Pkg; Pkg.instantiate()'
    ```
 2. Install test dependencies:
    ```bash
-   julia --project=. -e 'using Pkg; Pkg.instantiate()'
+   julia --project=test -e 'using Pkg; Pkg.instantiate()'
    ```
 
 ### Run All Tests
@@ -46,11 +46,9 @@ julia --project runtests.jl test_unit
 
 ```bash
 # First start the server in another terminal
-cd ..
 GENIE_ENV=test julia --project=. -e 'using Cqn; Cqn.main(); Cqn.up(async=false)'
 
 # Then run integration tests
-cd test
 julia --project runtests.jl test_integration
 ```
 
