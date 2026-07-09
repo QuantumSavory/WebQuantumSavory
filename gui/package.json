@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/sync-version.js && rm -rf ../public/assets && vite build",
+    "build": "node scripts/sync-version.js && node scripts/clean-output.js && vite build",
     "preview": "vite preview",
     "test": "playwright test --project=chromium",
     "test:headed": "playwright test --headed",
