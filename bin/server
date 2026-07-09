@@ -1,2 +1,10 @@
 #!/bin/sh
-julia --color=yes --depwarn=no --project=@. -q -i -- $(dirname $0)/../bootstrap.jl -s=true "$@"
+set -eu
+
+app_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+npm --prefix "$app_root/gui" ci --include=dev
+npm --prefix "$app_root/gui" run build
+
+exec julia --color=yes --depwarn=no --project="$app_root" -q -i -- \
+  "$app_root/bootstrap.jl" -s=true "$@"
