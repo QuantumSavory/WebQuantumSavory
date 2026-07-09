@@ -174,7 +174,7 @@ The system includes a background task that releases resources held by inactive s
 - Service function: `Cqn.cleanup_stale_simulations()` (in `src/services.jl`)
 - Frequency: every 60 seconds
 - After 30 minutes: block the simulation and release heavy resources while retaining status for the UI
-- After 300 minutes: destroy the retained simulation record
+- After another 300 minutes without activity: destroy the retained simulation record
 - Skips cleanup when `state.is_running == true`
 - Startup: launched from `routes.jl` inside `bootstrap()` via
 
