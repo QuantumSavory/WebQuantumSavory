@@ -50,6 +50,7 @@ node_modules/
 /public/vite.svg
 /gui/test-results/
 /gui/playwright-report/
+/gui/cloc_report.txt
 
 # Database
 db/*.sqlite
