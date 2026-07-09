@@ -5,7 +5,7 @@ A Vue 3 + Vite application for interactive quantum network visualization and sim
 ## Development
 
 ### Prerequisites
-- Node.js (v16 or higher)
+- Node.js (v18 or higher)
 - npm
 - Playwright browser dependencies:
   ```bash
@@ -15,8 +15,8 @@ A Vue 3 + Vite application for interactive quantum network visualization and sim
 
 ### Getting Started
 ```bash
-# Install dependencies
-npm install
+# Install locked dependencies
+npm ci
 
 # Install the Chromium browser used by Playwright
 npx playwright install chromium
@@ -30,6 +30,10 @@ npm run build
 # Preview production build
 npm run preview
 ```
+
+The production build is emitted into the backend's `../public/` directory. Those generated
+files are ignored by Git; the root `./bin/server` launcher installs dependencies and rebuilds
+the GUI automatically before starting the API server.
 
 ## Testing
 

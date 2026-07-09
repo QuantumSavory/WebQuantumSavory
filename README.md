@@ -4,10 +4,12 @@ A Julia-based web API for quantum network operations, built with the Genie web f
 
 ## Installation
 
+Prerequisites are Julia, Node.js 18 or newer, and npm.
+
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd cqn
+   cd WebQuantumSavory
    ```
 
 2. **Install Julia dependencies**:
@@ -23,8 +25,8 @@ A Julia-based web API for quantum network operations, built with the Genie web f
 ```
 
 The server will start on `http://localhost:8000` by default.
-
-In production, the Genie server port can be set with `PORT` and the host with `HOST`.
+The launcher runs `npm ci` and rebuilds the GUI before starting Genie, so the generated
+files under `public/` do not need to be checked into Git.
 
 ## UI Access
 
@@ -167,11 +169,12 @@ Notes:
 
 ## Automatic Cleanup of Inactive Simulations
 
-The system includes a background task that periodically cleans up simulations that have been inactive for more than 30 minutes.
+The system includes a background task that releases resources held by inactive simulations and eventually removes their retained status records.
 
 - Service function: `Cqn.cleanup_stale_simulations()` (in `src/services.jl`)
 - Frequency: every 60 seconds
-- Threshold: 30 minutes of inactivity
+- After 30 minutes: block the simulation and release heavy resources while retaining status for the UI
+- After 300 minutes: destroy the retained simulation record
 - Skips cleanup when `state.is_running == true`
 - Startup: launched from `routes.jl` inside `bootstrap()` via
 
@@ -179,10 +182,7 @@ The system includes a background task that periodically cleans up simulations th
   @async Cqn.cleanup_stale_simulations() |> errormonitor
   ```
 
-- Logging: before destroying a stale simulation, an event is logged with the simulation's state using the Logger module macro:
-
-  ```julia
-  @log_event state Logging.Info "Stopping simulation $simulation_name after $CLEANUP_THRESHOLD minutes of inactivity"
-  ```
+- Logging: both automatic blocking and destruction add an event to the simulation's captured log before releasing its state.
 
 You can trigger a single cleanup pass manually (useful in tests) via `Cqn.cleanup_stale_simulations_once()`.
+Running simulations also have a separate 10-minute wall-clock execution limit.
