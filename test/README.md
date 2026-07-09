@@ -10,7 +10,8 @@ This directory contains comprehensive tests for the CQN codebase.
 
 ## Test Data
 
-The tests use the sample payload from `mock/payload2.json` which contains a sample quantum network configuration with:
+The unit suite primarily uses `mock/payload.json`, while the integration suite uses
+`mock/payload3.json`. Additional payloads cover more complex protocol configurations. The fixtures contain:
 - 2 nodes (cities) with different slot configurations
 - 1 edge connecting the nodes
 - Various protocol definitions
