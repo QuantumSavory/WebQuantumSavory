@@ -42,7 +42,7 @@ API host, set `VITE_API_BASE_URL` when running `npm run build`.
 
 1. **Create Network** (`POST /parse_network_graph`) - Upload network graph definition
 2. **Prepare Simulation** (`POST /prepare_simulation`) - Launch protocols and setup network
-3. **Run Simulation** (`POST /run_simulation`) - Execute simulation for specified time units
+3. **Run Simulation** (`POST /run_simulation`) - Start a cooperative run to an absolute simulation-time target
 4. **Monitor State** (`GET /get_state`) - Check simulation status and progress
 5. **Cleanup** (`POST /destroy_simulation`) - Remove simulation and free resources
 
@@ -50,11 +50,17 @@ API host, set `VITE_API_BASE_URL` when running `npm run build`.
 
 - **Pause Simulation** (`POST /pause_simulation`) - Pause a running simulation
   - Requires simulation to be currently running
-  - Sets `simulation_paused` flag to `true`
-  - Simulation will stop at the next loop iteration
+  - Returns only after the run task stops at a simulation-step boundary
   - Returns error if simulation is not running
 
-The simulation state includes a `simulation_paused` boolean field that indicates whether the simulation has been paused by user request. When paused, the simulation stops gracefully and can be monitored through the state endpoint.
+`POST /run_simulation` returns HTTP 202 after marking the simulation as running; use
+`GET /get_state` to monitor completion or errors. `time_units` is the absolute cumulative target,
+not a duration added by the API. To resume a paused simulation, call `/run_simulation` again with
+the target already reported in `simulation_time`.
+
+The simulation state includes a `simulation_paused` boolean field that indicates an acknowledged
+pause. When it is `true`, `simulation_running` is `false` and the execution task has stopped, so the
+simulation can be resumed or safely destroyed.
 
 #### Example: Pausing a Simulation
 

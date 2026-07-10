@@ -4,6 +4,7 @@
   using .Cqn
   using Graphs
   using QuantumSavory
+  using ConcurrentSim
   using Dates
 
   # Load test data
@@ -676,31 +677,6 @@
     end
   end
 
-  @testset "Simulation Pause Functionality" begin
-    # Test pause_simulation function with mock simulation (since RegisterNet creation fails)
-    mock_sim = nothing  # Mock simulation object
-    
-    state = Cqn.State(
-      name="pause_test",
-      simulation=mock_sim,
-      is_running=true,
-      simulation_paused=false
-    )
-    
-    # Test pause when simulation not prepared (expected behavior)
-    @test_throws Cqn.APIError Cqn.pause_simulation(state)
-    
-    # Test pause when not running
-    state.is_running = false
-    state.simulation_paused = false
-    @test_throws Cqn.APIError Cqn.pause_simulation(state)
-    
-    # Test pause when simulation not prepared
-    state.simulation = nothing
-    state.is_running = true
-    @test_throws Cqn.APIError Cqn.pause_simulation(state)
-  end
-
   @testset "State Serialization with Pause Field" begin
     # Test that simulation_paused field is included in serialization
     state = Cqn.State(
@@ -723,33 +699,73 @@
     @test serialized2["simulation"]["simulation_running"] == true
   end
 
-  @testset "Run Simulation with Pause Check" begin
-    # Test that run_simulation fails when RegisterNet creation fails (current behavior)
-    validation_result = Cqn.validate_payload(test_payload)
-    g = Cqn.build_graph(validation_result)
-    registers, slot_mapping = Cqn.create_registers_from_nodes(validation_result)
-    
-    # Test that RegisterNet creation fails due to empty slots (expected behavior)
-    @test_throws BoundsError Cqn.create_register_net(g, registers)
-    
-    # Test pause functionality with mock state
-    mock_sim = nothing
-    state = Cqn.State(
-      name="pause_run_test",
-      simulation=mock_sim,
-      simulation_time=10.0,
-      simulation_progress=0.0,
-      simulation_paused=false,
-      is_running=false
-    )
-    
-    # Test that pause_simulation fails when simulation not prepared
+  @testset "Cooperative Simulation Lifecycle" begin
+    payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    simulation_name = "cooperative_lifecycle"
+    payload["name"] = simulation_name
+
+    state = Cqn.parse_network_graph(Cqn.validate_payload(payload))
+    state = Cqn.prepare_simulation(state, simulation_name)
+
+    # A prepared-but-not-started simulation cannot be paused.
     @test_throws Cqn.APIError Cqn.pause_simulation(state)
-    
-    # Test that simulation_paused field works correctly
-    @test state.simulation_paused == false
-    state.simulation_paused = true
-    @test state.simulation_paused == true
+
+    # Starting is immediate and creates exactly one same-thread task.
+    Cqn.run_simulation(state, 2.0, simulation_name)
+    first_task = state.run_task
+    @test state.is_running
+    @test first_task !== nothing
+    @test first_task.sticky
+    @test_throws Cqn.APIError Cqn.run_simulation(state, 2.0, simulation_name)
+    @test_throws Cqn.APIError Cqn.destroy_simulation(simulation_name)
+
+    # Pause waits for acknowledgement and task cleanup.
+    @test Cqn.pause_simulation(state)
+    @test !state.is_running
+    @test state.simulation_paused
+    @test !state.pause_requested
+    @test state.run_task === nothing
+    paused_progress = state.simulation_progress
+    paused_logs = state.log_events
+
+    # Resume retains the cumulative target, progress, and captured logs.
+    @test_throws Cqn.APIError Cqn.run_simulation(state, 3.0, simulation_name)
+    Cqn.run_simulation(state, 2.0, simulation_name)
+    @test state.simulation_time == 2.0
+    @test state.simulation_progress == paused_progress
+    @test state.log_events === paused_logs
+    @test timedwait(() -> state.run_task === nothing, 10.0) == :ok
+    @test state.has_run
+    @test !state.is_running
+    @test !state.simulation_paused
+    @test state.error === nothing
+    @test state.simulation_progress >= 2.0
+
+    # A later run extends the absolute target and starts a fresh log stream.
+    completed_logs = state.log_events
+    Cqn.run_simulation(state, 3.0, simulation_name)
+    @test state.log_events !== completed_logs
+    @test timedwait(() -> state.run_task === nothing, 10.0) == :ok
+    @test state.has_run
+    @test state.simulation_progress >= 3.0
+
+    @test Cqn.destroy_simulation(simulation_name)
+    @test !haskey(Cqn.STATE, simulation_name)
+  end
+
+  @testset "Simulation Task Error" begin
+    simulation_name = "simulation_task_error"
+    state = Cqn.State(name=simulation_name, simulation=ConcurrentSim.Simulation())
+    Cqn.STATE[simulation_name] = state
+
+    Cqn.run_simulation(state, 1.0, simulation_name)
+    @test timedwait(() -> state.run_task === nothing, 10.0) == :ok
+    @test !state.is_running
+    @test !state.simulation_paused
+    @test state.error isa ConcurrentSim.EmptySchedule
+    @test !state.has_run
+
+    @test Cqn.destroy_simulation(simulation_name)
   end
 
   @testset "Cleanup Stale Simulations - Basic Test" begin

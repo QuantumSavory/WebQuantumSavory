@@ -63,6 +63,23 @@
     end
   end
 
+  function wait_for_state(predicate, simulation_name; timeout=15.0, poll_interval=0.05)
+    deadline = time() + timeout
+    last_state = nothing
+
+    while time() < deadline
+      response = make_request("GET", "/get_state", query=Dict("name" => simulation_name))
+      if response.status == 200
+        data = parse_response(response)
+        last_state = data["state"]
+        predicate(last_state) && return last_state
+      end
+      sleep(poll_interval)
+    end
+
+    error("Timed out waiting for simulation $simulation_name; last state: $last_state")
+  end
+
   @testset "Server Status" begin
       response = make_request("GET", "/status")
       @test response.status == 200
@@ -247,10 +264,18 @@
 
       # Then run the simulation
       run_response = make_request("POST", "/run_simulation", body=Dict("name" => TEST_SIMULATION_NAME, "time_units" => 5))
-      @test run_response.status == 200
+      @test run_response.status == 202
 
       data = parse_response(run_response)
       @test data["success"] == true
+      @test data["status"] == "started"
+      @test data["state"]["simulation"]["simulation_running"] == true
+
+      final_state = wait_for_state(TEST_SIMULATION_NAME, timeout=10.0) do state
+        state["simulation"]["simulation_running"] == false
+      end
+      @test final_state["simulation"]["simulation_error"] === nothing
+      @test final_state["simulation"]["simulation_progress"] >= 5
   end
 
   @testset "Run Simulation - Error Cases" begin
@@ -371,15 +396,16 @@
 
       # 3. Run simulation
       run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_name, "time_units" => 10))
-      @test run_response.status == 200
+      @test run_response.status == 202
       run_data = parse_response(run_response)
       @test run_data["success"] == true
 
-      # 4. Get final state
-      state_response = make_request("GET", "/get_state", query=Dict("name" => workflow_name))
-      @test state_response.status == 200
-      state_data = parse_response(state_response)
-      @test state_data["success"] == true
+      # 4. Wait for the real run transition and get final state
+      final_state = wait_for_state(workflow_name, timeout=10.0) do state
+        state["simulation"]["simulation_running"] == false
+      end
+      @test final_state["simulation"]["simulation_error"] === nothing
+      @test final_state["simulation"]["simulation_progress"] >= 10
 
       # 5. Clean up
       destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => workflow_name))
@@ -519,25 +545,21 @@
       prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => pause_test_name))
       @test prepare_response.status == 200
 
-      # Start the simulation (short time)
-      run_response = make_request("POST", "/run_simulation", body=Dict("name" => pause_test_name, "time_units" => 5))
-      @test run_response.status == 200
+      # Start a long run and observe actual progress before pausing it.
+      target_time = 1000
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => pause_test_name, "time_units" => target_time))
+      @test run_response.status == 202
 
-      # Then manipulate state to set it as running for testing pause functionality
-      manipulate_response = make_request("POST", "/dev/manipulate_state", body=Dict(
-        "name" => pause_test_name,
-        "is_running" => true,
-        "simulation_paused" => false
-      ))
-      @test manipulate_response.status == 200
+      running_state = wait_for_state(pause_test_name, timeout=10.0) do state
+        state["simulation"]["simulation_running"] == true &&
+          state["simulation"]["simulation_progress"] > 0
+      end
+      @test running_state["simulation"]["simulation_paused"] == false
 
-      # Check that simulation is running
-      state_response = make_request("GET", "/get_state", query=Dict("name" => pause_test_name))
-      @test state_response.status == 200
-      state_data = parse_response(state_response)
-      @test state_data["success"] == true
-      @test state_data["state"]["simulation"]["simulation_running"] == true
-      @test state_data["state"]["simulation"]["simulation_paused"] == false
+      # A second run cannot overlap the active task.
+      duplicate_response = make_request("POST", "/run_simulation", body=Dict("name" => pause_test_name, "time_units" => target_time))
+      @test duplicate_response.status == 400
+      @test occursin("running", parse_response(duplicate_response)["error"])
 
       # Pause the simulation
       pause_response = make_request("POST", "/pause_simulation", body=Dict("name" => pause_test_name))
@@ -545,23 +567,21 @@
       pause_data = parse_response(pause_response)
       @test pause_data["success"] == true
       @test pause_data["message"] == "Simulation paused"
+      @test pause_data["state"]["simulation"]["simulation_running"] == false
+      @test pause_data["state"]["simulation"]["simulation_paused"] == true
 
-      # Check that simulation is paused
+      # The serialized state remains paused after acknowledgement.
       state_response2 = make_request("GET", "/get_state", query=Dict("name" => pause_test_name))
       @test state_response2.status == 200
       state_data2 = parse_response(state_response2)
       @test state_data2["success"] == true
       @test state_data2["state"]["simulation"]["simulation_paused"] == true
-      # Note: pause_simulation doesn't set is_running to false immediately
+      @test state_data2["state"]["simulation"]["simulation_running"] == false
 
-      # Now set is_running to false to allow cleanup
-      manipulate_response2 = make_request("POST", "/dev/manipulate_state", body=Dict(
-        "name" => pause_test_name,
-        "is_running" => false
-      ))
-      @test manipulate_response2.status == 200
+      duplicate_pause = make_request("POST", "/pause_simulation", body=Dict("name" => pause_test_name))
+      @test duplicate_pause.status == 400
 
-      # Clean up
+      # An acknowledged pause has no active task, so stop/destroy is race-free.
       destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => pause_test_name))
       @test destroy_response.status == 200
   end
@@ -588,10 +608,9 @@
       @test pause_data["success"] == false
       @test occursin("not running", pause_data["error"])
 
-      # Clean up - may fail if stuck in running state
+      # Clean up the unprepared state.
       destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => unprepared_name))
-      # Accept both 200 and 400 (if simulation is running)
-      @test destroy_response.status in [200, 400]
+      @test destroy_response.status == 200
   end
 
   @testset "Complete Workflow with Pause" begin
@@ -613,26 +632,18 @@
       @test prepare_data["status"] == Cqn.STATUS_PREPARED
 
       # 3. Start simulation
-      run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_pause_name, "time_units" => 5))
-      @test run_response.status == 200
+      target_time = 100
+      run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_pause_name, "time_units" => target_time))
+      @test run_response.status == 202
       run_data = parse_response(run_response)
       @test run_data["success"] == true
 
-      # Then manipulate state to set it as running for testing pause functionality
-      manipulate_response = make_request("POST", "/dev/manipulate_state", body=Dict(
-        "name" => workflow_pause_name,
-        "is_running" => true,
-        "simulation_paused" => false
-      ))
-      @test manipulate_response.status == 200
-
-      # 4. Check initial state
-      state_response = make_request("GET", "/get_state", query=Dict("name" => workflow_pause_name))
-      @test state_response.status == 200
-      state_data = parse_response(state_response)
-      @test state_data["success"] == true
-      @test state_data["state"]["simulation"]["simulation_running"] == true
-      @test state_data["state"]["simulation"]["simulation_paused"] == false
+      # 4. Observe real execution before requesting a pause.
+      running_state = wait_for_state(workflow_pause_name, timeout=10.0) do state
+        state["simulation"]["simulation_running"] == true &&
+          state["simulation"]["simulation_progress"] > 0
+      end
+      @test running_state["simulation"]["simulation_paused"] == false
 
       # 5. Pause simulation
       pause_response = make_request("POST", "/pause_simulation", body=Dict("name" => workflow_pause_name))
@@ -646,16 +657,24 @@
       state_data2 = parse_response(state_response2)
       @test state_data2["success"] == true
       @test state_data2["state"]["simulation"]["simulation_paused"] == true
-      # Note: pause_simulation doesn't set is_running to false immediately
+      @test state_data2["state"]["simulation"]["simulation_running"] == false
+      paused_progress = state_data2["state"]["simulation"]["simulation_progress"]
+      @test state_data2["state"]["simulation"]["simulation_time"] == target_time
 
-      # Set is_running to false to allow cleanup
-      manipulate_cleanup = make_request("POST", "/dev/manipulate_state", body=Dict(
-        "name" => workflow_pause_name,
-        "is_running" => false
-      ))
-      @test manipulate_cleanup.status == 200
+      # 7. Resume to the same cumulative target and wait for completion.
+      resume_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_pause_name, "time_units" => target_time))
+      @test resume_response.status == 202
 
-      # 7. Clean up
+      final_state = wait_for_state(workflow_pause_name, timeout=15.0) do state
+        state["simulation"]["simulation_running"] == false &&
+          state["simulation"]["simulation_paused"] == false
+      end
+      @test final_state["simulation"]["simulation_error"] === nothing
+      @test final_state["simulation"]["simulation_time"] == target_time
+      @test final_state["simulation"]["simulation_progress"] >= target_time
+      @test final_state["simulation"]["simulation_progress"] >= paused_progress
+
+      # 8. Clean up
       destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => workflow_pause_name))
       @test destroy_response.status == 200
       destroy_data = parse_response(destroy_response)
@@ -673,10 +692,15 @@
 
       for name in test_names
         try
-          # First try to set is_running to false if it's stuck running
-          make_request("POST", "/dev/manipulate_state", body=Dict("name" => name, "is_running" => false))
+          state_response = make_request("GET", "/get_state", query=Dict("name" => name))
+          if state_response.status == 200
+            state = parse_response(state_response)["state"]["simulation"]
+            if state["simulation_running"]
+              make_request("POST", "/pause_simulation", body=Dict("name" => name))
+            end
+          end
         catch
-          # Ignore errors
+          # Best-effort cleanup after a failed test.
         end
         
         try

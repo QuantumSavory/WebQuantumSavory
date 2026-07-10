@@ -689,7 +689,7 @@ end
 @swagger """
 /run_simulation:
   post:
-    description: Run the simulation
+    description: Start or resume a simulation in a cooperative background task
     requestBody:
       content:
         application/json:
@@ -701,10 +701,10 @@ end
                 description: Name of the simulation
               time_units:
                 type: number
-                description: Number of time units to run the simulation for
+                description: Absolute cumulative simulation-time target
     responses:
-      '200':
-        description: Simulation run successfully
+      '202':
+        description: Simulation run accepted
         content:
           application/json:
             schema:
@@ -713,6 +713,14 @@ end
                 success:
                   type: boolean
                   example: true
+                status:
+                  type: string
+                  example: started
+                state:
+                  type: object
+                  description: State immediately after accepting the run
+      '400':
+        description: Simulation is unprepared, already running, or has an invalid target
       '404':
         description: Simulation not found
         content:
@@ -743,7 +751,7 @@ route("/run_simulation", method="POST") do
   end
 
   try
-    state = Cqn.run_simulation(state, time_units, simulation_name)
+    Cqn.run_simulation(state, time_units, simulation_name)
   catch e
     if isa(e, APIError)
       rethrow(e)
@@ -754,9 +762,10 @@ route("/run_simulation", method="POST") do
     end
   end
 
-  Cqn.STATE[simulation_name] = state
-
-  json(Dict(:success => true))
+  json(
+    Dict(:success => true, :status => "started", :state => Cqn.serialize_state(state));
+    status=202,
+  )
 end
 
 ########################################################
@@ -1033,6 +1042,9 @@ end
                 message:
                   type: string
                   example: Simulation paused
+                state:
+                  type: object
+                  description: State after the run task acknowledges the pause
       '400':
         description: Simulation is not running
         content:
@@ -1071,7 +1083,11 @@ route("/pause_simulation", method="POST") do
     state = Cqn.STATE[simulation_name]
     Cqn.pause_simulation(state)
 
-    json(Dict(:success => true, :message => "Simulation paused"))
+    json(Dict(
+      :success => true,
+      :message => "Simulation paused",
+      :state => Cqn.serialize_state(state),
+    ))
   catch e
     if isa(e, APIError)
       rethrow(e)

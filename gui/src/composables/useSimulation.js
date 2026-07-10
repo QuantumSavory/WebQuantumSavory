@@ -268,14 +268,25 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         console.log('✅ runSimulation: Simulation prepared')
       }
 
-      simulationState.value.cumulativeTargetTime = newCumulativeTargetTime
-
       console.log('🔄 runSimulation: Starting simulation run to', newCumulativeTargetTime, 's')
       addLog('info', `Running simulation to ${newCumulativeTargetTime}s`, 'Backend')
-      
-      api.runSimulation(projectData.value.name, newCumulativeTargetTime).catch(error => {
-        console.error('❌ runSimulation: Background error from run_simulation', error)
-      })
+
+      const runResponse = await api.runSimulation(projectData.value.name, newCumulativeTargetTime)
+      if (!runResponse || runResponse.success === false) {
+        const errorMsg = extractErrorMessage(runResponse, 'Failed to start simulation')
+        const error = new Error(`Failed to start simulation: ${errorMsg}`)
+        error.response = runResponse
+        throw error
+      }
+
+      simulationState.value.cumulativeTargetTime = newCumulativeTargetTime
+      if (runResponse.state) {
+        simulationStatus.value = {
+          status: 'processing',
+          message: 'Simulation started',
+          state: runResponse.state
+        }
+      }
 
       console.log('⏳ runSimulation: Starting polling')
       startPolling()
@@ -308,15 +319,15 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
       }
       
       stopPolling()
-      
-      const currentStatus = await api.getSimulationStatus(minimizedProjectData.value)
-      if (currentStatus.success) {
+
+      const pausedState = response.state || (await api.getSimulationStatus(minimizedProjectData.value)).state
+      if (pausedState) {
         simulationStatus.value = {
           status: 'processing',
           message: 'Simulation paused',
-          state: currentStatus.state
+          state: pausedState
         }
-        console.log('📊 pauseSimulation: Paused at', currentStatus.state.simulation?.simulation_progress, 's')
+        console.log('📊 pauseSimulation: Paused at', pausedState.simulation?.simulation_progress, 's')
       }
       
       addLog('info', 'Simulation paused', 'Backend')
@@ -357,9 +368,21 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
       
       console.log('📊 resumeSimulation: Resuming to', sim.simulation_time, 's')
       
-      api.runSimulation(projectData.value.name, sim.simulation_time).catch(error => {
-        console.error('❌ resumeSimulation: Background error from run_simulation', error)
-      })
+      const runResponse = await api.runSimulation(projectData.value.name, sim.simulation_time)
+      if (!runResponse || runResponse.success === false) {
+        const errorMsg = extractErrorMessage(runResponse, 'Failed to resume simulation')
+        const error = new Error(`Failed to resume simulation: ${errorMsg}`)
+        error.response = runResponse
+        throw error
+      }
+
+      if (runResponse.state) {
+        simulationStatus.value = {
+          status: 'processing',
+          message: 'Simulation resumed',
+          state: runResponse.state
+        }
+      }
       
       startPolling()
       addLog('info', 'Simulation resumed', 'Backend')
@@ -392,8 +415,6 @@ export function useSimulation(projectData, addLog, validatePayload, minimizedPro
         }
         
         stopPolling()
-        
-        const currentStatus = await api.getSimulationStatus(minimizedProjectData.value)
       } catch (error) {
         console.error('❌ stopSimulation: Failed to pause', error)
         const extendedInfo = error.response ? JSON.stringify(error.response, null, 2) : null

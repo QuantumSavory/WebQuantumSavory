@@ -32,9 +32,9 @@ The normal lifecycle is:
 - Protocol placement is part of the API contract: node protocols live under each node's `data.protocols`, edge protocols under each edge's `data.protocols`, and floating protocols under `net.protocols`.
 - Protocol, background, and slot catalogs come from QuantumSavory metadata. Do not duplicate hard-coded catalogs in the API or GUI.
 - `STATE` is in-memory and process-local. Restarts lose simulations, and tests which use fixed names or mutate state must run serially and clean up after themselves.
-- `run_simulation` is synchronous; pause is cooperative between simulation steps. Keep `is_running`, `simulation_paused`, timestamps, error flags, and serialized status fields consistent when changing lifecycle code.
+- `run_simulation` marks the state running and starts one sticky `@async` task; the task yields cooperatively between simulation steps. Pause responses wait for that task to acknowledge and exit. Keep the task reference, pause request, `is_running`, `simulation_paused`, timestamps, error flags, and serialized status fields consistent when changing lifecycle code.
 - A run has a 10-minute wall-clock cap. Non-running states are blocked and stripped of heavy resources after 30 idle minutes, then retained for UI status. Blocking refreshes the activity timestamp, so the retained record is destroyed after a further 300 idle minutes. The service checks once per minute.
-- Starting a run clears previously captured simulation logs. `GET /logs/:name` purges returned logs by default, so tests and callers which need repeat reads must request otherwise.
+- Starting a new target clears previously captured simulation logs; resuming a paused target preserves them. `GET /logs/:name` purges returned logs by default, so tests and callers which need repeat reads must request otherwise.
 - Do not remove `InteractiveUtils`, `REPL`, or `CairoMakie` from `src/Cqn.jl` as apparently unused imports. They activate QuantumSavory metadata and MIME-rendering extensions used by the API.
 - `Sandbox` creates a fresh module but evaluates Julia code with `Base.eval`; this is namespace isolation, not a security boundary. Treat code, lambda, symbolic, and fallback parameter evaluation as unsafe for untrusted input.
 

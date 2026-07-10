@@ -80,6 +80,18 @@ export function usePolling(simulationState, simulationStatus, projectData, minim
           if (checkAndHideInvalidEntangledStates && typeof checkAndHideInvalidEntangledStates === 'function') {
             checkAndHideInvalidEntangledStates(response)
           }
+
+          if (sim.simulation_error) {
+            console.error('❌ startStatePolling: Simulation task failed', sim.simulation_error)
+            stopPolling()
+            simulationStatus.value = {
+              status: 'error',
+              message: `Simulation failed: ${sim.simulation_error}`,
+              state: response.state
+            }
+            addLog('error', `Simulation failed: ${sim.simulation_error}`, 'Backend')
+            return
+          }
           
           if (sim.simulation_running === false) {
             // Check if the simulation execution time exceeded
@@ -103,14 +115,36 @@ export function usePolling(simulationState, simulationStatus, projectData, minim
               return;
             }
 
-            // Simulation completed
-            console.log('✅ startStatePolling: Simulation completed!')
+            if (sim.simulation_paused) {
+              console.log('⏸️ startStatePolling: Simulation paused')
+              stopPolling()
+              simulationStatus.value = {
+                status: 'processing',
+                message: 'Simulation paused',
+                state: response.state
+              }
+              return
+            }
+
+            if ((sim.simulation_progress || 0) >= (sim.simulation_time || 0)) {
+              console.log('✅ startStatePolling: Simulation completed!')
+              stopPolling()
+              simulationStatus.value = {
+                status: 'ready',
+                message: 'Simulation completed',
+                state: response.state
+              }
+              return
+            }
+
+            console.error('❌ startStatePolling: Simulation stopped before reaching its target')
             stopPolling()
             simulationStatus.value = {
-              status: 'ready',
-              message: 'Simulation completed',
+              status: 'error',
+              message: 'Simulation stopped before reaching its target',
               state: response.state
             }
+            addLog('error', 'Simulation stopped before reaching its target', 'Backend')
             return
           }
 
