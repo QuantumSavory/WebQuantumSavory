@@ -49,7 +49,8 @@
                     <div v-else-if="param.type === 'Lambda' || param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic'" style="width:100%;" >
                       <CodeEditorWithSymbols
                         :modelValue="param.value"
-                        :readOnly="isEditingDisabled"
+                        :readOnly="isEditingDisabled || !unsafeCodeEvaluationEnabled"
+                        :evaluationEnabled="unsafeCodeEvaluationEnabled"
                         :errorMessage="param.error"
                         :showLatex="param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic'"
                         :latexExpression="param.latex"
@@ -97,7 +98,8 @@
                     <div v-else-if="param.selectedType === 'Lambda' || param.selectedType === 'SymbolicUtils.Symbolic' || param.selectedType === 'Symbolic'" style="width:100%;" >
                       <CodeEditorWithSymbols
                         :modelValue="param.value"
-                        :readOnly="isEditingDisabled"
+                        :readOnly="isEditingDisabled || !unsafeCodeEvaluationEnabled"
+                        :evaluationEnabled="unsafeCodeEvaluationEnabled"
                         :errorMessage="param.error"
                         :showLatex="param.selectedType === 'SymbolicUtils.Symbolic' || param.selectedType === 'Symbolic'"
                         :latexExpression="param.latex"
@@ -165,6 +167,7 @@ const resultFromShowEndpoint = ref(`placeholder`);
 const isEditingDisabled = computed(() => {
   return props.simulationState?.hasSimulationRun || false
 })
+const unsafeCodeEvaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
 
 const optionsMenuElement = ref(null)
 const mainMenuItems = computed(() => {
@@ -295,6 +298,11 @@ function onCodeEditorValueChanged(paramObject, value) {
 
 async function validateFunction(param){
   console.log( 'validateFunction', param );
+  if( !unsafeCodeEvaluationEnabled.value ){
+    param.error = '<pre>Server-side Julia evaluation is disabled.</pre>';
+    return;
+  }
+
   let response;
   if( param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic' ){
     response = await api.validateSymbolicFunction( param.value );

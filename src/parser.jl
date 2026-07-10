@@ -541,6 +541,7 @@ function _instantiate_noise(noise_def)
 
       # For complex types, try eval with value::type
       eval_expr = "$(value)::$(ptype)"
+      require_unsafe_code_evaluation()
       try
         @info "Attempting eval for noise parameter" parameter_name=name eval_expr=eval_expr
         kwargs[name] = eval(Meta.parse(eval_expr))
@@ -613,6 +614,7 @@ function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symb
     # then fall back to creating a lambda from code.
     resolved = resolve_function_reference(value)
     if resolved === nothing && special_type == "Lambda"
+      require_unsafe_code_evaluation()
       try
         resolved = create_lambda(value)
         # Validate the lambda - try calling it with a test value if it's a filter
@@ -635,6 +637,7 @@ function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symb
           end
         end
       catch e
+        isa(e, APIError) && rethrow(e)
         msg = "Failed to create lambda from string"
         if state !== nothing
           @log_event state Logging.Warn msg parameter_name=string(name) value=value error=string(e)
@@ -671,6 +674,7 @@ Handle Symbolic parameter conversion
 """
 function _handle_symbolic_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, value)
   if isa(value, String)
+    require_unsafe_code_evaluation()
     try
       # Use evaluate_symbolic_expression to get the actual symbolic object
       success, symbolic_value, error = Sandbox.evaluate_symbolic_expression(value)
@@ -681,6 +685,7 @@ function _handle_symbolic_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, val
         @warn "Failed to evaluate symbolic expression" parameter_name=name value=value error=error
       end
     catch e
+      isa(e, APIError) && rethrow(e)
       @warn "Failed to create symbolic expression from string" parameter_name=name value=value error=e
     end
   else
@@ -701,6 +706,7 @@ function _handle_regular_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, ptyp
   
   # For complex types, try eval with value::type pattern
   eval_expr = "$(value)::$(ptype)"
+  require_unsafe_code_evaluation()
   try
     @info "Attempting eval" parameter_name=name eval_expr=eval_expr
     kwargs[name] = eval(Meta.parse(eval_expr))
@@ -808,6 +814,7 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any}, state=nothing)
         _handle_regular_parameter!(kwargs, name, ptype, value)
       end
     catch e
+      isa(e, APIError) && rethrow(e)
       msg = "Failed to convert parameter"
       if state !== nothing
         @log_event state Logging.Warn msg parameter_name=string(name) parameter_type=ptype value=value error=string(e)

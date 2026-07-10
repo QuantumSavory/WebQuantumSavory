@@ -14,7 +14,7 @@
 - `routes.jl` owns HTTP handlers, adjacent Swagger descriptions, the common safe route wrapper, the root UI route, and startup of the stale-simulation service.
 - `src/Cqn.jl` defines `State`, the process-global `STATE` dictionary, serialization, protocol launching, simulation control, log access, and resource cleanup.
 - `src/parser.jl` discovers QuantumSavory metadata, validates request payloads, constructs graphs/registers/networks, converts parameters, and instantiates protocols.
-- `src/errors.jl` standardizes `APIError` responses. `Logger.jl` captures per-simulation events, `Sandbox.jl` evaluates user expressions, `types.jl` implements lambda/symbolic adapters, and `services.jl` manages idle simulations.
+- `src/errors.jl` standardizes `APIError` responses. `evaluation_policy.jl` gates unsafe server-process evaluation, `Logger.jl` captures per-simulation events, `Sandbox.jl` evaluates user expressions, `types.jl` implements lambda/symbolic adapters, and `services.jl` manages idle simulations.
 - `config/env/` contains Genie settings for dev, test, and production. `public/index.html` and `public/assets/` are generated from `gui/` at launch.
 
 ## Simulation flow and invariants
@@ -37,6 +37,7 @@ The normal lifecycle is:
 - Starting a new target clears previously captured simulation logs; resuming a paused target preserves them. `GET /logs/:name` purges returned logs by default, so tests and callers which need repeat reads must request otherwise.
 - Do not remove `InteractiveUtils`, `REPL`, or `CairoMakie` from `src/Cqn.jl` as apparently unused imports. They activate QuantumSavory metadata and MIME-rendering extensions used by the API.
 - `Sandbox` creates a fresh module but evaluates Julia code with `Base.eval`; this is namespace isolation, not a security boundary. Treat code, lambda, symbolic, and fallback parameter evaluation as unsafe for untrusted input.
+- `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` is the sole unsafe-evaluation override and accepts only `true` or `false`. Without it, evaluation is enabled only in `dev` and `test`; production and unknown environments deny it.
 
 ## API changes
 

@@ -125,17 +125,25 @@ export class ApiConnector {
     return this._platformInfo.value
   }
 
+  isUnsafeCodeEvaluationEnabled(){
+    return this._platformInfo.value?.capabilities?.unsafeCodeEvaluation === true
+  }
+
   async fetchPlatformInfo(){
     try{
       const res = await fetch(`${this.baseUrl}/platform_info`, {
         headers: this.requestHeaders,
       })
+      if (!res.ok) throw new Error(`Platform info fetch failed: ${res.status}`)
       const result = await res.json()
       this._platformInfo.value = {
         versions: {
           julia: result.versions.julia, 
           quantumSavory: result.versions.quantumsavory, 
           app: result.versions.app
+        },
+        capabilities: {
+          unsafeCodeEvaluation: result.capabilities?.unsafe_code_evaluation === true
         }
       }
       return result

@@ -30,6 +30,7 @@ Base.showerror(io::IO, e::APIError) = print(io, "APIError: $(e.message) (status:
 
 # include("constructors.jl")
 include("errors.jl")
+include("evaluation_policy.jl")
 include("types.jl")
 include("Sandbox.jl")
 include("Logger.jl")
@@ -70,6 +71,11 @@ end
 const STATE = Dict{String, State}()
 
 function main()
+  # Validate an explicit override before Genie starts and handles route-loading
+  # errors internally. Environment-specific defaults are resolved at use time.
+  unsafe_code_evaluation_enabled(
+    environment=get(ENV, "GENIE_ENV", Genie.Configuration.env()),
+  )
   Genie.genie(; context = @__MODULE__)
 end
 

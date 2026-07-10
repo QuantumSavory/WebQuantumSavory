@@ -1,6 +1,16 @@
 <template>
   <div class="code-editor-with-symbols">
     <div
+      v-if="!evaluationEnabled"
+      class="evaluation-disabled-notice"
+      role="status"
+      data-testid="evaluation-disabled-notice"
+    >
+      Server-side Julia evaluation is disabled. Raw lambda and symbolic
+      validation are unavailable; choose a listed function when supported.
+    </div>
+
+    <div
       v-if="hasError"
       class="function-error-badge"
       v-tooltip.top="{
@@ -37,11 +47,11 @@
       fontSize="12px" 
       :copy="false" 
       borderRadius="4px" 
-      :readOnly="readOnly"
+      :readOnly="interactionDisabled"
       :class="{ 
         'function-container': true, 
         'function-syntax-error': hasError,
-        'noInteraction': readOnly 
+        'noInteraction': interactionDisabled
       }"
       @click="captureCursorPosition"
       @mousedown="captureCursorPosition"
@@ -56,14 +66,19 @@
           class="symbol-button"
           :class="{ 'subscript-char': isSubscriptChar(symbol) }"
           @mousedown="handleSymbolClick($event, symbol)"
-          :disabled="readOnly"
+          :disabled="interactionDisabled"
           :title="'Insert ' + symbol"
         >
           <span class="symbol-content">{{ symbol }}</span>
         </button>
       </div>
       
-      <button @click="handleValidate" :disabled="readOnly" class="validate-button">Validate</button>
+      <button
+        @click="handleValidate"
+        :disabled="interactionDisabled"
+        :title="evaluationEnabled ? 'Validate' : 'Server-side Julia evaluation is disabled'"
+        class="validate-button"
+      >Validate</button>
     </div>
   </div>
 </template>
@@ -81,6 +96,10 @@ const props = defineProps({
     default: ''
   },
   readOnly: {
+    type: Boolean,
+    default: false
+  },
+  evaluationEnabled: {
     type: Boolean,
     default: false
   },
@@ -128,6 +147,7 @@ const latexOptions = ref({
 })
 
 const hasError = computed(() => !!props.errorMessage)
+const interactionDisabled = computed(() => props.readOnly || !props.evaluationEnabled)
 
 function handleValueChange(value) {
   emit('update:modelValue', value)
@@ -222,6 +242,12 @@ onMounted(() => {
 <style scoped>
 .code-editor-with-symbols {
   width: 100%;
+}
+
+.evaluation-disabled-notice {
+  margin-bottom: 0.5rem;
+  color: #8a4b08;
+  font-size: 0.8rem;
 }
 
 .function-error-badge {
