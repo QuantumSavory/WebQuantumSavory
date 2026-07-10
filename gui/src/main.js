@@ -10,7 +10,6 @@ import Aura from '@primeuix/themes/aura';
 import JsonViewer from "vue3-json-viewer";
 import "vue3-json-viewer/dist/vue3-json-viewer.css";
 import Tooltip from 'primevue/tooltip';
-import VueLatex from 'vatex'
 
 const MyPreset = definePreset(Aura, {
     semantic: {
@@ -36,7 +35,6 @@ api.init()
 const app = createApp(App);
 app.directive('tooltip', Tooltip);
 app.use(JsonViewer);
-app.use(VueLatex);
 app.use(PrimeVue, {
     theme: {
         preset: MyPreset,
