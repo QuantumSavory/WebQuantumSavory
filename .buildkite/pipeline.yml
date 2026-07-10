@@ -1,0 +1,27 @@
+env:
+  CI: "true"
+
+steps:
+  - label: ":julia: Backend unit"
+    key: backend-unit
+    command: ./ci/backend-unit.sh
+    timeout_in_minutes: 45
+
+  - label: ":nodejs: Frontend version and build"
+    key: frontend-build
+    command: ./ci/frontend-build.sh
+    timeout_in_minutes: 20
+
+  - label: ":julia: Backend integration"
+    key: backend-integration
+    command: ./ci/backend-integration.sh
+    artifact_paths: "ci-artifacts/**/*"
+    timeout_in_minutes: 60
+
+  - label: ":chromium: Full Chromium"
+    key: browser
+    command: ./ci/browser.sh
+    depends_on: backend-integration
+    allow_dependency_failure: true
+    artifact_paths: "ci-artifacts/**/*"
+    timeout_in_minutes: 60

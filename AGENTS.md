@@ -75,10 +75,21 @@ GENIE_ENV=test julia --project=. -e 'using Cqn; Cqn.main(); Cqn.up(async=false)'
 
 Run the server and integration command in separate terminals. Integration tests share global server state and fixed simulation names; do not parallelize them.
 
+The checked-in CI entry points install their own dependencies and can also be run locally:
+
+```sh
+./ci/backend-unit.sh
+./ci/frontend-build.sh
+./ci/backend-integration.sh
+./ci/browser.sh
+```
+
+`ci/run-with-server.sh` provides bounded readiness polling, failure logs, and cleanup for the integration and browser entry points. GitHub Actions uses Julia 1.12 and Node.js 24; Buildkite agents must provide those runtimes, curl, and the Playwright Chromium system dependencies described in `README.md`.
+
 ## Change discipline
 
 - Prefer the smallest relevant check first, then broaden based on risk. Run backend unit tests for `src/` changes, integration tests for routes/contracts, and the GUI checks in `gui/AGENTS.md` for frontend-facing changes.
-- There is no checked-in Julia/npm test CI workflow, so local verification is required and should be recorded in the PR.
+- GitHub Actions and Buildkite both run backend unit, frontend version/build, backend integration, and full headless Chromium checks through the shared `ci/` scripts.
 - Do not commit root or test manifests, `node_modules`, logs, SQLite runtime files, Genie build/cache/session output, Playwright results, or generated Vite output under `public/`.
 - Edit `gui/index.html`, `gui/public/`, or `gui/src/` for frontend changes; never edit generated `public/index.html`, `public/vite.svg`, or `public/assets/`.
 - Keep unrelated cleanup out of behavioral changes, avoid broad formatting churn, and preserve user work already present in the tree.

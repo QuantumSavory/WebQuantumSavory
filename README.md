@@ -197,6 +197,40 @@ Notes:
    julia --project runtests.jl test_integration
    ```
 
+### CI checks
+
+GitHub Actions and Buildkite run the same four repository scripts:
+
+```bash
+./ci/backend-unit.sh
+./ci/frontend-build.sh
+./ci/backend-integration.sh
+./ci/browser.sh
+```
+
+Each script installs the dependencies it needs, so it can run from a clean
+checkout. The integration and browser scripts start a test-mode backend, wait
+up to 120 seconds for `/status`, and always stop it. On failure they preserve
+the backend log and any Playwright traces under the ignored `ci-artifacts/`
+directory.
+
+The browser script downloads the Chromium version locked by Playwright. On a
+new Linux machine, install the locked npm dependencies and its system packages
+first:
+
+```bash
+npm --prefix gui ci --include=dev
+(cd gui && npx playwright install-deps chromium)
+```
+
+For Buildkite, configure the pipeline's upload step as
+`buildkite-agent pipeline upload`. Each Linux agent must provide Git, curl,
+Julia 1.12, Node.js 24 with npm, and the Playwright Chromium system packages;
+it must also be able to download Julia/npm packages and the Chromium binary.
+Ports 8000 and 5173 must be available. No queue name, secret, or container
+image is assumed by `.buildkite/pipeline.yml`. Configure Buildkite's GitHub
+integration to create builds for pull requests and pushes to `main`.
+
 ## Automatic Cleanup of Inactive Simulations
 
 The system includes a background task that releases resources held by inactive simulations and eventually removes their retained status records.

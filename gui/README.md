@@ -7,19 +7,14 @@ A Vue 3 + Vite application for interactive quantum network visualization and sim
 ### Prerequisites
 - Node.js (v18 or higher)
 - npm
-- Playwright browser dependencies:
-  ```bash
-  sudo apt-get update
-  sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libxdamage1 libxkbcommon0 libasound2 libcups2 libcairo2 libpango-1.0-0
-  ```
 
 ### Getting Started
 ```bash
 # Install locked dependencies
 npm ci
 
-# Install the Chromium browser used by Playwright
-npx playwright install chromium
+# Install the Chromium browser and Linux packages used by Playwright
+npx playwright install --with-deps chromium
 
 # Start development server
 npm run dev

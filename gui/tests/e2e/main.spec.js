@@ -200,15 +200,17 @@ test.describe.serial('Main Workflow', () => {
     await expect(runButton).toBeVisible();
     await expect(runButton).toBeEnabled();
 
+    const runAccepted = page.waitForResponse(response =>
+      response.url().endsWith('/run_simulation') &&
+      response.request().method() === 'POST' &&
+      response.status() === 202
+    );
     await runButton.click();
+    await runAccepted;
 
-    // The accepted-running response enables pause immediately. Backend integration
-    // coverage separately proves that nonzero progress is observable before pause.
-    await expect(page.locator('#runnerPanel .main-buttons .pause-btn')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('#runnerPanel .main-buttons .pause-btn')).toBeEnabled();
-    
-    // Click the "Pause Simulation" button
-    await page.click('#runnerPanel .main-buttons .pause-btn');
+    // Click as soon as the accepted-running response makes the real control
+    // actionable, before status polling can replace it with a completed state.
+    await page.locator('#runnerPanel .main-buttons .pause-btn').click({ timeout: 5000 });
 
     // The resume control appears only after the backend acknowledges the pause.
     await expect(page.locator('#runnerPanel .main-buttons .resume-btn')).toBeVisible({ timeout: 10000 });
