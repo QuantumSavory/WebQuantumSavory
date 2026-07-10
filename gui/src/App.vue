@@ -18,13 +18,14 @@ import Menu from 'primevue/menu';
 import TieredMenu from 'primevue/tieredmenu';
 import EdgeListPanel from './components/panels/EdgeListPanel.vue'
 import EdgePanel from './components/panels/EdgePanel.vue'
-import LogsPanel from './components/panels/LogsPanel.vue'
+import BottomPanel from './components/panels/BottomPanel.vue'
 import ProjectNameDialog from './components/ProjectNameDialog.vue'
 import ImportConflictDialog from './components/ImportConflictDialog.vue'
 import OpenProjectDialog from './components/OpenProjectDialog.vue'
 import AboutModal from './components/AboutModal.vue'
 import UnsavedChangesDialog from './components/UnsavedChangesDialog.vue'
 import AlertModal from './components/AlertModal.vue'
+import RepeaterChainDialog from './components/RepeaterChainDialog.vue'
 import packageJson from '../package.json'
 import VoidPanel from './components/panels/VoidPanel.vue'
 import ResultsView from './components/panels/ResultsView.vue'
@@ -46,6 +47,7 @@ import { validatePayload, generateRandomNodes, generateRandomEdges, getNodeById,
 import { showEntangledSlots as showEntangledSlotsUtil, hideSlotState } from './utils/windowHelpers.js'
 import { fetchBackendLogs, mapBackendLogLevel, compareVersionsMismatch } from './utils/backendHelpers.js'
 import { isEntangledStateStillValid } from './utils/SlotConnectionUtils.js'
+import { generateRepeaterChain } from './utils/repeaterChain.js'
 
 // Import demo projects
 import demo1 from './demos/1.Entangler.Example.json'
@@ -107,6 +109,7 @@ function addLog(level, message, source = 'App', extendedInfo = null) {
 // Application logs
 const applicationLogs = ref([])
 const maxLogs = ref(1000)
+const showRepeaterChainDialog = ref(false)
 
 // Minimized project data - cleans up project data for API calls
 const minimizedProjectData = computed(() => {
@@ -673,6 +676,55 @@ function clearLogs() {
   applicationLogs.value = []
 }
 
+function openRepeaterChainGenerator() {
+  if (hasSimulationRun.value) {
+    showAlert(
+      'Layout tools unavailable',
+      'Reset or stop the simulation before changing the network layout.'
+    )
+    return
+  }
+  showRepeaterChainDialog.value = true
+}
+
+function closeRepeaterChainGenerator() {
+  showRepeaterChainDialog.value = false
+}
+
+function handleGenerateRepeaterChain(options) {
+  if (hasSimulationRun.value) {
+    closeRepeaterChainGenerator()
+    showAlert(
+      'Layout tools unavailable',
+      'Reset or stop the simulation before changing the network layout.'
+    )
+    return
+  }
+
+  try {
+    const startNodeName = projectData.value.net.nodes.find(node => node.id === options.startNodeId)?.name
+    const endNodeName = projectData.value.net.nodes.find(node => node.id === options.endNodeId)?.name
+    const result = generateRepeaterChain(projectData.value.net, options)
+
+    if (
+      selectedItem.value?.id === result.removedNode.id
+      || selectedItem.value?.id === result.removedEdge.id
+    ) {
+      handleSelect(null, null)
+    }
+
+    closeRepeaterChainGenerator()
+    addLog(
+      'success',
+      `Generated a chain of ${result.generatedNodes.length} repeaters between ${startNodeName} and ${endNodeName}`,
+      'Layout Tools'
+    )
+  } catch (error) {
+    closeRepeaterChainGenerator()
+    showAlert('Unable to generate repeater chain', error.message)
+  }
+}
+
 
 function handleMenu(action) {
   showMenu.value = false
@@ -1181,18 +1233,26 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Logs Panel at bottom -->
+    <!-- Tabbed logs and layout tools panel at bottom -->
     <div class="logs-panel-container">
-      <LogsPanel 
-        id="logsPanel"
+      <BottomPanel
         :logs="applicationLogs"
         :max-logs="50"
         :show-timestamps="true"
         :allow-clear="true"
+        :helpers-disabled="hasSimulationRun"
         @clear-logs="clearLogs"
-        :collapsable="true"
+        @open-repeater-chain-generator="openRepeaterChainGenerator"
       />
     </div>
+
+    <RepeaterChainDialog
+      :show="showRepeaterChainDialog"
+      :nodes="projectData.net.nodes"
+      :edges="projectData.net.edges"
+      @confirm="handleGenerateRepeaterChain"
+      @cancel="closeRepeaterChainGenerator"
+    />
 
     <!-- Open Project Dialog Component -->
     <OpenProjectDialog
