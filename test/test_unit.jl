@@ -37,7 +37,20 @@
       @test all(haskey(pt, "doc") for pt in protocol_types)
       @test all(haskey(pt, "group") for pt in protocol_types)
       @test all(haskey(pt, "parameters") for pt in protocol_types)
+      @test all(haskey(pt, "virtual") for pt in protocol_types)
       @test all(pt["group"] in ["node", "edge", "floating"] for pt in protocol_types)
+
+      protocol_types_by_name = Dict(pt["type"] => pt for pt in protocol_types)
+      virtual_protocol = protocol_types_by_name[string(QuantumSavory.ProtocolZoo.EntanglementConsumer)]
+      physical_protocols = [
+        protocol_types_by_name[string(QuantumSavory.ProtocolZoo.EntanglerProt)],
+        protocol_types_by_name[string(QuantumSavory.ProtocolZoo.LinkController)],
+      ]
+
+      @test virtual_protocol["group"] == "edge"
+      @test virtual_protocol["virtual"] === true
+      @test all(pt["group"] == "edge" for pt in physical_protocols)
+      @test all(pt["virtual"] === false for pt in physical_protocols)
   end
 
   @testset "Payload Extraction" begin
