@@ -126,11 +126,12 @@
 
 
 <script setup>
-import { defineProps, defineEmits, onMounted, computed, ref, reactive } from 'vue'
+import { defineProps, defineEmits, onMounted, computed, ref, reactive, defineAsyncComponent } from 'vue'
 import Checkbox from 'primevue/checkbox';
 import Menu from 'primevue/menu';
 import { api } from '../../utils/ApiConnector'
-import CodeEditorWithSymbols from './CodeEditorWithSymbols.vue'
+
+const CodeEditorWithSymbols = defineAsyncComponent(() => import('./CodeEditorWithSymbols.vue'))
 
 const props = defineProps({
   protocol: {
@@ -450,4 +451,4 @@ input::placeholder {
   font-size: 0.85em;
 }
 
-</style> 
+</style>

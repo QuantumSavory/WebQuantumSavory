@@ -70,6 +70,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { VueLatex } from 'vatex'
 import { HighCode } from 'vue-highlight-code';
 import 'vue-highlight-code/dist/style.css';
 import { api } from '../../utils/ApiConnector'
@@ -347,4 +348,3 @@ onMounted(() => {
   cursor: not-allowed;
 }
 </style>
-
