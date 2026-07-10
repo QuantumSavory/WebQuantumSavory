@@ -30,12 +30,37 @@ async function openEntanglerEditor(page, projectName) {
   await expect(page.locator('.edge-list-item')).toBeVisible()
 
   await page.locator('.edge-list-item').first().click()
-  await expect(page.locator('#edgePanel .add-protocol-btn')).toBeVisible()
-  await page.click('#edgePanel .add-protocol-btn')
-  await page.locator('#overlay_menu .p-menu-item-link:visible', {
+  // main.spec.js owns real add-menu pointer coverage.
+  // Keep this test focused on capability UI.
+  await page.evaluate(() => {
+    const app = document.querySelector('#app')?.__vue_app__
+    const projectData = app?._instance?.setupState?.projectData
+    const edge = projectData?.net?.edges?.[0]
+    if (!edge) {
+      throw new Error('Reactive edge state is unavailable')
+    }
+    edge.data.protocols.push({
+      id: 'protocol_evaluation_capability',
+      type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
+      parameters: [{
+        name: 'chooseslotA',
+        type: ['Int64', 'Function'],
+      }],
+    })
+  })
+
+  const protocolEditor = page.locator('#edgePanel .protocol-editor', {
     hasText: 'EntanglerProt',
-  }).click()
-  await expect(page.locator('#edgePanel .protocol-editor')).toBeVisible()
+  })
+  await expect(protocolEditor).toBeVisible()
+  await protocolEditor.evaluate(element => {
+    const component = element.__vueParentComponent
+    if (!component?.props?.protocol) {
+      throw new Error('Protocol editor component is unavailable')
+    }
+    component.emit('select', component.props.protocol)
+  })
+  await expect(protocolEditor.locator('.protocol-container')).toBeVisible()
   const functionTypeSelector = page.locator('#edgePanel .complexTypeSelector').filter({
     has: page.locator('option[value="Function"]'),
   }).first()
