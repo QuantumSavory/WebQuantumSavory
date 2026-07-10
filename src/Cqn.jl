@@ -52,6 +52,8 @@ const MAX_SIM_RUNTIME_MINUTES = 10
   has_run::Bool = false
   is_running::Bool = false
   simulation_paused::Bool = false
+  pause_requested::Bool = false
+  run_task::Union{Nothing, Task} = nothing
   slot_mapping::Union{Nothing, Dict{String, Any}} = nothing
   slot_reverse_mapping::Union{Nothing, IdDict{Any, String}} = nothing
   protocol_mapping::Union{Nothing, Dict{String, Any}} = nothing
@@ -539,11 +541,26 @@ function pause_simulation(state::State)
   if state.simulation_paused
     throw(validation_error("Simulation already paused"))
   end
-  
-  state.simulation_paused = true
+
+  run_task = state.run_task
+  if run_task === nothing
+    throw(validation_error("Simulation has no active execution task"))
+  end
+
+  state.pause_requested = true
   state.simulation_last_active_time = Dates.now()
   @log_event state Logging.Info "Simulation pause requested"
-  
+
+  # A pause is acknowledged only after the cooperative run task has stopped.
+  wait(run_task)
+
+  if !state.simulation_paused
+    if state.error !== nothing
+      throw(validation_error("Simulation stopped with an error before it could be paused"))
+    end
+    throw(validation_error("Simulation completed before it could be paused"))
+  end
+
   return true
 end
 
@@ -551,7 +568,7 @@ function destroy_simulation(simulation_name)
   # Check if simulation exists and isn't running, but allow destroying blocked states
   if haskey(STATE, simulation_name)
     state = STATE[simulation_name]
-    if state.is_running
+    if state.is_running || (state.run_task !== nothing && !istaskdone(state.run_task))
       throw(simulation_is_running_exception(simulation_name))
     end
   end
@@ -582,6 +599,7 @@ function block_simulation(state::State; reason::Symbol = :timeout, max_minutes::
   # Stop running flags
   state.is_running = false
   state.simulation_paused = false
+  state.pause_requested = false
 
   # Cleanup heavy resources but keep lightweight status for UI
   try
@@ -643,65 +661,120 @@ function prepare_simulation(state::State, simulation_name::String)
   return state
 end
 
-function run_simulation(state::State, time_units::Float64, simulation_name::String)
-  action_is_valid(simulation_name, false)  # This already checks if blocked
+function _record_run_error!(state::State, error)
+  exception = error isa Exception ? error : ErrorException(string(error))
+  @error "Error running simulation" error=exception
+  @log_event state Logging.Error "Error running simulation" error=exception
 
-  state.error = nothing
-  state.simulation_time = time_units
-  state.simulation_progress = 0.0
-  state.log_events = []
+  state.is_running = false
   state.simulation_paused = false
+  state.pause_requested = false
+  state.has_run = false
+  state.error = exception
   state.simulation_last_active_time = Dates.now()
-  state.simulation_started_at = Dates.now()
+  state.simulation_started_at = nothing
 
+  return state
+end
+
+function _run_simulation(state::State)
   Logging.with_logger(Logger.make_logger(state)) do
     while state.simulation_progress < state.simulation_time
-      # sleep(2) # sleep to test pause functionality
-
-      # Check if simulation was paused
-      if state.simulation_paused
+      if state.pause_requested
         @log_event state Logging.Info "Simulation paused by user request"
         state.is_running = false
+        state.simulation_paused = true
+        state.pause_requested = false
+        state.simulation_last_active_time = Dates.now()
+        state.simulation_started_at = nothing
         return state
       end
 
-      # Enforce max wall-clock execution time
+      # Enforce max wall-clock execution time for this active run segment.
       if state.simulation_started_at !== nothing && (Dates.now() - state.simulation_started_at > Dates.Minute(MAX_SIM_RUNTIME_MINUTES))
         block_simulation(state; reason=:timeout, max_minutes=MAX_SIM_RUNTIME_MINUTES)
         return state
       end
 
       try
-        state.has_run = false
-        state.is_running = true
-
         ConcurrentSim.step(state.simulation)
         state.simulation_progress = QuantumSavory.now(state.simulation)
       catch e
-        @error "Error running simulation" error=e
-        @log_event state Logging.Error "Error running simulation" error=e
-        
-        state.is_running = false
-        state.has_run = false
-        state.error = e
-
-        return state
+        return _record_run_error!(state, e)
       end
 
-      @show simulation_progress=state.simulation_progress simulation_time=state.simulation_time
-      # @log_event state Logging.Info "Simulation progress" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
+      # Give libuv a zero-delay scheduling point so pending HTTP I/O is serviced.
+      sleep(0)
     end
 
-    @show "Simulation completed" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
     @log_event state Logging.Info "Simulation completed" simulation_progress=state.simulation_progress simulation_time=state.simulation_time
-    
+
     state.has_run = true
     state.is_running = false
+    state.simulation_paused = false
+    state.pause_requested = false
     state.error = nothing
     state.simulation_last_active_time = Dates.now()
     state.simulation_started_at = nothing
   end
-  
+
+  return state
+end
+
+function run_simulation(state::State, time_units::Float64, simulation_name::String)
+  action_is_valid(simulation_name, false)  # This already checks if blocked
+
+  if state.simulation === nothing
+    throw(validation_error("Simulation not prepared"))
+  end
+
+  if state.run_task !== nothing
+    if !istaskdone(state.run_task)
+      throw(simulation_is_running_exception(simulation_name))
+    end
+    state.run_task = nothing
+  end
+
+  current_time = Float64(QuantumSavory.now(state.simulation))
+  resuming = state.simulation_paused
+
+  if !isfinite(time_units)
+    throw(validation_error("time_units must be finite"))
+  elseif resuming
+    if state.simulation_time === nothing || time_units != state.simulation_time
+      throw(validation_error("A paused simulation must resume to its existing target time"))
+    end
+  elseif time_units <= current_time
+    throw(validation_error("time_units must be greater than the current simulation time"))
+  end
+
+  if !resuming
+    state.log_events = []
+    state.simulation_time = time_units
+  end
+
+  state.error = nothing
+  state.simulation_progress = current_time
+  state.has_run = false
+  state.is_running = true
+  state.simulation_paused = false
+  state.pause_requested = false
+  state.simulation_last_active_time = Dates.now()
+  state.simulation_started_at = Dates.now()
+
+  state.run_task = @async begin
+    try
+      # Let the request task hand its accepted response back to the HTTP server.
+      sleep(0)
+      _run_simulation(state)
+    catch e
+      _record_run_error!(state, e)
+    finally
+      state.is_running = false
+      state.run_task = nothing
+    end
+  end
+
   return state
 end
 
