@@ -103,98 +103,49 @@ function create_symbolic(expression_string::String)
     end
 end
 
+const SAFE_FUNCTION_REFERENCES = (
+    "minimum" => minimum,
+    "maximum" => maximum,
+    "abs" => abs,
+    "identity" => identity,
+)
+
+const SELF_COMPARISON_OPERATORS = (
+    "<(self)" => (<),
+    ">(self)" => (>),
+    "≤(self)" => (≤),
+    "≥(self)" => (≥),
+    "==(self)" => (==),
+)
+
 """
-Resolve a function reference by name, supporting dotted module paths like `Base.max`.
-Returns the `Function` if found, otherwise `nothing`.
+Resolve a function from the explicit protocol-builder allowlist.
+
+Returns the corresponding `Function`, or `nothing` when `name` is not an
+allowlisted function. Module-qualified and arbitrary Julia function names are
+not supported.
 """
 function resolve_function_reference(name::AbstractString)
-    s = strip(String(name))
-
-    # Basic guardrails: do not allow parentheses to avoid accidental calls
-    if occursin("(", s) || occursin(")", s)
-        return nothing
+    normalized_name = strip(String(name))
+    for (reference_name, function_reference) in SAFE_FUNCTION_REFERENCES
+        normalized_name == reference_name && return function_reference
     end
-
-    # Candidate root modules to search when an unqualified name is provided
-    candidate_modules = (
-        Base,
-        Core,
-        Main,
-        @__MODULE__,
-    )
-
-    parts = split(s, ".")
-
-    # Helper to walk a dotted path starting from a module
-    function walk_from(mod::Module, syms::Vector{SubString{String}})
-        obj = mod
-        for p in syms
-            sym = Symbol(p)
-            if obj isa Module
-                if isdefined(obj, sym)
-                    obj = getfield(obj, sym)
-                else
-                    return nothing
-                end
-            else
-                # Only allow getfield on modules in this resolver
-                return nothing
-            end
-        end
-        return obj isa Function ? obj : nothing
-    end
-
-    if length(parts) == 1
-        # Unqualified name: search candidate modules in order
-        sym = Symbol(parts[1])
-        for mod in candidate_modules
-            if isdefined(mod, sym)
-                obj = getfield(mod, sym)
-                if obj isa Function
-                    return obj
-                end
-            end
-        end
-        return nothing
-    else
-        # Qualified path: the first part must be a known root module
-        root_name = Symbol(first(parts))
-        root_mod = nothing
-        for mod in candidate_modules
-            if nameof(mod) == root_name
-                root_mod = mod
-                break
-            end
-        end
-        root_mod === nothing && return nothing
-        return walk_from(root_mod, parts[2:end])
-    end
+    return nothing
 end
 
 """
 Resolve one of the protocol-builder comparison functions that uses `self`.
 
 `self` is the Julia-native (one-based) index of the node on which the
-node-attached protocol parameter applies.
+node-attached protocol parameter applies. These functions are unavailable when
+`self_node_index` is `nothing`, including for edge and floating protocols.
 """
-function resolve_self_comparison_reference(name::AbstractString, parameter_name::Symbol, ctx::Dict{Symbol,Any})
-    node_index = if haskey(ctx, :node)
-        ctx[:node]
-    else
-        return nothing
-    end
+function resolve_self_comparison_reference(name::AbstractString, self_node_index=nothing)
+    self_node_index === nothing && return nothing
 
-    return if name == "<(self)"
-        x -> x < node_index
-    elseif name == ">(self)"
-        x -> x > node_index
-    elseif name == "≤(self)"
-        x -> x ≤ node_index
-    elseif name == "≥(self)"
-        x -> x ≥ node_index
-    elseif name == "==(self)"
-        x -> x == node_index
-    else
-        nothing
+    normalized_name = strip(String(name))
+    for (reference_name, comparison_operator) in SELF_COMPARISON_OPERATORS
+        normalized_name == reference_name && return comparison_operator(self_node_index)
     end
+    return nothing
 end

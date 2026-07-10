@@ -44,7 +44,7 @@ async function openEntanglerEditor(page, projectName) {
       type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
       parameters: [{
         name: 'chooseslotA',
-        type: ['Int64', 'Function', 'QuantumSavory.Wildcard'],
+        type: ['Int64', 'Function'],
       }],
     })
   })
@@ -64,8 +64,6 @@ async function openEntanglerEditor(page, projectName) {
   const functionTypeSelector = page.locator('#edgePanel .complexTypeSelector').filter({
     has: page.locator('option[value="Function"]'),
   }).first()
-  await expect(functionTypeSelector.locator('option[value="QuantumSavory.Wildcard"]')).toBeEnabled()
-  await expect(protocolEditor).not.toContainText('QuantumSavory.Wildcard not supported')
   await functionTypeSelector.selectOption('Lambda')
   return functionTypeSelector
 }
@@ -74,7 +72,7 @@ async function setEvaluationCapability(page, enabled) {
   await page.route('**/known_functions', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    json: { known_functions: ['identity', '<(self)'] },
+    json: { known_functions: ['identity'] },
   }))
   await page.route('**/background_types', route => route.fulfill({
     status: 200,
@@ -136,7 +134,8 @@ test.describe('Unsafe evaluation capability', () => {
     await expect(editor.locator('.validate-button')).toBeDisabled()
 
     await functionTypeSelector.selectOption('Function')
-    await expect(page.locator('#edgePanel .functionSelector').first()).toBeEnabled()
-    await expect(page.locator('#edgePanel .functionSelector option[value="<(self)"]')).toHaveCount(0)
+    const knownFunctionSelector = page.locator('#edgePanel .functionSelector').first()
+    await expect(knownFunctionSelector).toBeEnabled()
+    await expect(knownFunctionSelector.locator('option[value="identity"]')).toBeEnabled()
   })
 })

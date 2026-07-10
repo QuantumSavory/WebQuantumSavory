@@ -39,10 +39,12 @@ function _ensure_slot_types_cache!()
   end
 end
 
-"""Convert a raw parameter value to a target primitive or simple Union type.
+"""Convert a raw parameter value to a target primitive, Wildcard, or simple Union type.
 
 Supported target strings: "Int", "Int64", "Float64", "Float32", "Bool",
-Union types that include Nothing and one of the above primitives or String.
+"Wildcard", "QuantumSavory.Wildcard", and Union types that include Nothing and
+one of the above primitives or String. Wildcard targets produce a fresh
+`QuantumSavory.Wildcard()` and do not use the supplied value.
 
 Returns a Pair{Bool,Any} where first indicates success. On failure, returns
 (false, nothing) and callers should skip setting the parameter.
@@ -607,17 +609,20 @@ function _resolve_type_from_string(type_str::AbstractString, type_group::Symbol)
 end
 
 """
-Handle Function or Lambda parameter conversion
+Handle Function or Lambda parameter conversion.
+
+The optional `self_node_index` enables node-relative comparison functions for
+node protocols. Leave it as `nothing` for edge and floating protocols.
 """
-function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, special_type::String, value, ctx::Dict{Symbol,Any}, state=nothing)
+function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, special_type::String, value, state=nothing; self_node_index=nothing)
   if isa(value, Function)
     kwargs[name] = value
     return true
   elseif isa(value, String)
     # Try to resolve by name first (works for both Function and Lambda cases),
     # then fall back to creating a lambda from code.
-    resolved = resolve_self_comparison_reference(value, name, ctx)
-    resolved === nothing && (resolved = resolve_function_reference(value))
+    resolved = resolve_function_reference(value)
+    resolved === nothing && (resolved = resolve_self_comparison_reference(value, self_node_index))
     if resolved === nothing && special_type == "Lambda"
       require_unsafe_code_evaluation()
       try
@@ -812,7 +817,14 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any}, state=nothing)
       end
       
       if special_type == "Function" || special_type == "Lambda"
-        _handle_function_lambda_parameter!(kwargs, name, special_type, value, ctx, state)
+        _handle_function_lambda_parameter!(
+          kwargs,
+          name,
+          special_type,
+          value,
+          state;
+          self_node_index=get(ctx, :node, nothing),
+        )
       elseif special_type == "Symbolic"
         _handle_symbolic_parameter!(kwargs, name, value)
       else

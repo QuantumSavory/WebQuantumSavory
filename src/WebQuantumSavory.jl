@@ -640,7 +640,10 @@ end
 
 
 function known_functions()
-  ["minimum", "maximum", "abs", "identity", "<(self)", ">(self)", "≤(self)", "≥(self)", "==(self)"]
+  [
+    first(reference)
+    for reference in (SAFE_FUNCTION_REFERENCES..., SELF_COMPARISON_OPERATORS...)
+  ]
 end
 
 
