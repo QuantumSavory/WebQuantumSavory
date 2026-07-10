@@ -29,6 +29,24 @@
       @test all(haskey(st, "doc") for st in slot_types)
   end
 
+  @testset "Known Function References" begin
+      @test WebQuantumSavory.known_functions() == [
+          "minimum", "maximum", "abs", "identity", "<(self)", ">(self)", "≤(self)", "≥(self)", "==(self)",
+      ]
+      @test WebQuantumSavory.resolve_function_reference("minimum") === minimum
+      @test WebQuantumSavory.resolve_function_reference("min") === min
+
+      node_ctx = Dict{Symbol,Any}(:node => 2)
+      @test WebQuantumSavory.resolve_self_comparison_reference("<(self)", :chooseslot, node_ctx)(1)
+      @test !WebQuantumSavory.resolve_self_comparison_reference(">(self)", :chooseslot, node_ctx)(2)
+      @test WebQuantumSavory.resolve_self_comparison_reference("≤(self)", :chooseslot, node_ctx)(2)
+      @test WebQuantumSavory.resolve_self_comparison_reference("≥(self)", :chooseslot, node_ctx)(2)
+      @test WebQuantumSavory.resolve_self_comparison_reference("==(self)", :chooseslot, node_ctx)(2)
+
+      edge_ctx = Dict{Symbol,Any}(:nodeA => 1, :nodeB => 3)
+      @test WebQuantumSavory.resolve_self_comparison_reference("==(self)", :chooseA, edge_ctx) === nothing
+  end
+
   @testset "Protocol Types" begin
       protocol_types = WebQuantumSavory.get_protocol_types()
       @test isa(protocol_types, Vector)

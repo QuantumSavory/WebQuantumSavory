@@ -1277,7 +1277,7 @@ end
               default:
                 summary: Example response
                 value:
-                  known_functions: ["min", "maximum", "abs", "identity"]
+                  known_functions: ["minimum", "maximum", "abs", "identity", "<(self)", ">(self)", "≤(self)", "≥(self)", "==(self)"]
 """
 route("/known_functions") do
   Dict(:known_functions => WebQuantumSavory.known_functions()) |> json

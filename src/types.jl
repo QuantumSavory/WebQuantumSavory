@@ -170,3 +170,31 @@ function resolve_function_reference(name::AbstractString)
         return walk_from(root_mod, parts[2:end])
     end
 end
+
+"""
+Resolve one of the protocol-builder comparison functions that uses `self`.
+
+`self` is the Julia-native (one-based) index of the node on which the
+node-attached protocol parameter applies.
+"""
+function resolve_self_comparison_reference(name::AbstractString, parameter_name::Symbol, ctx::Dict{Symbol,Any})
+    node_index = if haskey(ctx, :node)
+        ctx[:node]
+    else
+        return nothing
+    end
+
+    return if name == "<(self)"
+        x -> x < node_index
+    elseif name == ">(self)"
+        x -> x > node_index
+    elseif name == "≤(self)"
+        x -> x ≤ node_index
+    elseif name == "≥(self)"
+        x -> x ≥ node_index
+    elseif name == "==(self)"
+        x -> x == node_index
+    else
+        nothing
+    end
+end

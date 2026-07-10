@@ -640,7 +640,7 @@ end
 
 
 function known_functions()
-  [string(f) for f in [min, maximum, abs, identity]]
+  ["minimum", "maximum", "abs", "identity", "<(self)", ">(self)", "≤(self)", "≥(self)", "==(self)"]
 end
 
 

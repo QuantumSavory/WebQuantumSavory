@@ -125,7 +125,7 @@
                     <div v-else-if="param.selectedType === 'Function'" >
                       <select v-model="param.value" class="functionSelector" :disabled="isEditingDisabled">
                         <option value="default">Default</option>
-                        <option v-for="func in api.getKnownFunctions()" :key="func" :value="func">{{ func }}</option>
+                        <option v-for="func in selectableFunctions" :key="func" :value="func">{{ func }}</option>
                       </select>
                     </div>
                     
@@ -180,6 +180,9 @@ const isEditingDisabled = computed(() => {
   return props.simulationState?.hasSimulationRun || false
 })
 const unsafeCodeEvaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
+const selectableFunctions = computed(() => api.getKnownFunctions().filter(func =>
+  props.category === 'node' || !func.endsWith('(self)')
+))
 
 function toggleDetails(){
   emit('select', props.protocol)

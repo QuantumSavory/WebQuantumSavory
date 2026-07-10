@@ -72,7 +72,7 @@ async function setEvaluationCapability(page, enabled) {
   await page.route('**/known_functions', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    json: { known_functions: ['identity'] },
+    json: { known_functions: ['identity', '<(self)'] },
   }))
   await page.route('**/background_types', route => route.fulfill({
     status: 200,
@@ -135,5 +135,6 @@ test.describe('Unsafe evaluation capability', () => {
 
     await functionTypeSelector.selectOption('Function')
     await expect(page.locator('#edgePanel .functionSelector').first()).toBeEnabled()
+    await expect(page.locator('#edgePanel .functionSelector option[value="<(self)"]')).toHaveCount(0)
   })
 })

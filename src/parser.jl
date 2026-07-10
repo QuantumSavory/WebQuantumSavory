@@ -605,14 +605,15 @@ end
 """
 Handle Function or Lambda parameter conversion
 """
-function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, special_type::String, value, state=nothing)
+function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, special_type::String, value, ctx::Dict{Symbol,Any}, state=nothing)
   if isa(value, Function)
     kwargs[name] = value
     return true
   elseif isa(value, String)
     # Try to resolve by name first (works for both Function and Lambda cases),
     # then fall back to creating a lambda from code.
-    resolved = resolve_function_reference(value)
+    resolved = resolve_self_comparison_reference(value, name, ctx)
+    resolved === nothing && (resolved = resolve_function_reference(value))
     if resolved === nothing && special_type == "Lambda"
       require_unsafe_code_evaluation()
       try
@@ -807,7 +808,7 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any}, state=nothing)
       end
       
       if special_type == "Function" || special_type == "Lambda"
-        _handle_function_lambda_parameter!(kwargs, name, special_type, value, state)
+        _handle_function_lambda_parameter!(kwargs, name, special_type, value, ctx, state)
       elseif special_type == "Symbolic"
         _handle_symbolic_parameter!(kwargs, name, value)
       else
