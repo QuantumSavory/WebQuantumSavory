@@ -14,6 +14,9 @@ steps:
   - label: ":nodejs: Frontend version and build"
     key: frontend-build
     command: ./ci/frontend-build.sh
+    plugins:
+      - mise#v1.1.4:
+          version: "2026.7.2"
     timeout_in_minutes: 20
 
   - label: ":julia: Backend integration"
@@ -22,6 +25,8 @@ steps:
     plugins:
       - JuliaCI/julia#v1:
           version: "1.12"
+      - mise#v1.1.4:
+          version: "2026.7.2"
     artifact_paths: "ci-artifacts/**/*"
     timeout_in_minutes: 60
 
@@ -35,5 +40,7 @@ steps:
     plugins:
       - JuliaCI/julia#v1:
           version: "1.12"
+      - mise#v1.1.4:
+          version: "2026.7.2"
     artifact_paths: "ci-artifacts/**/*"
     timeout_in_minutes: 60

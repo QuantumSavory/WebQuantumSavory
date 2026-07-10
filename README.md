@@ -225,16 +225,18 @@ npm --prefix gui ci --include=dev
 
 For Buildkite, configure the pipeline's upload step as
 `buildkite-agent pipeline upload`. The JuliaCI plugin downloads Julia 1.12 and
-uses an isolated, pipeline-specific depot. The browser step installs the locked
-Chromium binary and its Linux packages through Playwright.
+uses an isolated, pipeline-specific depot. The official mise plugin installs
+the pinned mise release and the Node.js 24 toolchain declared in `mise.toml`.
+The browser step installs the locked Chromium binary and its Linux packages
+through Playwright.
 
-Each Linux agent must still provide Git, curl, wget, Python 3, and Node.js 24
-with npm. Browser agents must use a Playwright-supported Debian/Ubuntu base and
-let the job install apt packages as root or through passwordless `sudo`. Agents
-must be able to download Julia/npm packages and Chromium, and ports 8000 and
-5173 must be available. No queue name, secret, or container image is assumed by
-`.buildkite/pipeline.yml`. Configure Buildkite's GitHub integration to create
-builds for pull requests and pushes to `main`.
+Each Linux agent must still provide Git, Bash, curl, wget, tar, and Python 3.
+Browser agents must use a Playwright-supported Debian/Ubuntu base and let the
+job install apt packages as root or through passwordless `sudo`. Agents must be
+able to download Julia, mise, Node.js, npm packages, and Chromium, and ports
+8000 and 5173 must be available. No queue name, secret, or container image is
+assumed by `.buildkite/pipeline.yml`. Configure Buildkite's GitHub integration
+to create builds for pull requests and pushes to `main`.
 
 ## Automatic Cleanup of Inactive Simulations
 

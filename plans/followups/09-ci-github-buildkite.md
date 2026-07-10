@@ -22,7 +22,7 @@ Run the maintained backend, integration, frontend build, and browser tests in bo
 2. Run backend unit tests, frontend version/build checks, backend integration tests, and the full headless Chromium suite.
 3. Start the backend with bounded readiness polling, capture useful logs on failure, and always terminate it cleanly.
 4. Configure GitHub Actions for pull requests and pushes to `main`, with dependency caches, concurrency cancellation, least-privilege permissions, and pinned major action versions from official publishers.
-5. Configure Buildkite with equivalent steps, provision Julia through the JuliaCI plugin, install browser system dependencies through Playwright, and document the smaller remaining agent baseline. Use official Buildkite syntax and avoid organization-specific secrets or queue names.
+5. Configure Buildkite with equivalent steps, provision Julia and Node.js through the JuliaCI and official mise plugins, install browser system dependencies through Playwright, and document the smaller remaining agent baseline. Use official Buildkite syntax and avoid organization-specific secrets or queue names.
 6. Keep generated manifests, Vite output, Playwright results, and logs uncommitted; upload diagnostic artifacts only on failures where supported.
 7. Document how to run each CI check locally and how Buildkite agents must be provisioned.
 

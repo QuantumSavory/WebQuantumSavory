@@ -84,7 +84,7 @@ The checked-in CI entry points install their own project dependencies and can al
 ./ci/browser.sh
 ```
 
-`ci/run-with-server.sh` provides bounded readiness polling, failure logs, and cleanup for the integration and browser entry points. GitHub Actions and Buildkite use Julia 1.12 and Node.js 24. Buildkite provisions Julia and the Playwright Chromium dependencies during each relevant job; its smaller host baseline is documented in `README.md`.
+`ci/run-with-server.sh` provides bounded readiness polling, failure logs, and cleanup for the integration and browser entry points. GitHub Actions and Buildkite use Julia 1.12 and Node.js 24. Buildkite provisions Julia, Node.js, and the Playwright Chromium dependencies during each relevant job; its smaller host baseline is documented in `README.md`.
 
 ## Change discipline
 
