@@ -51,6 +51,10 @@ function _convert_parameter_value(ptype::AbstractString, value)
   # Normalize ptype string
   ts = String(ptype)
 
+  if ts in ("Wildcard", "QuantumSavory.Wildcard")
+    return true => QuantumSavory.Wildcard()
+  end
+
   # Direct primitives
   try
     if ts in ("Int", "Int64")

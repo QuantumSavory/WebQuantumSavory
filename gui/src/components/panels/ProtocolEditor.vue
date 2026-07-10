@@ -72,6 +72,7 @@
                         @validate="validateFunction(param)"
                       />
                     </div>
+                    <span v-else-if="isWildcardType(param.type)">Wildcard</span>
                   <input v-else type="text" v-model="param.value" style="border-color: transparent;" placeholder="default" :disabled="isEditingDisabled" />
                 </div>
               </div>
@@ -97,7 +98,7 @@
                     <i style="color: #ff0000; font-size: 8px; position: relative; top: -1px;" class="pi pi-exclamation-triangle"></i>
                   </div>
                   <br/>
-                  <select v-model="param.selectedType" class="complexTypeSelector" :disabled="isEditingDisabled">
+                  <select v-model="param.selectedType" class="complexTypeSelector" :disabled="isEditingDisabled" @change="onSelectedTypeChanged(param)">
                     <option :disabled="!paramIsKnownType(type)" v-for="type in parseJuliaType(param.type)" :key="type" :value="type">
                       {{ type == 'default' ? 'Default' : type }}
                     </option>
@@ -128,6 +129,8 @@
                         <option v-for="func in selectableFunctions" :key="func" :value="func">{{ func }}</option>
                       </select>
                     </div>
+
+                    <span v-else-if="isWildcardType(param.selectedType)">Wildcard</span>
                     
                   <input v-else type="text" v-model="param.value" style="border-color: transparent;" :disabled="isEditingDisabled" />
                 </div>
@@ -241,13 +244,17 @@ const filteredParameters = computed(() => {
 
 const knownTypes = ['Float64', 'Int64', 'Bool', 'String', 'Function', 'Nothing', 'Symbolic', 'Vector{Int64}', 'Vector{Float64}', 'Lambda', 'SymbolicUtils.Symbolic', 'default' ];
 
+function isWildcardType(type) {
+  return type === 'Wildcard' || type === 'QuantumSavory.Wildcard'
+}
+
 function paramIsKnownType(param){
   if( param == undefined ){
     return false;
   }
 
   const originalType = typeof param === 'object' ? param.type : param;
-  const isKnownType = knownTypes.includes(originalType);
+  const isKnownType = knownTypes.includes(originalType) || isWildcardType(originalType);
   return isKnownType;
 }
 
@@ -266,11 +273,11 @@ function paramUnknownTypes(param){
     return [];
   }
   let unknownTypes = [];
-  if( typeof param === 'string' && !knownTypes.includes(param) ){
+  if( typeof param === 'string' && !knownTypes.includes(param) && !isWildcardType(param) ){
     unknownTypes.push(param);
   }
   if( Array.isArray( param ) ){
-    unknownTypes = param.filter(type => !knownTypes.includes(type));
+    unknownTypes = param.filter(type => !knownTypes.includes(type) && !isWildcardType(type));
   }
   return unknownTypes;
 }
@@ -288,6 +295,14 @@ function paramTypeIsNumber(param){
 function onCodeEditorValueChanged(paramObject, value) {
   paramObject.value = value;
   delete paramObject.error;
+}
+
+function onSelectedTypeChanged(param) {
+  if (isWildcardType(param.selectedType)) {
+    param.value = 'Wildcard'
+  } else if (param.value === 'Wildcard') {
+    param.value = null
+  }
 }
 
 async function validateFunction(param){

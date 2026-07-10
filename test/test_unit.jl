@@ -29,6 +29,16 @@
       @test all(haskey(st, "doc") for st in slot_types)
   end
 
+  @testset "Wildcard Parameter Conversion" begin
+      ok, wildcard = WebQuantumSavory._convert_parameter_value("QuantumSavory.Wildcard", "Wildcard")
+      @test ok
+      @test wildcard isa QuantumSavory.Wildcard
+
+      ok, wildcard = WebQuantumSavory._convert_parameter_value("Wildcard", "Wildcard")
+      @test ok
+      @test wildcard isa QuantumSavory.Wildcard
+  end
+
   @testset "Known Function References" begin
       @test WebQuantumSavory.known_functions() == [
           "minimum", "maximum", "abs", "identity", "<(self)", ">(self)", "≤(self)", "≥(self)", "==(self)",

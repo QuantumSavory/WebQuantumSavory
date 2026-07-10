@@ -44,7 +44,7 @@ async function openEntanglerEditor(page, projectName) {
       type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
       parameters: [{
         name: 'chooseslotA',
-        type: ['Int64', 'Function'],
+        type: ['Int64', 'Function', 'QuantumSavory.Wildcard'],
       }],
     })
   })
@@ -64,6 +64,8 @@ async function openEntanglerEditor(page, projectName) {
   const functionTypeSelector = page.locator('#edgePanel .complexTypeSelector').filter({
     has: page.locator('option[value="Function"]'),
   }).first()
+  await expect(functionTypeSelector.locator('option[value="QuantumSavory.Wildcard"]')).toBeEnabled()
+  await expect(protocolEditor).not.toContainText('QuantumSavory.Wildcard not supported')
   await functionTypeSelector.selectOption('Lambda')
   return functionTypeSelector
 }
