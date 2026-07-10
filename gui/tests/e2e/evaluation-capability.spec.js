@@ -53,14 +53,14 @@ async function openEntanglerEditor(page, projectName) {
     hasText: 'EntanglerProt',
   })
   await expect(protocolEditor).toBeVisible()
-  await protocolEditor.evaluate(element => {
-    const component = element.__vueParentComponent
-    if (!component?.props?.protocol) {
-      throw new Error('Protocol editor component is unavailable')
-    }
-    component.emit('select', component.props.protocol)
-  })
+  const protocolHeader = protocolEditor.locator('.protocol-list-type')
+  await expect(protocolHeader.getByRole('button', { name: 'Show results' })).toBeVisible()
+  await expect(protocolHeader.getByRole('button', { name: 'Delete protocol' })).toBeVisible()
+  await protocolHeader.click()
   await expect(protocolEditor.locator('.protocol-container')).toBeVisible()
+  await protocolHeader.click()
+  await expect(protocolEditor.locator('.protocol-container')).toBeHidden()
+  await protocolHeader.click()
   const functionTypeSelector = page.locator('#edgePanel .complexTypeSelector').filter({
     has: page.locator('option[value="Function"]'),
   }).first()
