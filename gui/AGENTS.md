@@ -57,7 +57,7 @@ npm run test:headed
 - `npm run build` synchronizes `package.json`'s version from the root `Project.toml`, cleans the generated asset directory, and writes the production bundle to `../public/`.
 - `npm test` and `npm run test:headless` run all Playwright specs headlessly in Chromium. Playwright starts Vite but expects the backend to already be available at `http://localhost:8000`.
 - `npm run test:headed` runs the Chromium suite with a visible browser for local debugging. On a host without an attached display, run it under Xvfb: `xvfb-run -a npm run test:headed`.
-- CI uses Node.js 24 and the repository-root `ci/browser.sh` entry point. GitHub Actions installs Chromium's Linux packages during the job; Buildkite agents must have them provisioned as described in `../README.md`.
+- CI uses Node.js 24 and the repository-root `ci/browser.sh` entry point. GitHub Actions and Buildkite install Chromium's Linux packages during the browser job; Buildkite's remaining host requirements are described in `../README.md`.
 
 Minimum checks:
 
