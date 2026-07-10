@@ -51,6 +51,7 @@ node_modules/
 /gui/test-results/
 /gui/playwright-report/
 /gui/cloc_report.txt
+/ci-artifacts/
 
 # Database
 db/*.sqlite
