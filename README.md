@@ -228,7 +228,8 @@ For Buildkite, configure the pipeline's upload step as
 uses an isolated, pipeline-specific depot. The official mise plugin installs
 the pinned mise release and the Node.js 24 toolchain declared in `mise.toml`.
 The browser step installs the locked Chromium binary and its Linux packages
-through Playwright.
+through Playwright. The integration and browser jobs share a concurrency group
+so overlapping builds cannot contend for ports 8000 and 5173.
 
 Each Linux agent must still provide Git, Bash, curl, wget, tar, and Python 3.
 Browser agents must use a Playwright-supported Debian/Ubuntu base and let the
