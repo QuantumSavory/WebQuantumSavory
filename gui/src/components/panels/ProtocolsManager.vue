@@ -122,7 +122,7 @@ function getProtocolTypeSimpleName( protocolType ){
   return simpleName;
 }
 
-function toggleAddProtocolMenu() {
+function toggleAddProtocolMenu(event) {
   // Prevent adding protocols if simulation has run
   if (props.simulationState?.hasSimulationRun) {
     alert('Cannot add protocols after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')

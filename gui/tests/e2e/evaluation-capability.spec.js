@@ -32,10 +32,9 @@ async function openEntanglerEditor(page, projectName) {
   await page.locator('.edge-list-item').first().click()
   await expect(page.locator('#edgePanel .add-protocol-btn')).toBeVisible()
   await page.click('#edgePanel .add-protocol-btn')
-  const entanglerMenuItem = page.locator('#overlay_menu .p-menu-item').filter({
+  await page.locator('#overlay_menu .p-menu-item-link:visible', {
     hasText: 'EntanglerProt',
-  })
-  await entanglerMenuItem.locator('.p-menu-item-content').dispatchEvent('click')
+  }).click()
   await expect(page.locator('#edgePanel .protocol-editor')).toBeVisible()
   const functionTypeSelector = page.locator('#edgePanel .complexTypeSelector').filter({
     has: page.locator('option[value="Function"]'),
