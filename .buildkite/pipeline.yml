@@ -22,6 +22,8 @@ steps:
   - label: ":julia: Backend integration"
     key: backend-integration
     command: ./ci/backend-integration.sh
+    concurrency: 1
+    concurrency_group: "webquantumsavory/server"
     plugins:
       - JuliaCI/julia#v1:
           version: "1.12"
@@ -33,6 +35,8 @@ steps:
   - label: ":chromium: Full Chromium"
     key: browser
     command: ./ci/browser.sh
+    concurrency: 1
+    concurrency_group: "webquantumsavory/server"
     depends_on: backend-integration
     allow_dependency_failure: true
     env:
