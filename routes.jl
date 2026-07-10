@@ -1773,7 +1773,7 @@ end
 
 info = Dict{String,Any}()
 info["title"] = "WebQuantumSavory API"
-info["version"] = "1.5.0"
+info["version"] = "1.6.0"
 openApi = OpenAPI("3.0.0", info)
 swagger_document = build(openApi)
 
