@@ -159,6 +159,24 @@ test.describe.serial('Main Workflow', () => {
 
     // Expect to have 2 .slot-row-container (belonging to the second node)
     await expect(page.locator('.slot-row-container')).toHaveCount(2);
+
+    await expect(page.locator('#nodePanel .slots-container > .slots-header')).toHaveCount(0);
+    const firstSlot = page.locator('#nodePanel .slot-row-container').first();
+    const slotActions = firstSlot.locator('.slot-actions');
+    await expect(slotActions.getByRole('button')).toHaveCount(3);
+
+    for (const name of ['Toggle details', 'Show results', 'Delete slot']) {
+      const actionButton = slotActions.getByRole('button', { name });
+      await expect(actionButton).toBeVisible();
+      await actionButton.hover();
+      await expect(page.locator('.p-tooltip-text')).toHaveText(name);
+    }
+
+    const toggleDetailsButton = slotActions.getByRole('button', { name: 'Toggle details' });
+    await toggleDetailsButton.click();
+    await expect(firstSlot.locator('.slot-row-expanded')).toBeVisible();
+    await toggleDetailsButton.click();
+    await expect(firstSlot.locator('.slot-row-expanded')).toBeHidden();
   });
 
   // Test 6: Create Protocol in Edge

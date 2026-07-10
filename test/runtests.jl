@@ -17,8 +17,8 @@ Genie.loadapp()
 cd(@__DIR__)
 Pkg.activate(".")
 
-# !!! Main.UserApp is configured as an alias for Main.Cqn and you might encounter it in some tests
-using Main.Cqn, Test, TestSetExtensions, Logging, SafeTestsets
+# !!! Main.UserApp is configured as an alias for Main.WebQuantumSavory and you might encounter it in some tests
+using Main.WebQuantumSavory, Test, TestSetExtensions, Logging, SafeTestsets
 
 macro includetests(testarg...)
   if length(testarg) == 0
@@ -55,6 +55,6 @@ end
 
 Logging.global_logger(NullLogger())
 
-@testset ExtendedTestSet "Cqn tests" begin
+@testset ExtendedTestSet "WebQuantumSavory tests" begin
   @includetests ARGS
 end

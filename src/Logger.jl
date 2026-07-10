@@ -54,7 +54,7 @@ end
 """Append a structured log event to the state's log_events with a timestamp.
 
 Parameters:
-- state: Cqn.State holding the log_events array
+- state: WebQuantumSavory.State holding the log_events array
 - level: a Logging level (e.g., Logging.Info)
 - message: a String describing the event
 - Keyword args are included as extra fields on the event

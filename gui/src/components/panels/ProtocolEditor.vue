@@ -2,14 +2,27 @@
   <div class="protocol-editor protocol-list-item"
         :class="{ 'selected':isSelected }" 
       >
-    <div class="protocol-list-type" 
-    >
+    <div class="protocol-list-type" @click="toggleDetails">
         <div>{{ getProtocolTypeSimpleName(protocol.type) }}</div>
-        <div class="" >
-          <button class="options-btn noborder" @mouseover="showOptionsMenu" aria-label="Menu" style="font-weight: bold; color: #000;">
-            ⋮
+        <div class="protocol-header-actions">
+          <button
+            type="button"
+            class="protocol-header-action noborder"
+            aria-label="Show results"
+            v-tooltip.top="'Show results'"
+            @click.stop="showResults"
+          >
+            <i class="pi pi-chart-line" aria-hidden="true"></i>
           </button>
-          <Menu @mouseleave="hideOptionsMenu" ref="optionsMenuElement"  :model="mainMenuItems" :popup="true" style="transform: translate(10px, -30px);"/>
+          <button
+            type="button"
+            class="protocol-header-action noborder"
+            aria-label="Delete protocol"
+            v-tooltip.top="'Delete protocol'"
+            @click.stop="deleteProtocol"
+          >
+            <i class="pi pi-trash" aria-hidden="true"></i>
+          </button>
         </div>
     </div>
     <div class="protocol-container" v-if="isSelected">
@@ -130,7 +143,6 @@
 <script setup>
 import { defineProps, defineEmits, onMounted, computed, ref, reactive, defineAsyncComponent } from 'vue'
 import Checkbox from 'primevue/checkbox';
-import Menu from 'primevue/menu';
 import { api } from '../../utils/ApiConnector'
 
 const CodeEditorWithSymbols = defineAsyncComponent(() => import('./CodeEditorWithSymbols.vue'))
@@ -169,37 +181,16 @@ const isEditingDisabled = computed(() => {
 })
 const unsafeCodeEvaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
 
-const optionsMenuElement = ref(null)
-const mainMenuItems = computed(() => {
-  let result = [
-    { label: 'Toggle Details', icon: 'pi pi-pencil', command: () => handleOptionsMenu('editDetails') },
-    { label: 'Show Results', icon: 'pi pi-chart-line', command: () => handleOptionsMenu('getResults') },
-    { label: 'Delete', icon: 'pi pi-trash', command: () => handleOptionsMenu('delete') },
-  ];
-  return result;
-}) 
+function toggleDetails(){
+  emit('select', props.protocol)
+}
 
-function handleOptionsMenu(action){
-  if( action === 'editDetails' ){
-    emit('select', props.protocol)
-  }else if( action == "delete" ){
-    deleteProtocol( props.protocol )
-  }else if( action == "getResults" ){
-    // Build context based on category
-    const context = { 
-      ...props.contextInfo,
-      protocolType: getProtocolTypeSimpleName(props.protocol.type)
-    }
-    window.showResultsView( 'protocol', props.protocol, context )
+function showResults(){
+  const context = {
+    ...props.contextInfo,
+    protocolType: getProtocolTypeSimpleName(props.protocol.type)
   }
-}
-
-function showOptionsMenu(event){
-  optionsMenuElement.value.show(event)
-}
-
-function hideOptionsMenu(event){
-  optionsMenuElement.value.hide(event)
+  window.showResultsView( 'protocol', props.protocol, context )
 }
 
 function isGrayedParameter(param){
@@ -368,6 +359,30 @@ function deleteProtocol(  ){
   justify-content: space-between;
   align-items: center;
   user-select: none;
+  cursor: pointer;
+}
+
+.protocol-header-actions{
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+button.protocol-header-action{
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 4px;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button.protocol-header-action:hover{
+  background: #eeeeee;
+  color: #4345ac;
 }
 
 .protocol-list-item.selected > .protocol-list-type{

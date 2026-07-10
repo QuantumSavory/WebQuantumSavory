@@ -63,8 +63,8 @@ route("/simulations", method="GET") do
   sims = [
     Dict(
       :name => state.name,
-      :status => Cqn._determine_status(state)
-    ) for (_, state) in Cqn.STATE
+      :status => WebQuantumSavory._determine_status(state)
+    ) for (_, state) in WebQuantumSavory.STATE
   ]
 
   json(Dict(:success => true, :simulations => sims))
@@ -499,13 +499,13 @@ route("/parse_network_graph", method="POST") do
   payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
   validation_result = validate_payload(payload)
   state = try
-    Cqn.parse_network_graph(validation_result)
+    WebQuantumSavory.parse_network_graph(validation_result)
   catch ex
     isa(ex, APIError) && rethrow(ex)
     throw(validation_error("Invalid graph - data can not be correctly parsed. Details: $ex"))
   end
 
-  json(Cqn.serialize_state(state))
+  json(WebQuantumSavory.serialize_state(state))
 end
 
 ########################################################
@@ -643,11 +643,11 @@ end
 route("/prepare_simulation", method="POST") do
   simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
-  state = Cqn.STATE[simulation_name]
+  state = WebQuantumSavory.STATE[simulation_name]
 
   if state.network === nothing
     throw(validation_error("Network not found in simulation $simulation_name"))
@@ -655,7 +655,7 @@ route("/prepare_simulation", method="POST") do
 
   # Prepare the simulation, logging unexpected errors to the simulation's log stream
   try
-    state = Cqn.prepare_simulation(state, simulation_name)
+    state = WebQuantumSavory.prepare_simulation(state, simulation_name)
   catch e
     isa(e, APIError) && rethrow(e)
 
@@ -666,7 +666,7 @@ route("/prepare_simulation", method="POST") do
     throw(validation_error("Error preparing simulation $simulation_name: $(e)", Dict("error" => string(e))))
   end
 
-  json(Cqn.serialize_state(state))
+  json(WebQuantumSavory.serialize_state(state))
 end
 
 ########################################################
@@ -749,18 +749,18 @@ route("/run_simulation", method="POST") do
   simulation_name = payload["name"]
   time_units = _parse_time_input(payload["time_units"])
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
-  state = Cqn.STATE[simulation_name]
+  state = WebQuantumSavory.STATE[simulation_name]
 
   if state.simulation === nothing
     throw(validation_error("Simulation not prepared"))
   end
 
   try
-    Cqn.run_simulation(state, time_units, simulation_name)
+    WebQuantumSavory.run_simulation(state, time_units, simulation_name)
   catch e
     if isa(e, APIError)
       rethrow(e)
@@ -772,7 +772,7 @@ route("/run_simulation", method="POST") do
   end
 
   json(
-    Dict(:success => true, :status => "started", :state => Cqn.serialize_state(state));
+    Dict(:success => true, :status => "started", :state => WebQuantumSavory.serialize_state(state));
     status=202,
   )
 end
@@ -908,12 +908,12 @@ end
 route("/get_state", method="GET") do
   simulation_name = Genie.Requests.getpayload()[:name]
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
-  state = Cqn.STATE[simulation_name]
-  json(Dict(:success => true, :state => Cqn.serialize_state(state)))
+  state = WebQuantumSavory.STATE[simulation_name]
+  json(Dict(:success => true, :state => WebQuantumSavory.serialize_state(state)))
 end
 
 ########################################################
@@ -1012,12 +1012,12 @@ route("/slots/:name/:slot_id", method="GET") do
   slot_id = string(params(:slot_id))
   simulation_name = string(params(:name))
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
-  state = Cqn.STATE[simulation_name]
-  result = Cqn.get_slot_state(slot_id, state)
+  state = WebQuantumSavory.STATE[simulation_name]
+  result = WebQuantumSavory.get_slot_state(slot_id, state)
 
   json(Dict(:success => true, result...))
 end
@@ -1084,18 +1084,18 @@ end
 route("/pause_simulation", method="POST") do
   simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
   try
-    state = Cqn.STATE[simulation_name]
-    Cqn.pause_simulation(state)
+    state = WebQuantumSavory.STATE[simulation_name]
+    WebQuantumSavory.pause_simulation(state)
 
     json(Dict(
       :success => true,
       :message => "Simulation paused",
-      :state => Cqn.serialize_state(state),
+      :state => WebQuantumSavory.serialize_state(state),
     ))
   catch e
     if isa(e, APIError)
@@ -1153,11 +1153,11 @@ end
 route("/destroy_simulation", method="POST") do
   simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
-  if Cqn.destroy_simulation(simulation_name)
+  if WebQuantumSavory.destroy_simulation(simulation_name)
     json(Dict(:success => true, :message => "Simulation destroyed and resources cleaned up"))
   else
     json(Dict(:success => true, :message => "Simulation destroyed (cleanup had warnings)", :warning => "Some resources may not have been fully cleaned up"))
@@ -1222,12 +1222,12 @@ route("/protocols/:name/:protocol_id", method="GET") do
   protocol_id = string(params(:protocol_id))
   simulation_name = string(params(:name))
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
-  state = Cqn.STATE[simulation_name]
-  result = Cqn.get_protocol_state(protocol_id, state)
+  state = WebQuantumSavory.STATE[simulation_name]
+  result = WebQuantumSavory.get_protocol_state(protocol_id, state)
 
   json(Dict(:success => true, result...))
 end
@@ -1280,7 +1280,7 @@ end
                   known_functions: ["min", "maximum", "abs", "identity"]
 """
 route("/known_functions") do
-  Dict(:known_functions => Cqn.known_functions()) |> json
+  Dict(:known_functions => WebQuantumSavory.known_functions()) |> json
 end
 
 ########################################################
@@ -1640,14 +1640,14 @@ route("/logs/:name", method="GET") do
   simulation_name = string(params(:name))
 
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
   purge_raw = Genie.Requests.getpayload(:purge, "true")
   purge = purge_raw isa Bool ? purge_raw : (lowercase(string(purge_raw)) in ("true", "1", "yes", "on"))
 
-  logs = Cqn.get_logs(simulation_name, purge)
+  logs = WebQuantumSavory.get_logs(simulation_name, purge)
 
   json(Dict(
     :success => true,
@@ -1730,11 +1730,11 @@ route("/dev/manipulate_state", method="POST") do
 
   simulation_name = payload["name"]
 
-  if !haskey(Cqn.STATE, simulation_name)
+  if !haskey(WebQuantumSavory.STATE, simulation_name)
     throw(not_found_error("Simulation", simulation_name))
   end
 
-  state = Cqn.STATE[simulation_name]
+  state = WebQuantumSavory.STATE[simulation_name]
 
   # Allow manipulation of various fields
   if haskey(payload, "is_running")
@@ -1772,8 +1772,8 @@ end
 ########################################################
 
 info = Dict{String,Any}()
-info["title"] = "CQN API"
-info["version"] = "1.0.0"
+info["title"] = "WebQuantumSavory API"
+info["version"] = "1.5.0"
 openApi = OpenAPI("3.0.0", info)
 swagger_document = build(openApi)
 
@@ -1784,7 +1784,7 @@ end
 ########################################################
 
 try 
-  @async Cqn.cleanup_stale_simulations() |> errormonitor
+  @async WebQuantumSavory.cleanup_stale_simulations() |> errormonitor
 catch e
   @error "Error starting cleanup_stale_simulations" error=e
 end

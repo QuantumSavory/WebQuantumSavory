@@ -6,7 +6,7 @@ Make simulation runs observable and cooperatively pausable while they are in pro
 
 ## Evidence
 
-- `/run_simulation` executes `Cqn.run_simulation` synchronously.
+- `/run_simulation` executes `WebQuantumSavory.run_simulation` synchronously.
 - The run loop advances a long CPU-bound sequence without yielding to other request tasks.
 - The GUI intentionally fires the run request in the background and polls, but the 1000-unit run completes before `/pause_simulation` is handled.
 - The current end-to-end result is 8 passed, 1 failed, and 1 skipped.

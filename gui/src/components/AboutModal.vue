@@ -2,7 +2,7 @@
   <div v-if="show" class="modal-overlay" @click="handleOverlayClick">
     <div class="modal-dialog about-modal" @click.stop>
       <div class="modal-header">
-        <h3>About CQN Simulation Builder</h3>
+        <h3>About WebQuantumSavory Simulation Builder</h3>
         <button class="close-btn" @click="$emit('close')" aria-label="Close">
           <i class="pi pi-times"></i>
         </button>

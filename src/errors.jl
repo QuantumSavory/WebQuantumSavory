@@ -1,4 +1,4 @@
-# Error handling framework for CQN API
+# Error handling framework for WebQuantumSavory API
 
 # Standard error response format
 function create_error_response(error::APIError)
