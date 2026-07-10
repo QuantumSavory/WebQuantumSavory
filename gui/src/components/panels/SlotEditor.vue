@@ -1,16 +1,36 @@
 <template>
-    <div class="" >
-        <button class="options-btn noborder" @mouseover="showOptionsMenu" aria-label="Menu" style="font-weight: bold; color: #000;    padding: 0px 5px;">
-        ⋮
+    <div class="slot-actions">
+        <button
+            type="button"
+            class="slot-action noborder"
+            aria-label="Toggle details"
+            v-tooltip.top="'Toggle details'"
+            @click.stop="toggleDetails"
+        >
+            <i class="pi pi-pencil" aria-hidden="true"></i>
         </button>
-        <Menu @mouseleave="hideOptionsMenu" ref="optionsMenuElement"  :model="optionsMenuItems" :popup="true" style="transform: translate(10px, -30px);"/>
+        <button
+            type="button"
+            class="slot-action noborder"
+            aria-label="Show results"
+            v-tooltip.top="'Show results'"
+            @click.stop="showResults"
+        >
+            <i class="pi pi-chart-line" aria-hidden="true"></i>
+        </button>
+        <button
+            type="button"
+            class="slot-action noborder"
+            aria-label="Delete slot"
+            v-tooltip.top="'Delete slot'"
+            @click.stop="deleteSlot"
+        >
+            <i class="pi pi-trash" aria-hidden="true"></i>
+        </button>
     </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
-import Menu from 'primevue/menu';
-
 const props = defineProps({
     registerSlot: {
         type: Object,
@@ -24,50 +44,47 @@ const props = defineProps({
 
 const emit = defineEmits(['deleteSlot', 'toggleDetails'])
 
-const slot = ref(props.registerSlot);
-const optionsMenuElement = ref(null);
-const optionsMenuItems = computed(() => {
-  let result = [
-    { label: 'Toggle Details', icon: 'pi pi-pencil', command: () => handleOptionsMenu('editDetails') },
-    { label: 'Show Results', icon: 'pi pi-chart-line', command: () => handleOptionsMenu('getResults') },
-    { label: 'Delete', icon: 'pi pi-trash', command: () => handleOptionsMenu('delete') },
-  ];
-  return result;
-}) 
-
-
-const slotOptionsMenuItems = ref([
-  {
-    label: 'Delete Slot',
-    icon: 'pi pi-trash',
-    command: () => { deleteSlot(slot) }
-  }
-])
-
-function handleOptionsMenu(action){
-  if( action === 'delete' ){
-    emit('deleteSlot', slot.value)
-  }else if( action === 'editDetails' ){
-    emit('toggleDetails', slot.value)
-  }else if( action === 'getResults' ){
-    // Find slot index in node's slots array
-    const slotIndex = props.node?.data?.slots?.findIndex(s => s.id === slot.value.id) ?? -1
-    const context = {
-      nodeName: props.node?.name || 'Unknown Node',
-      slotIndex: slotIndex >= 0 ? slotIndex : 'Unknown'
-    }
-    window.showResultsView( 'slot', slot.value, context )
-  }
+function toggleDetails(){
+  emit('toggleDetails', props.registerSlot)
 }
 
-function showOptionsMenu(event){
-  optionsMenuElement.value.show(event)
+function showResults(){
+  const slotIndex = props.node?.data?.slots?.findIndex(s => s.id === props.registerSlot.id) ?? -1
+  const context = {
+    nodeName: props.node?.name || 'Unknown Node',
+    slotIndex: slotIndex >= 0 ? slotIndex : 'Unknown'
+  }
+  window.showResultsView( 'slot', props.registerSlot, context )
 }
 
-function hideOptionsMenu(event){
-  optionsMenuElement.value.hide(event)
+function deleteSlot(){
+  emit('deleteSlot', props.registerSlot)
 }
 </script>
 
 <style scoped>
+.slot-actions{
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  margin-left: 4px;
+}
+
+button.slot-action{
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 4px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button.slot-action:hover{
+  background: #eeeeee;
+  color: #4345ac;
+}
 </style>

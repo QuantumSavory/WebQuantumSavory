@@ -42,14 +42,6 @@
       <section class="panel-section">
         <div class="panel-section-title">SLOTS ({{ props.node.data.slots.length }})</div>
         <div v-if="props.node.data.slots.length > 0" class="slots-container">
-          <!-- Header Row -->
-          <div class="slots-header">
-            <div v-if="batchEditMode" class="slot-cell checkbox-header"></div>
-            <div class="slot-cell type-header"></div>
-            <div class="slot-cell bg-noise-header">BG Noise</div>
-            <!-- <div class="slot-cell last-op-header">Last Op</div> -->
-          </div>
-          
           <!-- Slots List -->
           <div class="slots-list">
             <div v-for="slot in props.node.data.slots" :key="slot.id" :class="{ 'slot-row-container': true, 'expanded-slot': slot.ui_expanded}">
@@ -682,15 +674,6 @@ if (props.justCreated) {
 /* New Flexbox-based Slots Layout */
 .slots-container {
   margin-bottom: 0.62rem;
-}
-
-.slots-header {
-  display: flex;
-  align-items: center;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #666;
-  height: 28px;
 }
 
 .slots-list {
