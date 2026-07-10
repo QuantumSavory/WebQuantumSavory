@@ -30,6 +30,11 @@ const SWAPPER_TYPE = {
       type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
       doc: 'Remote high node, a predicate, or a wildcard.',
     },
+    {
+      field: 'chooseL',
+      type: 'Function',
+      doc: 'Choose one candidate from the filtered low-node results.',
+    },
   ],
 }
 
@@ -118,6 +123,10 @@ async function createProjectWithEdge(page) {
           name: 'nodeH',
           type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
         },
+        {
+          name: 'chooseL',
+          type: 'Function',
+        },
       ],
     })
     projectData.net.edges[0].data.protocols.push({
@@ -141,6 +150,17 @@ async function openProtocolEditor(panel, protocolName) {
   await editor.locator('.protocol-list-type').click()
   await expect(editor.locator('.protocol-container')).toBeVisible()
   return editor
+}
+
+async function serializedNodeParameter(page, name) {
+  return page.evaluate(parameterName => {
+    const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    const minimized = setupState?.minimizedProjectData
+    const payload = minimized?.value ?? minimized
+    return payload?.net?.nodes?.[0]?.data?.protocols?.[0]?.parameters?.find(
+      parameter => parameter.name === parameterName,
+    )
+  }, name)
 }
 
 test.describe('Protocol parameter options', () => {
@@ -168,14 +188,7 @@ test.describe('Protocol parameter options', () => {
     await expect(nodeLRow.locator('.param-value')).toHaveText('Wildcard')
     await expect(nodeLRow.locator('.param-value input, .param-value select')).toHaveCount(0)
 
-    const serializedParameter = await page.evaluate(() => {
-      const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
-      const minimized = setupState?.minimizedProjectData
-      const payload = minimized?.value ?? minimized
-      return payload?.net?.nodes?.[0]?.data?.protocols?.[0]?.parameters?.find(
-        parameter => parameter.name === 'nodeL',
-      )
-    })
+    const serializedParameter = await serializedNodeParameter(page, 'nodeL')
     expect(serializedParameter).toEqual({
       name: 'nodeL',
       type: 'QuantumSavory.Wildcard',
@@ -197,5 +210,47 @@ test.describe('Protocol parameter options', () => {
     for (const name of SELF_FUNCTIONS) {
       await expect(edgeFunctionSelector.locator(`option[value="${name}"]`)).toHaveCount(0)
     }
+  })
+
+  test('offers readable predefined and custom choices for Union and standalone Function fields', async ({ page }) => {
+    await page.locator('.node-marker').first().click()
+    const swapperEditor = await openProtocolEditor(page.locator('#nodePanel'), 'SwapperProt')
+
+    const nodeLRow = parameterRow(swapperEditor, 'nodeL')
+    const nodeLTypeSelector = nodeLRow.locator('.complexTypeSelector')
+    await expect(nodeLTypeSelector.locator('option')).toHaveText([
+      'Default',
+      'QuantumSavory.Wildcard',
+      'Int64',
+      'Predefined function',
+      'Custom function',
+    ])
+    await nodeLTypeSelector.selectOption('Lambda')
+    await expect(nodeLRow.locator('.code-editor-with-symbols')).toBeVisible()
+
+    const chooseLRow = parameterRow(swapperEditor, 'chooseL')
+    const chooseLTypeSelector = chooseLRow.locator('.complexTypeSelector')
+    await expect(chooseLTypeSelector.locator('option')).toHaveText([
+      'Default',
+      'Predefined function',
+      'Custom function',
+    ])
+
+    await chooseLTypeSelector.selectOption('Function')
+    const predefinedSelector = chooseLRow.locator('.functionSelector')
+    await expect(predefinedSelector).toBeVisible()
+    await predefinedSelector.selectOption('identity')
+    await expect.poll(() => serializedNodeParameter(page, 'chooseL')).toEqual({
+      name: 'chooseL',
+      type: 'Function',
+      value: 'identity',
+    })
+
+    await chooseLTypeSelector.selectOption('default')
+    await expect(chooseLRow.locator('.param-value')).toHaveText('Use protocol default')
+    await expect.poll(() => serializedNodeParameter(page, 'chooseL')).toBeUndefined()
+
+    await chooseLTypeSelector.selectOption('Lambda')
+    await expect(chooseLRow.locator('.code-editor-with-symbols')).toBeVisible()
   })
 })

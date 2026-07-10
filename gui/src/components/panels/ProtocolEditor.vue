@@ -100,7 +100,7 @@
                   <br/>
                   <select v-model="param.selectedType" class="complexTypeSelector" :disabled="isEditingDisabled" @change="onSelectedTypeChanged(param)">
                     <option :disabled="!paramIsKnownType(type)" v-for="type in parseJuliaType(param.type)" :key="type" :value="type">
-                      {{ type == 'default' ? 'Default' : type }}
+                      {{ getTypeOptionLabel(type) }}
                     </option>
                   </select>
                 </div>
@@ -130,6 +130,7 @@
                       </select>
                     </div>
 
+                    <span v-else-if="param.selectedType === 'default'">Use protocol default</span>
                     <span v-else-if="isWildcardType(param.selectedType)">Wildcard</span>
                     
                   <input v-else type="text" v-model="param.value" style="border-color: transparent;" :disabled="isEditingDisabled" />
@@ -204,17 +205,24 @@ function isGrayedParameter(param){
 }
 
 function parseJuliaType( inputType ) {
-  if( Array.isArray( inputType ) ){
-    const containsFunction = inputType.some( type => type === 'Function' );
-    if( containsFunction ){
-      return ['default', ...inputType, 'Lambda'];
-    }else{
-      return ['default', ...inputType];
-    }
+  const isUnion = Array.isArray( inputType );
+  const declaredTypes = isUnion ? inputType : [inputType];
+
+  if( declaredTypes.includes('Function') ){
+    return ['default', ...declaredTypes, 'Lambda'];
   }
-  else{
-    return inputType;
-  }
+
+  return isUnion ? ['default', ...declaredTypes] : inputType;
+}
+
+const typeOptionLabels = {
+  default: 'Default',
+  Function: 'Predefined function',
+  Lambda: 'Custom function',
+}
+
+function getTypeOptionLabel(type) {
+  return typeOptionLabels[type] || type
 }
 
 
@@ -298,7 +306,9 @@ function onCodeEditorValueChanged(paramObject, value) {
 }
 
 function onSelectedTypeChanged(param) {
-  if (isWildcardType(param.selectedType)) {
+  if (param.selectedType === 'default') {
+    param.value = null
+  } else if (isWildcardType(param.selectedType)) {
     param.value = 'Wildcard'
   } else if (param.value === 'Wildcard') {
     param.value = null
