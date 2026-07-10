@@ -49,13 +49,14 @@ npm ci
 npm run dev
 npm run build
 npx playwright install chromium
-xvfb-run -a npm test
+npm test
+npm run test:headed
 ```
 
 - `npm run dev` starts Vite at `http://localhost:5173`; it does not start the backend.
 - `npm run build` synchronizes `package.json`'s version from the root `Project.toml`, cleans the generated asset directory, and writes the production bundle to `../public/`.
-- `npm test` runs all Playwright specs for Chromium. Playwright starts Vite but expects the backend to already be available at `http://localhost:8000`.
-- The Playwright configuration forces a headed browser even for the misleadingly named `test:headless` script. Use Xvfb on a host without a display until the configuration is deliberately changed.
+- `npm test` and `npm run test:headless` run all Playwright specs headlessly in Chromium. Playwright starts Vite but expects the backend to already be available at `http://localhost:8000`.
+- `npm run test:headed` runs the Chromium suite with a visible browser for local debugging. On a host without an attached display, run it under Xvfb: `xvfb-run -a npm run test:headed`.
 
 Minimum checks:
 
