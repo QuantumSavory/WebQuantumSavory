@@ -6,15 +6,21 @@ using QuantumSavory
 using QuantumSavory.ProtocolZoo
 using ResumableFunctions
 using ConcurrentSim
+using ..Cqn: require_unsafe_code_evaluation
 
 import Base: Meta
 
 """
-Test Julia code in an isolated sandboxed environment.
+Test Julia code in a fresh module.
+
+This executes code in the server process. A fresh module isolates names; it is
+not a security sandbox.
 
 Returns a tuple of (success::Bool, results::Dict, error::Union{Nothing, Exception})
 """
 function test_code(code_string::String)
+    require_unsafe_code_evaluation()
+
     # Create isolated module
     sandbox = Module()
 
@@ -83,12 +89,15 @@ end
 
 
 """
-Evaluate a symbolic expression in an isolated temporary module preloaded with
-QuantumSavory-related namespaces. Returns a tuple of
+Evaluate a symbolic expression in a temporary module preloaded with
+QuantumSavory-related namespaces. This is namespace isolation, not a security
+sandbox. Returns a tuple of
 (success::Bool, value::Any, error::Union{Nothing,Exception}).
 If successful, `value` is the actual evaluated symbolic object.
 """
 function evaluate_symbolic_expression(expr::String)
+    require_unsafe_code_evaluation()
+
     # Create isolated module and load required namespaces
     tempmod = Module()
 

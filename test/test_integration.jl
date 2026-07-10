@@ -80,6 +80,14 @@
     error("Timed out waiting for simulation $simulation_name; last state: $last_state")
   end
 
+  platform_info_response = make_request("GET", "/platform_info")
+  platform_info = parse_response(platform_info_response)
+  unsafe_evaluation_enabled = get(
+    get(platform_info, "capabilities", Dict{String,Any}()),
+    "unsafe_code_evaluation",
+    false,
+  )
+
   @testset "Server Status" begin
       response = make_request("GET", "/status")
       @test response.status == 200
@@ -93,6 +101,13 @@
       body = String(response.body)
       # Root now serves the app UI (public/index.html). Check for HTML markers.
       @test contains(lowercase(body), "<!doctype") || contains(lowercase(body), "<html") || contains(lowercase(body), "<head")
+  end
+
+  @testset "Platform Info" begin
+      @test platform_info_response.status == 200
+      @test haskey(platform_info, "versions")
+      @test haskey(platform_info, "capabilities")
+      @test unsafe_evaluation_enabled isa Bool
   end
 
   @testset "Background Types Endpoint" begin
@@ -428,12 +443,20 @@
   end
 
   @testset "Test Code Endpoint" begin
-      # Success - function definition
+      # The same contract supports default-enabled test servers and explicit
+      # disabled-policy integration runs.
       response = make_request("POST", "/test_code", body=Dict("code" => "f(x) = x + 1"))
-      @test response.status == 200
       data = parse_response(response)
-      @test data["success"] == true
-      @test haskey(data, "results")
+      if unsafe_evaluation_enabled
+        @test response.status == 200
+        @test data["success"] == true
+        @test haskey(data, "results")
+      else
+        @test response.status == 403
+        @test data["success"] == false
+        @test data["error"] == "Unsafe Julia code evaluation is disabled"
+        @test data["error_code"] == "UNSAFE_EVALUATION_DISABLED"
+      end
 
       # Validation error (missing field)
       response2 = make_request("POST", "/test_code", body=Dict("wrong" => "x=1"))
@@ -444,14 +467,21 @@
   end
 
   @testset "Test Symbolic Expression Endpoint" begin
-      # Success
+      # Success when enabled; stable policy denial otherwise.
       response = make_request("POST", "/test_symbolic_expression", body=Dict("expr" => "(Z₁⊗Z₁+Z₂⊗Z₂) / √2"))
-      @test response.status == 200
       data = parse_response(response)
-      @test data["success"] == true
-      @test haskey(data, "results")
-      @test haskey(data["results"], "latex")
-      @test haskey(data["results"], "value")
+      if unsafe_evaluation_enabled
+        @test response.status == 200
+        @test data["success"] == true
+        @test haskey(data, "results")
+        @test haskey(data["results"], "latex")
+        @test haskey(data["results"], "value")
+      else
+        @test response.status == 403
+        @test data["success"] == false
+        @test data["error"] == "Unsafe Julia code evaluation is disabled"
+        @test data["error_code"] == "UNSAFE_EVALUATION_DISABLED"
+      end
 
       # Validation error (missing field)
       response2 = make_request("POST", "/test_symbolic_expression", body=Dict("wrong" => "..."))
@@ -460,14 +490,13 @@
       @test data2["success"] == false
       @test occursin("Missing required field 'expr'", data2["error"])
 
-      # Execution error (bad expression)
-      response3 = make_request("POST", "/test_symbolic_expression", body=Dict("expr" => "(Z₁⊗Z₁+"))
-      @test response3.status == 400 || response3.status == 200  # server wraps as 400 via handler; allow either in case of internal mapping
-      data3 = parse_response(response3)
-      if response3.status == 400
+      if unsafe_evaluation_enabled
+        # Execution error (bad expression)
+        response3 = make_request("POST", "/test_symbolic_expression", body=Dict("expr" => "(Z₁⊗Z₁+"))
+        @test response3.status == 400 || response3.status == 200  # server wraps as 400 via handler; allow either in case of internal mapping
+        data3 = parse_response(response3)
         @test data3["success"] == false
-      else
-        @test data3["success"] == false || haskey(data3, "error")
+        @test data3["error_code"] == "EVALUATION_FAILED"
       end
   end
 

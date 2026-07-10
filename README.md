@@ -90,9 +90,9 @@ The state response will show `simulation_paused: true` and `simulation_running: 
 - **`GET /slots/:name/:slot_id`** - Details for a slot in a simulation
 - **`GET /simulations`** - List existing simulations with `name` and `status`
 - **`GET /known_functions`** - List of supported Julia functions usable as argument values
-- **`POST /test_code`** - Test Julia code in a sandboxed environment
-- **`POST /test_symbolic_expression`** - Evaluate a symbolic expression and return LaTeX
-- **`GET /platform_info`** - Versions: Julia, QuantumSavory (if installed), and app version
+- **`POST /test_code`** - Test Julia code when unsafe evaluation is enabled
+- **`POST /test_symbolic_expression`** - Evaluate a symbolic expression and return LaTeX when unsafe evaluation is enabled
+- **`GET /platform_info`** - Versions and server capabilities, including `unsafe_code_evaluation`
 - **`GET /logs/:name`** - Fetch log events for a simulation; supports `purge` query (default `true`). Example: `/logs/my-sim?purge=false`
 - **`GET /status`** - Server health check
 - **`GET /docs`** - Interactive Swagger UI
@@ -122,7 +122,31 @@ The best way to explore the API is through the interactive Swagger documentation
 
 ### Symbolic Expression Evaluation
 
-Use `POST /test_symbolic_expression` to evaluate a symbolic expression in a sandboxed module with QuantumSavory preloaded and get its LaTeX representation.
+`POST /test_code`, `POST /test_symbolic_expression`, lambda and symbolic
+protocol parameters, and fallback conversion of complex parameters all execute
+Julia code in the API server process. A fresh module isolates names, but does
+not restrict filesystem, process, network, memory, or CPU access. Do not enable
+these features for untrusted users.
+
+Unsafe evaluation is enabled by default only in Genie's `dev` and `test`
+environments. It is disabled in `prod` and unrecognized environments. Operators
+can override either default with one environment variable:
+
+```bash
+WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true ./bin/server
+```
+
+The value is parsed strictly: only `true` or `false` are accepted, ignoring case
+and surrounding whitespace. Keep the variable unset or set it to `false` in
+production unless the deployment intentionally trusts every API caller and
+simulation payload. When disabled, evaluation requests return HTTP 403 with
+`error_code: "UNSAFE_EVALUATION_DISABLED"`. Evaluation exceptions are included
+only in `dev` and `test` responses, even when evaluation is explicitly enabled
+in another environment.
+
+When enabled, use `POST /test_symbolic_expression` to evaluate a symbolic
+expression in a fresh module with QuantumSavory preloaded and get its LaTeX
+representation.
 
 Example request body:
 
@@ -130,16 +154,16 @@ Example request body:
 { "expr": "(Z₁⊗Z₁+Z₂⊗Z₂) / √2" }
 ```
 
-Successful response:<
+Successful response:
 
 ```json
-{ "success": true, "latex": "... LaTeX string ..." }
+{ "success": true, "results": { "latex": "... LaTeX string ...", "value": "..." } }
 ```
 
 On error, you'll receive:
 
 ```json
-{ "success": false, "error": "<message>", "error_type": "<ExceptionType>" }
+{ "success": false, "error": "<message>", "error_code": "EVALUATION_FAILED" }
 ```
 
 ## Running Tests

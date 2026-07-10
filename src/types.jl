@@ -26,10 +26,15 @@ function (f::LambdaImpl)(args...)
 end
 
 """
-Create a Lambda from a string representation using a temporary module for safety
+Create a Lambda from a string representation in a temporary module.
+
+This evaluates code in the server process; the temporary module is not a
+security boundary.
 """
 function create_lambda(lambda_string::String)
-    # Create a temporary module for safe evaluation
+    require_unsafe_code_evaluation()
+
+    # Create a temporary namespace for evaluation
     temp_module = Module()
 
     try

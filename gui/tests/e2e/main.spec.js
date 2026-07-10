@@ -164,8 +164,13 @@ test.describe.serial('Main Workflow', () => {
   // Test 6: Create Protocol in Edge
   test('create protocol in edge', async () => {
     const page = sharedPage;
-    // Select Edge by clicking on map, mid-way between the two nodes
-    await page.click('canvas', { position: { x: 500, y: 350 } });
+    // Select the edge through its stable list item rather than map coordinates.
+    const edgeListItem = page.locator('.edge-list-item').first();
+    if (!await edgeListItem.isVisible()) {
+      await page.click('#edgeListPanel .panel-title-text');
+    }
+    await expect(edgeListItem).toBeVisible();
+    await edgeListItem.click();
 
     await expect(page.locator('#edgePanel .panel-content .add-protocol-btn')).toBeVisible();
     await page.click('#edgePanel .panel-content .add-protocol-btn');

@@ -518,6 +518,114 @@
     @test ok && v === true
   end
 
+  @testset "Unsafe Evaluation Policy" begin
+    @test Cqn.unsafe_code_evaluation_enabled(environment="dev", override=nothing)
+    @test Cqn.unsafe_code_evaluation_enabled(environment="test", override=nothing)
+    @test !Cqn.unsafe_code_evaluation_enabled(environment="prod", override=nothing)
+    @test !Cqn.unsafe_code_evaluation_enabled(environment="staging", override=nothing)
+    @test Cqn.unsafe_code_evaluation_enabled(environment="prod", override=" TRUE ")
+    @test !Cqn.unsafe_code_evaluation_enabled(environment="test", override="False")
+    @test_throws ArgumentError Cqn.unsafe_code_evaluation_enabled(environment="prod", override="1")
+    @test_throws ArgumentError Cqn.unsafe_code_evaluation_enabled(environment="prod", override="yes")
+
+    production_failure = Cqn.evaluation_failure_response(
+      ErrorException("sensitive evaluation details");
+      environment="prod",
+    )
+    @test production_failure[:error] == "Evaluation failed"
+    @test production_failure[:error_code] == Cqn.EVALUATION_FAILED_CODE
+    @test !haskey(production_failure, :error_type)
+    @test !occursin("sensitive", string(production_failure))
+
+    staging_failure = Cqn.evaluation_failure_response(
+      ErrorException("staging details are also private");
+      environment="staging",
+    )
+    @test staging_failure[:error] == "Evaluation failed"
+    @test !haskey(staging_failure, :error_type)
+
+    development_failure = Cqn.evaluation_failure_response(
+      ErrorException("useful development details");
+      environment="dev",
+    )
+    @test occursin("useful development details", development_failure[:error])
+    @test haskey(development_failure, :error_type)
+  end
+
+  @testset "Unsafe Evaluation Surfaces" begin
+    function test_disabled(thunk)
+      caught = try
+        thunk()
+        nothing
+      catch e
+        e
+      end
+
+      @test caught isa Cqn.APIError
+      @test caught.status_code == 403
+      @test caught.error_code == Cqn.UNSAFE_EVALUATION_DISABLED_CODE
+    end
+
+    original_override = get(ENV, Cqn.UNSAFE_EVALUATION_ENV_VAR, nothing)
+    withenv(Cqn.UNSAFE_EVALUATION_ENV_VAR => "false") do
+      # Direct code, symbolic, and lambda entry points enforce the policy before
+      # entering their tuple-return/error-wrapping catches.
+      test_disabled(() -> Cqn.Sandbox.test_code("x -> x + 1"))
+      test_disabled(() -> Cqn.Sandbox.evaluate_symbolic_expression("Z₁"))
+      test_disabled(() -> Cqn.create_lambda("x -> x + 1"))
+      test_disabled(() -> Cqn.create_symbolic("Z₁"))
+
+      # Known function references and primitive conversion do not evaluate code.
+      safe_function_kwargs = Dict{Symbol,Any}()
+      @test Cqn._handle_function_lambda_parameter!(
+        safe_function_kwargs,
+        :filter,
+        "Function",
+        "identity",
+      )
+      @test safe_function_kwargs[:filter] === identity
+
+      safe_primitive_kwargs = Dict{Symbol,Any}()
+      @test Cqn._handle_regular_parameter!(safe_primitive_kwargs, :rounds, "Int64", "3")
+      @test safe_primitive_kwargs[:rounds] == 3
+
+      safe_noise = Cqn._instantiate_noise(Dict(
+        "type" => "AmplitudeDamping",
+        "parameters" => [Dict("name" => "τ", "value" => "2.0")],
+      ))
+      @test safe_noise isa QuantumSavory.AmplitudeDamping
+
+      # Each payload fallback propagates denial instead of silently dropping a
+      # parameter or using a constructor default.
+      test_disabled(() -> Cqn._handle_function_lambda_parameter!(
+        Dict{Symbol,Any}(),
+        :filter,
+        "Lambda",
+        "x -> true",
+      ))
+      test_disabled(() -> Cqn._handle_symbolic_parameter!(
+        Dict{Symbol,Any}(),
+        :pairstate,
+        "Z₁",
+      ))
+      test_disabled(() -> Cqn._handle_regular_parameter!(
+        Dict{Symbol,Any}(),
+        :values,
+        "Vector{Int64}",
+        "[1, 2]",
+      ))
+      test_disabled(() -> Cqn._instantiate_noise(Dict(
+        "type" => "AmplitudeDamping",
+        "parameters" => [Dict(
+          "name" => "τ",
+          "value" => "begin error(\"must not execute\"); 2.0 end",
+        )],
+      )))
+    end
+
+    @test get(ENV, Cqn.UNSAFE_EVALUATION_ENV_VAR, nothing) == original_override
+  end
+
   @testset "Symbolic Expression Evaluation (Unit)" begin
     # Simple valid expression using QuantumSavory symbols should produce latex and value
     expr = "(Z₁⊗Z₁+Z₂⊗Z₂) / √2"

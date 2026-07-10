@@ -25,6 +25,8 @@ end
 
 function bootstrap()
 # don't indent everything 
+unsafe_code_evaluation_enabled() # validate the operator override during startup
+
 route("/") do
   Genie.Router.serve_static_file("index.html")
 end
@@ -490,6 +492,8 @@ end
                 details:
                   type: object
                   description: Additional error details
+      '403':
+        description: Payload requires unsafe Julia evaluation, which is disabled (UNSAFE_EVALUATION_DISABLED)
 """
 route("/parse_network_graph", method="POST") do
   payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
@@ -497,6 +501,7 @@ route("/parse_network_graph", method="POST") do
   state = try
     Cqn.parse_network_graph(validation_result)
   catch ex
+    isa(ex, APIError) && rethrow(ex)
     throw(validation_error("Invalid graph - data can not be correctly parsed. Details: $ex"))
   end
 
@@ -632,6 +637,8 @@ end
                 details:
                   type: object
                   description: Additional error details
+      '403':
+        description: Protocol parameters require unsafe Julia evaluation, which is disabled (UNSAFE_EVALUATION_DISABLED)
 """
 route("/prepare_simulation", method="POST") do
   simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
@@ -650,6 +657,8 @@ route("/prepare_simulation", method="POST") do
   try
     state = Cqn.prepare_simulation(state, simulation_name)
   catch e
+    isa(e, APIError) && rethrow(e)
+
     # Log a human-readable message into the simulation logs for frontend display
     @log_event state Logging.Error "Error preparing simulation $simulation_name: $(e)" error_type=string(typeof(e))
 
@@ -1279,10 +1288,11 @@ end
 @swagger """
 /test_code:
   post:
-    summary: Test Julia code in a sandboxed environment
+    summary: Test Julia code in a fresh module
     description: |
-      Execute Julia code in an isolated module and return the results.
-      Useful for testing function definitions and expressions.
+      Execute Julia code in the server process and return the results. The
+      fresh module isolates names but is not a security sandbox. This endpoint
+      is available only when unsafe code evaluation is enabled.
     requestBody:
       required: true
       content:
@@ -1342,6 +1352,22 @@ end
                   type: string
                   description: Type of error that occurred
                   example: "UndefVarError"
+      '403':
+        description: Unsafe Julia code evaluation is disabled
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  example: Unsafe Julia code evaluation is disabled
+                error_code:
+                  type: string
+                  example: UNSAFE_EVALUATION_DISABLED
 """
 route("/test_code", method="POST") do
   payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
@@ -1351,8 +1377,9 @@ route("/test_code", method="POST") do
   end
 
   code_string = payload["code"]
+  require_unsafe_code_evaluation()
 
-  # Use Sandbox module to test the code
+  # Evaluate in a fresh namespace; Sandbox also enforces the policy for direct callers.
   success, results, error = Sandbox.test_code(code_string)
 
   if success
@@ -1362,15 +1389,7 @@ route("/test_code", method="POST") do
       :results => results
     ))
   else
-    # Extract detailed error information
-    error_type = string(typeof(error))
-    error_message = string(error)
-
-    json(Dict(
-      :success => false,
-      :error => error_message,
-      :error_type => error_type
-    ))
+    json(evaluation_failure_response(error))
   end
 end
 
@@ -1381,9 +1400,10 @@ end
   post:
     summary: Evaluate a symbolic expression and return its LaTeX form
     description: |
-      Parses and evaluates a symbolic expression in a sandboxed environment
-      with QuantumSavory preloaded, returning the LaTeX representation of the
-      evaluated expression.
+      Parses and evaluates a symbolic expression in the server process, in a
+      fresh module with QuantumSavory preloaded. The module is not a security
+      sandbox. This endpoint is available only when unsafe code evaluation is
+      enabled.
     requestBody:
       required: true
       content:
@@ -1434,6 +1454,22 @@ end
                 error_type:
                   type: string
                   description: Type of error that occurred
+      '403':
+        description: Unsafe Julia code evaluation is disabled
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                  example: Unsafe Julia code evaluation is disabled
+                error_code:
+                  type: string
+                  example: UNSAFE_EVALUATION_DISABLED
 """
 route("/test_symbolic_expression", method="POST") do
   payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
@@ -1443,15 +1479,14 @@ route("/test_symbolic_expression", method="POST") do
   end
 
   expr = payload["expr"]
+  require_unsafe_code_evaluation()
 
   success, results, error = Sandbox.test_symbolic_expression(expr)
 
   if success
     json(Dict(:success => true, :results => results, :message => "Expression evaluated successfully"))
   else
-    error_type = string(typeof(error))
-    error_message = string(error)
-    json(Dict(:success => false, :error => error_message, :error_type => error_type))
+    json(evaluation_failure_response(error))
   end
 end
 
@@ -1486,6 +1521,12 @@ end
                       nullable: true
                       description: Application version from Project.toml
                       example: "1.0.0"
+                capabilities:
+                  type: object
+                  properties:
+                    unsafe_code_evaluation:
+                      type: boolean
+                      description: Whether raw Julia code and symbolic evaluation are enabled
 """
 route("/platform_info") do
   julia_version = string(VERSION)
@@ -1518,7 +1559,10 @@ route("/platform_info") do
         :julia => julia_version,
         :quantumsavory => quantumsavory_version,
         :app => app_version,
-      )
+      ),
+      :capabilities => Dict(
+        :unsafe_code_evaluation => unsafe_code_evaluation_enabled(),
+      ),
     )
   )
 end
