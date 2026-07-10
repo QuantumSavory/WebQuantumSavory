@@ -10,7 +10,7 @@ A Vue 3 + Vite application for interactive quantum network visualization and sim
 - Playwright browser dependencies:
   ```bash
   sudo apt-get update
-  sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libxdamage1 libxkbcommon0 libasound2 libcups2 libcairo2 libpango-1.0-0 xvfb
+  sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libxdamage1 libxkbcommon0 libasound2 libcups2 libcairo2 libpango-1.0-0
   ```
 
 ### Getting Started
@@ -41,11 +41,17 @@ the GUI automatically before starting the API server.
 This project uses Playwright for automated end-to-end testing.
 
 ```bash
-# Run all e2e tests
-npm run test
+# Run all e2e tests headlessly in Chromium
+npm test
 
-# On a host without an attached display
-xvfb-run -a npm run test
+# Equivalent explicit headless command
+npm run test:headless
+
+# Run headed in Chromium for local debugging
+npm run test:headed
+
+# Run headed on a host without an attached display (requires Xvfb)
+xvfb-run -a npm run test:headed
 ```
 
 The e2e tests automatically start the Vite dev server and run tests in Chromium. They also expect the backend API to be running at `http://localhost:8000`.

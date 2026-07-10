@@ -8,8 +8,8 @@
     "build": "node scripts/sync-version.js && node scripts/clean-output.js && vite build",
     "preview": "vite preview",
     "test": "playwright test --project=chromium",
-    "test:headed": "playwright test --headed",
-    "test:headless": "playwright test",
+    "test:headed": "playwright test --project=chromium --headed",
+    "test:headless": "playwright test --project=chromium",
     "test:ui": "playwright test --ui",
     "test:report": "playwright show-report"
   },
