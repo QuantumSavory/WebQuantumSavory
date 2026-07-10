@@ -32,6 +32,6 @@
   "devDependencies": {
     "@playwright/test": "^1.56.0",
     "@vitejs/plugin-vue": "^5.2.1",
-    "vite": "^6.2.0"
+    "vite": "^6.4.3"
   }
 }
