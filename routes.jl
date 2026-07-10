@@ -1259,7 +1259,7 @@ end
 /known_functions:
   get:
     summary: List known Julia functions usable as argument values
-    description: Returns the whitelist of supported Julia functions that can be referenced in request payloads as argument values.
+    description: Returns the whitelist of supported Julia functions that can be referenced in request payloads as argument values. Functions containing `(self)` are available only to node protocols, where `self` is the node's Julia-native one-based RegisterNet index.
     responses:
       '200':
         description: Successful response with the list of known functions
@@ -1277,7 +1277,7 @@ end
               default:
                 summary: Example response
                 value:
-                  known_functions: ["min", "maximum", "abs", "identity"]
+                  known_functions: ["minimum", "maximum", "abs", "identity", "<(self)", ">(self)", "≤(self)", "≥(self)", "==(self)"]
 """
 route("/known_functions") do
   Dict(:known_functions => WebQuantumSavory.known_functions()) |> json

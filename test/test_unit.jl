@@ -29,6 +29,97 @@
       @test all(haskey(st, "doc") for st in slot_types)
   end
 
+  @testset "Known Function References" begin
+      expected_known_functions = [
+          "minimum", "maximum", "abs", "identity", "<(self)", ">(self)", "≤(self)", "≥(self)", "==(self)",
+      ]
+      @test WebQuantumSavory.known_functions() == expected_known_functions
+
+      safe_references = [
+        "minimum" => minimum,
+        "maximum" => maximum,
+        "abs" => abs,
+        "identity" => identity,
+      ]
+      for (name, expected) in safe_references
+        @test WebQuantumSavory.resolve_function_reference(name) === expected
+      end
+
+      # Names outside the advertised allowlist must not reach arbitrary Julia
+      # functions, whether they are qualified or unqualified.
+      rejected_references = [
+        "min", "Base.min", "exit", "Base.exit", "eval", "Core.eval",
+        "Main.eval", "include", "Base.include", "run", "Base.run", "rm",
+        "Base.rm", "open", "Base.open",
+      ]
+      for name in rejected_references
+        @test WebQuantumSavory.resolve_function_reference(name) === nothing
+      end
+
+      rejected_kwargs = Dict{Symbol,Any}()
+      @test !WebQuantumSavory._handle_function_lambda_parameter!(
+        rejected_kwargs,
+        :filter,
+        "Function",
+        "exit",
+      )
+      @test !haskey(rejected_kwargs, :filter)
+
+      comparison_cases = [
+        "<(self)" => [true, false, false],
+        ">(self)" => [false, false, true],
+        "≤(self)" => [true, true, false],
+        "≥(self)" => [false, true, true],
+        "==(self)" => [false, true, false],
+      ]
+      for (name, expected) in comparison_cases
+        comparison = WebQuantumSavory.resolve_self_comparison_reference(name, 2)
+        @test comparison !== nothing
+        if comparison !== nothing
+          @test comparison.(1:3) == expected
+        end
+        @test WebQuantumSavory.resolve_function_reference(name) === nothing
+      end
+      @test WebQuantumSavory.resolve_self_comparison_reference("!=(self)", 2) === nothing
+      @test WebQuantumSavory.resolve_self_comparison_reference("==(self)", nothing) === nothing
+
+      node_kwargs = Dict{Symbol,Any}()
+      @test WebQuantumSavory._handle_function_lambda_parameter!(
+        node_kwargs,
+        :chooseslot,
+        "Function",
+        "==(self)";
+        self_node_index=2,
+      )
+      @test haskey(node_kwargs, :chooseslot)
+      if haskey(node_kwargs, :chooseslot)
+        @test node_kwargs[:chooseslot].(1:3) == [false, true, false]
+      end
+
+      non_node_kwargs = Dict{Symbol,Any}()
+      @test !WebQuantumSavory._handle_function_lambda_parameter!(
+        non_node_kwargs,
+        :chooseslot,
+        "Function",
+        "==(self)",
+      )
+      @test !haskey(non_node_kwargs, :chooseslot)
+
+      # The optional positional state argument remains backwards compatible.
+      ordinary_kwargs = Dict{Symbol,Any}()
+      @test WebQuantumSavory._handle_function_lambda_parameter!(
+        ordinary_kwargs,
+        :filter,
+        "Function",
+        "identity",
+        nothing,
+      )
+      @test haskey(ordinary_kwargs, :filter)
+      if haskey(ordinary_kwargs, :filter)
+        @test ordinary_kwargs[:filter] === identity
+      end
+  end
+
   @testset "Protocol Types" begin
       protocol_types = WebQuantumSavory.get_protocol_types()
       @test isa(protocol_types, Vector)
@@ -485,6 +576,14 @@
   end
 
   @testset "Parameter Conversion Utility" begin
+    # Wildcard selections carry no user-entered value, but the UI sends the
+    # selected entry name so the backend can construct the sentinel.
+    for wildcard_type in ("Wildcard", "QuantumSavory.Wildcard")
+      ok, wildcard = WebQuantumSavory._convert_parameter_value(wildcard_type, "Wildcard")
+      @test ok
+      @test wildcard isa QuantumSavory.Wildcard
+    end
+
     # Int conversions
     ok, v = WebQuantumSavory._convert_parameter_value("Int", "42")
     @test ok && v == 42
@@ -562,8 +661,10 @@
       end
 
       @test caught isa WebQuantumSavory.APIError
-      @test caught.status_code == 403
-      @test caught.error_code == WebQuantumSavory.UNSAFE_EVALUATION_DISABLED_CODE
+      if caught isa WebQuantumSavory.APIError
+        @test caught.status_code == 403
+        @test caught.error_code == WebQuantumSavory.UNSAFE_EVALUATION_DISABLED_CODE
+      end
     end
 
     original_override = get(ENV, WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR, nothing)

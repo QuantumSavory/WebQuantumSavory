@@ -133,6 +133,14 @@
       @test all(haskey(st, "doc") for st in data["slot_types"])
   end
 
+  @testset "Known Functions Endpoint" begin
+      response = make_request("GET", "/known_functions")
+      @test response.status == 200
+      data = parse_response(response)
+      @test haskey(data, "known_functions")
+      @test data["known_functions"] == WebQuantumSavory.known_functions()
+  end
+
   @testset "Protocol Types Endpoint" begin
       response = make_request("GET", "/protocol_types")
       @test response.status == 200
@@ -661,7 +669,9 @@
       @test prepare_data["status"] == WebQuantumSavory.STATUS_PREPARED
 
       # 3. Start simulation
-      target_time = 100
+      # Keep the run long enough that the cooperative task cannot finish
+      # between observing progress and sending the pause request.
+      target_time = 1000
       run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_pause_name, "time_units" => target_time))
       @test run_response.status == 202
       run_data = parse_response(run_response)

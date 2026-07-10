@@ -640,7 +640,10 @@ end
 
 
 function known_functions()
-  [string(f) for f in [min, maximum, abs, identity]]
+  [
+    first(reference)
+    for reference in (SAFE_FUNCTION_REFERENCES..., SELF_COMPARISON_OPERATORS...)
+  ]
 end
 
 

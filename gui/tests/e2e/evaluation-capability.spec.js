@@ -134,6 +134,8 @@ test.describe('Unsafe evaluation capability', () => {
     await expect(editor.locator('.validate-button')).toBeDisabled()
 
     await functionTypeSelector.selectOption('Function')
-    await expect(page.locator('#edgePanel .functionSelector').first()).toBeEnabled()
+    const knownFunctionSelector = page.locator('#edgePanel .functionSelector').first()
+    await expect(knownFunctionSelector).toBeEnabled()
+    await expect(knownFunctionSelector.locator('option[value="identity"]')).toBeEnabled()
   })
 })
