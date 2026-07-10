@@ -2,7 +2,7 @@
 
 ## Scope and project boundary
 
-- This repository is the WebQuantumSavory application. The root is the Julia/Genie API package named `Cqn`; `gui/` is a separate Vue/Vite package governed by `gui/AGENTS.md`.
+- This repository is the WebQuantumSavory application. The root is the Julia/Genie API package named `WebQuantumSavory`; `gui/` is a separate Vue/Vite package governed by `gui/AGENTS.md`.
 - Use the root `Project.toml` for backend work and `test/Project.toml` for backend tests. Both manifests are local generated files and must not be committed.
 - `../QuantumSavory.jl` is a separate reference checkout with its own `AGENTS.md`. Normal package resolution uses the GitHub `master` source declared in this repository's `Project.toml`, not that sibling directory. Do not edit the sibling unless a task explicitly spans both repositories.
 - `_docs_/` and `_tests_/` contain historical examples and fixtures. The maintained automated suite is under `test/`; confirm behavior in current source and tests before trusting legacy material.
@@ -10,9 +10,9 @@
 ## Runtime and source map
 
 - `bin/server` is the supported application launcher. It installs the locked GUI dependencies, rebuilds the Vite bundle, and then starts Genie. It is safe to invoke outside the repository directory.
-- `bootstrap.jl` loads `Cqn`, aliases it as `UserApp`, and calls `Cqn.main()` so Genie loads configuration, initializers, and routes.
+- `bootstrap.jl` loads `WebQuantumSavory`, aliases it as `UserApp`, and calls `WebQuantumSavory.main()` so Genie loads configuration, initializers, and routes.
 - `routes.jl` owns HTTP handlers, adjacent Swagger descriptions, the common safe route wrapper, the root UI route, and startup of the stale-simulation service.
-- `src/Cqn.jl` defines `State`, the process-global `STATE` dictionary, serialization, protocol launching, simulation control, log access, and resource cleanup.
+- `src/WebQuantumSavory.jl` defines `State`, the process-global `STATE` dictionary, serialization, protocol launching, simulation control, log access, and resource cleanup.
 - `src/parser.jl` discovers QuantumSavory metadata, validates request payloads, constructs graphs/registers/networks, converts parameters, and instantiates protocols.
 - `src/errors.jl` standardizes `APIError` responses. `evaluation_policy.jl` gates unsafe server-process evaluation, `Logger.jl` captures per-simulation events, `Sandbox.jl` evaluates user expressions, `types.jl` implements lambda/symbolic adapters, and `services.jl` manages idle simulations.
 - `config/env/` contains Genie settings for dev, test, and production. `public/index.html` and `public/assets/` are generated from `gui/` at launch.
@@ -35,7 +35,7 @@ The normal lifecycle is:
 - `run_simulation` marks the state running and starts one sticky `@async` task; the task yields cooperatively between simulation steps. Pause responses wait for that task to acknowledge and exit. Keep the task reference, pause request, `is_running`, `simulation_paused`, timestamps, error flags, and serialized status fields consistent when changing lifecycle code.
 - A run has a 10-minute wall-clock cap. Non-running states are blocked and stripped of heavy resources after 30 idle minutes, then retained for UI status. Blocking refreshes the activity timestamp, so the retained record is destroyed after a further 300 idle minutes. The service checks once per minute.
 - Starting a new target clears previously captured simulation logs; resuming a paused target preserves them. `GET /logs/:name` purges returned logs by default, so tests and callers which need repeat reads must request otherwise.
-- Do not remove `InteractiveUtils`, `REPL`, or `CairoMakie` from `src/Cqn.jl` as apparently unused imports. They activate QuantumSavory metadata and MIME-rendering extensions used by the API.
+- Do not remove `InteractiveUtils`, `REPL`, or `CairoMakie` from `src/WebQuantumSavory.jl` as apparently unused imports. They activate QuantumSavory metadata and MIME-rendering extensions used by the API.
 - `Sandbox` creates a fresh module but evaluates Julia code with `Base.eval`; this is namespace isolation, not a security boundary. Treat code, lambda, symbolic, and fallback parameter evaluation as unsafe for untrusted input.
 - `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` is the sole unsafe-evaluation override and accepts only `true` or `false`. Without it, evaluation is enabled only in `dev` and `test`; production and unknown environments deny it.
 
@@ -69,7 +69,7 @@ Running `runtests.jl` without a test name also includes integration tests. Those
 
 ```sh
 (cd gui && npm ci && npm run build)
-GENIE_ENV=test julia --project=. -e 'using Cqn; Cqn.main(); Cqn.up(async=false)'
+GENIE_ENV=test julia --project=. -e 'using WebQuantumSavory; WebQuantumSavory.main(); WebQuantumSavory.up(async=false)'
 (cd test && julia --project=. runtests.jl test_integration)
 ```
 

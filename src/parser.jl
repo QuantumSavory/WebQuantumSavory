@@ -1,4 +1,4 @@
-# Parser module for Cqn.jl
+# Parser module for WebQuantumSavory.jl
 # Contains all parsing, validation, and type resolution functionality
 
 using Dates
@@ -840,8 +840,8 @@ function simulation_blocked_exception(simulation_name)
 end
 
 function action_is_valid(simulation_name, destroy::Bool = true)
-  if haskey(Cqn.STATE, simulation_name)
-    state = Cqn.STATE[simulation_name]
+  if haskey(WebQuantumSavory.STATE, simulation_name)
+    state = WebQuantumSavory.STATE[simulation_name]
 
     state.is_running && throw(simulation_is_running_exception(simulation_name))
 
@@ -853,9 +853,9 @@ function action_is_valid(simulation_name, destroy::Bool = true)
     destroy || return true
 
     @warn "Simulation $simulation_name already exists, destroying it" simulation_name=simulation_name
-    @log_event Cqn.STATE[simulation_name] Logging.Warn "Simulation $simulation_name already exists, destroying it" simulation_name=simulation_name
+    @log_event WebQuantumSavory.STATE[simulation_name] Logging.Warn "Simulation $simulation_name already exists, destroying it" simulation_name=simulation_name
 
-    Cqn.destroy_simulation(simulation_name)
+    WebQuantumSavory.destroy_simulation(simulation_name)
   end
 
   return true
@@ -873,7 +873,7 @@ function parse_network_graph(data)
   simulation_name = data["data"]["name"]
   action_is_valid(simulation_name)
 
-  state = Cqn.State(
+  state = WebQuantumSavory.State(
     name = simulation_name,
     payload = data,
     graph = g,
@@ -883,7 +883,7 @@ function parse_network_graph(data)
   )
 
   state.simulation_last_active_time = Dates.now()
-  Cqn.STATE[simulation_name] = state
+  WebQuantumSavory.STATE[simulation_name] = state
 
   return state
 end

@@ -62,7 +62,7 @@ rm -rf "$artifact_dir"
 : > "$server_log"
 cd "$app_root"
 GENIE_ENV=test julia --color=yes --project="$app_root" \
-  -e 'using Cqn; Cqn.main(); Cqn.up(async=false)' >"$server_log" 2>&1 &
+  -e 'using WebQuantumSavory; WebQuantumSavory.main(); WebQuantumSavory.up(async=false)' >"$server_log" 2>&1 &
 server_pid=$!
 
 ready=false

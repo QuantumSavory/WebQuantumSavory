@@ -4,8 +4,8 @@
   using QuantumSavory
   using Test
 
-  include("../src/Cqn.jl")
-  using .Cqn
+  include("../src/WebQuantumSavory.jl")
+  using .WebQuantumSavory
 
   # Test server configuration
   TEST_BASE_URL = "http://localhost:8000"
@@ -180,11 +180,11 @@
 
       # Check values
       @test data["name"] == TEST_SIMULATION_NAME
-      @test data["status"] == Cqn.STATUS_CREATED
+      @test data["status"] == WebQuantumSavory.STATUS_CREATED
       @test data["node_count"] == 2
       @test data["edge_count"] == 1
       @test data["protocols_launched"] === nothing
-      @test data["message"] == Cqn.STATUS_MESSAGE_CREATED
+      @test data["message"] == WebQuantumSavory.STATUS_MESSAGE_CREATED
   end
 
   @testset "Parse Network Graph - Validation Errors" begin
@@ -250,11 +250,11 @@
       @test haskey(data, "message")
 
       @test data["name"] == TEST_SIMULATION_NAME
-      @test data["status"] == Cqn.STATUS_PREPARED
+      @test data["status"] == WebQuantumSavory.STATUS_PREPARED
       @test data["node_count"] == 2
       @test data["edge_count"] == 1
       @test data["protocols_launched"] !== nothing
-      @test data["message"] == Cqn.STATUS_MESSAGE_PREPARED
+      @test data["message"] == WebQuantumSavory.STATUS_MESSAGE_PREPARED
   end
 
   @testset "Prepare Simulation - Error Cases" begin
@@ -340,11 +340,11 @@
       @test haskey(state, "message")
 
       @test state["name"] == TEST_SIMULATION_NAME
-      @test state["status"] == Cqn.STATUS_CREATED
+      @test state["status"] == WebQuantumSavory.STATUS_CREATED
       @test state["node_count"] == 2
       @test state["edge_count"] == 1
       @test state["protocols_launched"] === nothing
-      @test state["message"] == Cqn.STATUS_MESSAGE_CREATED
+      @test state["message"] == WebQuantumSavory.STATUS_MESSAGE_CREATED
   end
 
   @testset "Get State - Error Cases" begin
@@ -401,13 +401,13 @@
       create_response = make_request("POST", "/parse_network_graph", body=payload)
       @test create_response.status == 200
       create_data = parse_response(create_response)
-      @test create_data["status"] == Cqn.STATUS_CREATED
+      @test create_data["status"] == WebQuantumSavory.STATUS_CREATED
 
       # 2. Prepare simulation
       prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => workflow_name))
       @test prepare_response.status == 200
       prepare_data = parse_response(prepare_response)
-      @test prepare_data["status"] == Cqn.STATUS_PREPARED
+      @test prepare_data["status"] == WebQuantumSavory.STATUS_PREPARED
 
       # 3. Run simulation
       run_response = make_request("POST", "/run_simulation", body=Dict("name" => workflow_name, "time_units" => 10))
@@ -652,13 +652,13 @@
       create_response = make_request("POST", "/parse_network_graph", body=payload)
       @test create_response.status == 200
       create_data = parse_response(create_response)
-      @test create_data["status"] == Cqn.STATUS_CREATED
+      @test create_data["status"] == WebQuantumSavory.STATUS_CREATED
 
       # 2. Prepare simulation
       prepare_response = make_request("POST", "/prepare_simulation", body=Dict("name" => workflow_pause_name))
       @test prepare_response.status == 200
       prepare_data = parse_response(prepare_response)
-      @test prepare_data["status"] == Cqn.STATUS_PREPARED
+      @test prepare_data["status"] == WebQuantumSavory.STATUS_PREPARED
 
       # 3. Start simulation
       target_time = 100

@@ -1,4 +1,4 @@
-module Cqn
+module WebQuantumSavory
 
 using Genie
 
@@ -662,7 +662,7 @@ function prepare_simulation(state::State, simulation_name::String)
   state.protocol_mapping = protocol_mapping
   state.simulation_last_active_time = Dates.now()
 
-  Cqn.STATE[simulation_name] = state
+  WebQuantumSavory.STATE[simulation_name] = state
 
   return state
 end

@@ -4,12 +4,12 @@ const AUTO_DESTROY_MINUTES = 300
 
 function cleanup_stale_simulations_once()
     # Get all simulation names to avoid mutating while iterating
-    simulation_names = collect(keys(Cqn.STATE))
+    simulation_names = collect(keys(WebQuantumSavory.STATE))
     
     for simulation_name in simulation_names
         try
-            if haskey(Cqn.STATE, simulation_name)
-                state = Cqn.STATE[simulation_name]
+            if haskey(WebQuantumSavory.STATE, simulation_name)
+                state = WebQuantumSavory.STATE[simulation_name]
                 
                 # Skip if running or no last active time set
                 if state.is_running || state.simulation_last_active_time === nothing
@@ -20,7 +20,7 @@ function cleanup_stale_simulations_once()
                 if Dates.now() - state.simulation_last_active_time > Dates.Minute(AUTO_DESTROY_MINUTES)
                     @info "Auto-destroying stale simulation: $simulation_name"
                     @log_event state Logging.Info "Destroying simulation $simulation_name after $AUTO_DESTROY_MINUTES minutes of inactivity"
-                    Cqn.destroy_simulation(simulation_name)
+                    WebQuantumSavory.destroy_simulation(simulation_name)
                     continue
                 end
                 
@@ -35,7 +35,7 @@ function cleanup_stale_simulations_once()
                     @log_event state Logging.Info "Stopping simulation $simulation_name after $AUTO_PURGE_MINUTES minutes of inactivity"
 
                     # Non-destructive block to preserve state for UI
-                    Cqn.block_simulation(state; reason=:autopurge, max_minutes=AUTO_PURGE_MINUTES, auto_purged=true)
+                    WebQuantumSavory.block_simulation(state; reason=:autopurge, max_minutes=AUTO_PURGE_MINUTES, auto_purged=true)
                 end
             end
         catch e

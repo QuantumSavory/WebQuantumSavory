@@ -9,7 +9,7 @@ test.describe('App smoke', () => {
     await expect(page.locator('#app')).toBeVisible();
 
     // Title set by index.html
-    await expect(page).toHaveTitle(/CQN/i);
+    await expect(page).toHaveTitle(/WebQuantumSavory/i);
   });
 
   test('renders top-level panels and map shell', async ({ page }) => {

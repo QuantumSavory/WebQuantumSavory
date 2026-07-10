@@ -1002,8 +1002,8 @@ onUnmounted(() => {
   <div>
     <div class="topbar">
       <div class="topbar-title">
-        <img src="./assets/logo.png" alt="CQN Logo" class="topbar-logo">
-        CQN Simulation Builder
+        <img src="./assets/logo.png" alt="WebQuantumSavory Logo" class="topbar-logo">
+        WebQuantumSavory Simulation Builder
         <span class="version-badge">v{{ appVersion }}</span>
       </div>
       <div class="topbar-right">

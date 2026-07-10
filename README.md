@@ -1,4 +1,4 @@
-# CQN (Quantum Network API)
+# WebQuantumSavory (Quantum Network API)
 
 A Julia-based web API for quantum network operations, built with the Genie web framework and QuantumSavory quantum computing library. This API provides endpoints for creating, preparing, and running quantum network simulations.
 
@@ -182,7 +182,7 @@ julia --project runtests.jl test_unit
 
 Notes:
 - Unit tests include deterministic checks for the background cleanup via `cleanup_stale_simulations_once()`.
-- When creating states from payloads in tests, always call `Cqn.validate_payload(payload)` before `Cqn.parse_network_graph(...)`.
+- When creating states from payloads in tests, always call `WebQuantumSavory.validate_payload(payload)` before `WebQuantumSavory.parse_network_graph(...)`.
 
 ### Run Integration Tests
 
@@ -243,7 +243,7 @@ to create builds for pull requests and pushes to `main`.
 
 The system includes a background task that releases resources held by inactive simulations and eventually removes their retained status records.
 
-- Service function: `Cqn.cleanup_stale_simulations()` (in `src/services.jl`)
+- Service function: `WebQuantumSavory.cleanup_stale_simulations()` (in `src/services.jl`)
 - Frequency: every 60 seconds
 - After 30 minutes: block the simulation and release heavy resources while retaining status for the UI
 - After another 300 minutes without activity: destroy the retained simulation record
@@ -251,10 +251,10 @@ The system includes a background task that releases resources held by inactive s
 - Startup: launched from `routes.jl` inside `bootstrap()` via
 
   ```julia
-  @async Cqn.cleanup_stale_simulations() |> errormonitor
+  @async WebQuantumSavory.cleanup_stale_simulations() |> errormonitor
   ```
 
 - Logging: both automatic blocking and destruction add an event to the simulation's captured log before releasing its state.
 
-You can trigger a single cleanup pass manually (useful in tests) via `Cqn.cleanup_stale_simulations_once()`.
+You can trigger a single cleanup pass manually (useful in tests) via `WebQuantumSavory.cleanup_stale_simulations_once()`.
 Running simulations also have a separate 10-minute wall-clock execution limit.

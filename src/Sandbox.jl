@@ -6,7 +6,7 @@ using QuantumSavory
 using QuantumSavory.ProtocolZoo
 using ResumableFunctions
 using ConcurrentSim
-using ..Cqn: require_unsafe_code_evaluation
+using ..WebQuantumSavory: require_unsafe_code_evaluation
 
 import Base: Meta
 
