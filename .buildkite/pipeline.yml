@@ -1,10 +1,14 @@
 env:
   CI: "true"
+  JULIA_NUM_THREADS: auto
 
 steps:
   - label: ":julia: Backend unit"
     key: backend-unit
     command: ./ci/backend-unit.sh
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "1.12"
     timeout_in_minutes: 45
 
   - label: ":nodejs: Frontend version and build"
@@ -15,6 +19,9 @@ steps:
   - label: ":julia: Backend integration"
     key: backend-integration
     command: ./ci/backend-integration.sh
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "1.12"
     artifact_paths: "ci-artifacts/**/*"
     timeout_in_minutes: 60
 
@@ -23,5 +30,10 @@ steps:
     command: ./ci/browser.sh
     depends_on: backend-integration
     allow_dependency_failure: true
+    env:
+      PLAYWRIGHT_INSTALL_SYSTEM_DEPS: "true"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "1.12"
     artifact_paths: "ci-artifacts/**/*"
     timeout_in_minutes: 60
