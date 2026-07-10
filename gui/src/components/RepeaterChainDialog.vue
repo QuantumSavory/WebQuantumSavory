@@ -237,13 +237,6 @@ h3 {
 .form-grid input {
   width: 100%;
   min-width: 0;
-  box-sizing: border-box;
-  padding: 7px 9px;
-  border: 1px solid #bbb;
-  border-radius: 4px;
-  background: #fff;
-  color: #222;
-  font: inherit;
 }
 
 .template-note {
@@ -262,25 +255,6 @@ h3 {
   justify-content: flex-end;
   gap: 12px;
   margin-top: 20px;
-}
-
-.modal-actions button {
-  padding: 7px 13px;
-  border: 1px solid #bbb;
-  border-radius: 4px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.modal-actions button.primary {
-  border-color: #4345ac;
-  background: #4345ac;
-  color: #fff;
-}
-
-.modal-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 @media (max-width: 560px) {
