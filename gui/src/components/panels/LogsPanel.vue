@@ -1,16 +1,6 @@
 <template>
-  <BasePanel panel_id="logs_panel" title="Logs">
-    <template #title-badges>
-      <span v-if="logCounts.info > 0" class="log-count-badge badge-info">{{ logCounts.info }}</span>
-      <span v-if="logCounts.warning > 0" class="log-count-badge badge-warning">{{ logCounts.warning }}</span>
-      <span v-if="logCounts.error > 0" class="log-count-badge badge-error">{{ logCounts.error }}</span>
-      <span v-if="logCounts.success > 0" class="log-count-badge badge-success">{{ logCounts.success }}</span>
-      <span v-if="logCounts.debug > 0" class="log-count-badge badge-debug">{{ logCounts.debug }}</span>
-    </template>
-    <template #content>
-      <!-- Logs Content -->
-      <section class="panel-section">
-        <div class="logs-container">
+  <section class="panel-section logs-panel-content">
+    <div class="logs-container">
         <div class="logs-header">
           <input 
             v-model="searchQuery"
@@ -74,15 +64,12 @@
             </div>
           </div>
         </div>
-        </div>
-      </section>
-    </template>
-  </BasePanel>
+    </div>
+  </section>
 </template>
 
 <script setup>
 import { ref, computed, nextTick } from 'vue'
-import BasePanel from './BasePanel.vue'
 
 // Props
 const props = defineProps({
@@ -132,35 +119,6 @@ const displayLogs = computed(() => {
 
 const hasLogs = computed(() => {
   return props.logs.length > 0
-})
-
-// Log count by type (counts visible rows, not individual logs)
-const logCounts = computed(() => {
-  const counts = {
-    info: 0,
-    warning: 0,
-    error: 0,
-    debug: 0,
-    success: 0
-  }
-  
-  props.logs.forEach(log => {
-    // Ensure level is a string before calling toLowerCase
-    const level = log.level ? String(log.level).toLowerCase() : 'info'
-    
-    // Count each log row as 1, regardless of how many individual logs are collapsed into it
-    const logRowCount = 1
-    
-    if (level === 'warning' || level === 'warn') {
-      counts.warning += logRowCount
-    } else if (counts.hasOwnProperty(level)) {
-      counts[level] += logRowCount
-    } else {
-      counts.info += logRowCount // Default to info for unknown levels
-    }
-  })
-  
-  return counts
 })
 
 // Methods
@@ -353,6 +311,10 @@ function stringifyValue(value, prefix, indent) {
 </script>
 
 <style scoped>
+.logs-panel-content {
+  min-height: 0;
+}
+
 .logs-container {
   display: flex;
   flex-direction: column;
