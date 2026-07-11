@@ -12,6 +12,7 @@
         :category="protocolGroupName"
         :contextInfo="contextInfo"
         :simulationState="props.simulationState"
+        :variables="props.variables"
         />
     </div>
     <div class="action-buttons" style="margin-top: 10px;">
@@ -55,6 +56,10 @@ const props = defineProps({
     type: Object,
     required: false,
     default: () => ({})
+  },
+  variables: {
+    type: Array,
+    default: () => []
   },
   isVirtualEdge: {
     type: Boolean,

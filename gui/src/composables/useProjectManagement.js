@@ -5,6 +5,7 @@ import { setEdgeCorrectNodeOrder } from '../utils/Utils'
 import Node from '../models/Node'
 import Edge from '../models/Edge'
 import FloatingProtocol from '../models/FloatingProtocol'
+import Variable from '../models/Variable'
 
 /**
  * useProjectManagement - Composable for project CRUD operations
@@ -150,6 +151,7 @@ export function useProjectManagement(
     isDemoProject.value = false
     projectData.value = {
       name: currentProjectName.value,
+      variables: [],
       simulationConfig: { time: 1.0, timeStep: 0.1 },
       net: { nodes: [], edges: [], protocols: [] }
     }
@@ -211,6 +213,7 @@ export function useProjectManagement(
         currentProjectName.value = ''
         projectData.value = {
           name: 'New Project',
+          variables: [],
           simulationConfig: { time: 1.0, timeStep: 0.1 },
           net: { nodes: [], edges: [], protocols: [] }
         }
@@ -233,6 +236,14 @@ export function useProjectManagement(
     const platformInfo = api.getPlatformInfo()
     return {
       name: currentProjectName.value,
+      variables: (projectData.value.variables || []).map(variable => (
+        variable.toJSON ? variable.toJSON() : {
+          id: variable.id,
+          name: variable.name,
+          type: variable.type,
+          value: variable.value
+        }
+      )),
       simulationConfig: {
         time: projectData.value.simulationConfig?.time || 1.0,
         timeStep: projectData.value.simulationConfig?.timeStep || 0.1,
@@ -284,6 +295,7 @@ export function useProjectManagement(
       return edge
     })
     const floating_protocols = (data.net.protocols || []).map(p => new FloatingProtocol(p))
+    const variables = (data.variables || []).map(variable => new Variable(variable))
 
     nodes.forEach(node => {
       node.data.slots.forEach(slot => {
@@ -303,6 +315,7 @@ export function useProjectManagement(
     
     return {
       name: data.name,
+      variables,
       simulationConfig: {
         time: Math.max(1.0, (data.simulationConfig?.time || 1.0)),
         timeStep: Math.max(TIME_STEP, (data.simulationConfig?.timeStep || 0.1)),
@@ -368,4 +381,3 @@ export function useProjectManagement(
     generateCopyName
   }
 }
-

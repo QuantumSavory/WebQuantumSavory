@@ -41,6 +41,7 @@
             targetNodeName: props.edge.target.name
           }"
           :simulationState="props.simulationState"
+          :variables="props.variables"
           :isVirtualEdge="props.edge.isLogic"
         />
       </section>
@@ -61,7 +62,8 @@ import Menu from 'primevue/menu'
 const props = defineProps({
   edge:             { type: Object, required: true }, 
   projectData:      { type: Object, required: true },
-  simulationState:  { type: Object, required: false, default: () => ({}) }
+  simulationState:  { type: Object, required: false, default: () => ({}) },
+  variables:        { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['slot-updated', 'delete', 'name-edit-complete', 'collapsed-changed'])

@@ -221,6 +221,7 @@
             nodeName: props.node.name
           }"
           :simulationState="props.simulationState"
+          :variables="props.variables"
         />
       </section>
     </template>
@@ -257,6 +258,10 @@ const props = defineProps({
     type: Object,
     required: false,
     default: () => ({})
+  },
+  variables: {
+    type: Array,
+    default: () => []
   }
 })
 

@@ -12,6 +12,7 @@
         protocolGroupName="floating" 
         :protocolClass="FloatingProtocol"
         :simulationState="props.simulationState"
+        :variables="props.variables"
       />
     </template>
   </BasePanel>
@@ -34,6 +35,10 @@ const props = defineProps({
     type: Object,
     required: false,
     default: () => ({})
+  },
+  variables: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -59,4 +64,4 @@ defineExpose({
   padding: 10px 18px;
   text-align: center;
 }
-</style> 
+</style>

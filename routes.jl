@@ -220,6 +220,29 @@ end
               name:
                 type: string
                 description: Name of the network
+              variables:
+                type: array
+                description: Optional simulation-global typed variables
+                items:
+                  type: object
+                  required:
+                    - id
+                    - name
+                    - type
+                    - value
+                  properties:
+                    id:
+                      type: string
+                      description: Stable variable identifier used by protocol references
+                    name:
+                      type: string
+                      description: User-visible unique variable name
+                    type:
+                      type: string
+                      description: Concrete parameter type used to convert the value
+                    value:
+                      nullable: true
+                      description: JSON-compatible variable value; null is valid for default, Nothing, and wildcard variables
               net:
                 type: object
                 required:
@@ -297,6 +320,17 @@ end
                                             - type: string
                                             - type: number
                                             - type: boolean
+                                            - type: object
+                                              required:
+                                                - kind
+                                                - id
+                                              properties:
+                                                kind:
+                                                  type: string
+                                                  enum: ["variable"]
+                                                id:
+                                                  type: string
+                                              description: Reference to a top-level simulation variable
                   edges:
                     type: array
                     items:
@@ -348,6 +382,17 @@ end
                                             - type: string
                                             - type: number
                                             - type: boolean
+                                            - type: object
+                                              required:
+                                                - kind
+                                                - id
+                                              properties:
+                                                kind:
+                                                  type: string
+                                                  enum: ["variable"]
+                                                id:
+                                                  type: string
+                                              description: Reference to a top-level simulation variable
                                           description: Parameter value
                   protocols:
                     type: array
@@ -377,6 +422,17 @@ end
                                   - type: string
                                   - type: number
                                   - type: boolean
+                                  - type: object
+                                    required:
+                                      - kind
+                                      - id
+                                    properties:
+                                      kind:
+                                        type: string
+                                        enum: ["variable"]
+                                      id:
+                                        type: string
+                                    description: Reference to a top-level simulation variable
                                 description: Parameter value
     responses:
       '200':
