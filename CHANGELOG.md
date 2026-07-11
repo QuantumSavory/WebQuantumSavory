@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added simulation-wide typed variables that can be defined in the Variables tab and assigned to node, edge, or floating protocol parameters.
+- Added JSON persistence and backend validation for variable definitions and protocol assignments, including legacy-project compatibility and simulation-state edit locking.
+
 ## 1.6.0
 
 - Added a tabbed bottom panel with Logs and Layout Tools views.
