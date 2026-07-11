@@ -3,7 +3,7 @@
     id="logsPanel"
     class="bottom-panel"
     :panel_id="panelId"
-    title="Logs and Layout Tools"
+    title="Logs, Variables, and Layout Tools"
     :collapsable="collapsable"
     @collapsed-changed="emit('collapsed-changed', $event)"
   >
@@ -37,6 +37,20 @@
             Logs
           </button>
           <button
+            id="bottom-panel-variables-tab"
+            type="button"
+            role="tab"
+            class="bottom-tab"
+            :class="{ active: activeTab === 'variables' }"
+            :aria-selected="activeTab === 'variables'"
+            aria-controls="bottom-panel-variables-content"
+            :tabindex="activeTab === 'variables' ? 0 : -1"
+            @click="activeTab = 'variables'"
+            @keydown="handleTabKeydown($event, 1)"
+          >
+            Variables
+          </button>
+          <button
             id="bottom-panel-layout-tools-tab"
             type="button"
             role="tab"
@@ -46,7 +60,7 @@
             aria-controls="bottom-panel-layout-tools-content"
             :tabindex="activeTab === 'layout-tools' ? 0 : -1"
             @click="activeTab = 'layout-tools'"
-            @keydown="handleTabKeydown($event, 1)"
+            @keydown="handleTabKeydown($event, 2)"
           >
             Layout Tools
           </button>
@@ -67,6 +81,21 @@
             :allow-clear="allowClear"
             @clear-logs="emit('clear-logs')"
             @log-click="forwardLogClick"
+          />
+        </section>
+
+        <section
+          v-show="activeTab === 'variables'"
+          id="bottom-panel-variables-content"
+          class="bottom-tab-panel variables-tab-panel"
+          role="tabpanel"
+          aria-labelledby="bottom-panel-variables-tab"
+          tabindex="0"
+        >
+          <VariablesPanel
+            :variables="variables"
+            :project-data="projectData"
+            :disabled="variablesDisabled"
           />
         </section>
 
@@ -93,6 +122,7 @@ import { computed, ref } from 'vue'
 import BasePanel from './BasePanel.vue'
 import LayoutToolsPanel from './LayoutToolsPanel.vue'
 import LogsPanel from './LogsPanel.vue'
+import VariablesPanel from './VariablesPanel.vue'
 
 const props = defineProps({
   logs: {
@@ -115,6 +145,18 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  variables: {
+    type: Array,
+    default: () => []
+  },
+  projectData: {
+    type: Object,
+    required: true
+  },
+  variablesDisabled: {
+    type: Boolean,
+    default: false
+  },
   collapsable: {
     type: Boolean,
     default: true
@@ -133,7 +175,7 @@ const emit = defineEmits([
 ])
 
 const activeTab = ref('logs')
-const tabNames = ['logs', 'layout-tools']
+const tabNames = ['logs', 'variables', 'layout-tools']
 
 const logCounts = computed(() => {
   const counts = {
@@ -258,6 +300,10 @@ function handleTabKeydown(event, currentIndex) {
 .layout-tools-tab-panel {
   padding-right: 4px;
   padding-bottom: 4px;
+}
+
+.variables-tab-panel {
+  padding-right: 4px;
 }
 
 .log-count-badge {

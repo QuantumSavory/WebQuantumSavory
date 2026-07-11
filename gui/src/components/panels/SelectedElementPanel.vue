@@ -7,6 +7,7 @@
     :nodeIndex="nodeIndex"
     :justCreated="justCreated"
     :simulationState="simulationState"
+    :variables="projectData.variables || []"
     @delete="$emit('delete')"
     @name-edit-complete="$emit('name-edit-complete')"
     @collapsed-changed="$emit('collapsed-changed', $event)"
@@ -19,6 +20,7 @@
     :key="'edge-' + selectedItem.id"
     :edge="selectedItem"
     :simulationState="simulationState"
+    :variables="projectData.variables || []"
     @delete="$emit('delete')"
     @collapsed-changed="$emit('collapsed-changed', $event)"
   />
@@ -63,4 +65,3 @@ const props = defineProps({
 
 const emit = defineEmits(['delete', 'name-edit-complete', 'collapsed-changed'])
 </script>
-

@@ -445,6 +445,9 @@ end
 
 function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}(), state = nothing)
   launched = Dict("nodes" => 0, "edges" => 0, "floating" => 0)
+  # Parse once for the full launch. Variable values remain raw until each
+  # assignment is resolved in its node/edge/floating protocol context.
+  variables = _parse_variables(data["data"])
 
   # Node-attached protocols: per-node under node["data"]["protocols"]
   nodes = data["graph_info"]["nodes"]
@@ -455,7 +458,7 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
 
     for prot_def in node_prots
       ctx = Dict{Symbol,Any}(:sim => sim, :net => net, :node => idx)
-      prot = _instantiate_protocol(prot_def, ctx, state)
+      prot = _instantiate_protocol(prot_def, ctx, state; variables=variables)
       prot === nothing && continue
       @process prot()
       launched["nodes"] += 1
@@ -490,7 +493,7 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
 
     for prot_def in edge_prots
       ctx = Dict{Symbol,Any}(:sim => sim, :net => net, :nodeA => nodeA_idx, :nodeB => nodeB_idx)
-      prot = _instantiate_protocol(prot_def, ctx, state)
+      prot = _instantiate_protocol(prot_def, ctx, state; variables=variables)
       prot === nothing && continue
       @process prot()
       launched["edges"] += 1
@@ -516,7 +519,7 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
 
   for prot_def in floating_prots
     ctx = Dict{Symbol,Any}(:sim => sim, :net => net)
-    prot = _instantiate_protocol(prot_def, ctx, state)
+    prot = _instantiate_protocol(prot_def, ctx, state; variables=variables)
     prot === nothing && continue
     @info "Launching floating protocol" protocol_type=typeof(prot)
     @process prot()

@@ -65,6 +65,7 @@ const DEFAULT_MAP_ZOOM = 4 // Zoom level to show most of the US
 // Initialize composables
 const projectData = ref({
   name: 'New Project',
+  variables: [],
   simulationConfig: {
     time: 1.0,
     timeStep: 0.1,
@@ -117,6 +118,14 @@ const minimizedProjectData = computed(() => {
   
   // Remove simulation config from the project data
   delete projectCopy.simulationConfig
+
+  // Keep global variable definitions free of editor-only validation state.
+  projectCopy.variables = (projectCopy.variables || []).map(variable => ({
+    id: variable.id,
+    name: variable.name,
+    type: variable.type,
+    value: variable.value
+  }))
   
   // Exclusion lists
   const excludeCommon = ['sim', 'net']
@@ -1145,6 +1154,7 @@ onUnmounted(() => {
                 :nodeIndex="selectedNodeIndex"
                 :justCreated="justCreatedNode"
                 :simulationState="{ ...simulationState, hasSimulationRun }"
+                :variables="projectData.variables"
                 @delete="deleteSelected"
                 @name-edit-complete="justCreatedNode = false"
                 @collapsed-changed="(collapsed) => handlePanelCollapse('node_panel', collapsed)"
@@ -1157,6 +1167,7 @@ onUnmounted(() => {
                 :key="selectedItem && selectedItem.id"
                 :edge="selectedItem"
                 :simulationState="{ ...simulationState, hasSimulationRun }"
+                :variables="projectData.variables"
                 @delete="deleteSelected"
                 @collapsed-changed="(collapsed) => handlePanelCollapse('edge_panel', collapsed)"
               />
@@ -1209,6 +1220,7 @@ onUnmounted(() => {
                 ref="floatingProtocolsPanel"    
                 :protocols="projectData.net.protocols"
                 :simulationState="{ ...simulationState, hasSimulationRun }"
+                :variables="projectData.variables"
                 @collapsed-changed="(collapsed) => handlePanelCollapse('floating_protocols', collapsed)"
               />
               <div v-else></div>
@@ -1233,7 +1245,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Tabbed logs and layout tools panel at bottom -->
+    <!-- Tabbed logs, variables, and layout tools panel at bottom -->
     <div class="logs-panel-container">
       <BottomPanel
         :logs="applicationLogs"
@@ -1241,6 +1253,9 @@ onUnmounted(() => {
         :show-timestamps="true"
         :allow-clear="true"
         :helpers-disabled="hasSimulationRun"
+        :variables="projectData.variables"
+        :project-data="projectData"
+        :variables-disabled="hasSimulationRun"
         @clear-logs="clearLogs"
         @open-repeater-chain-generator="openRepeaterChainGenerator"
       />

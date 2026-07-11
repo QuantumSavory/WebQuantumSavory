@@ -47,6 +47,10 @@ const ENTANGLER_TYPE = {
     field: 'chooseslotA',
     type: ['Int64', 'Function'],
     doc: 'Select a slot in node A by index or predicate.',
+  }, {
+    field: 'retry_lock_time',
+    type: ['Nothing', 'Float64'],
+    doc: 'Optional delay before retrying.',
   }],
 }
 
@@ -135,6 +139,9 @@ async function createProjectWithEdge(page) {
       parameters: [{
         name: 'chooseslotA',
         type: ['Int64', 'Function'],
+      }, {
+        name: 'retry_lock_time',
+        type: ['Nothing', 'Float64'],
       }],
     })
   })
@@ -158,6 +165,17 @@ async function serializedNodeParameter(page, name) {
     const minimized = setupState?.minimizedProjectData
     const payload = minimized?.value ?? minimized
     return payload?.net?.nodes?.[0]?.data?.protocols?.[0]?.parameters?.find(
+      parameter => parameter.name === parameterName,
+    )
+  }, name)
+}
+
+async function serializedEdgeParameter(page, name) {
+  return page.evaluate(parameterName => {
+    const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    const minimized = setupState?.minimizedProjectData
+    const payload = minimized?.value ?? minimized
+    return payload?.net?.edges?.[0]?.data?.protocols?.[0]?.parameters?.find(
       parameter => parameter.name === parameterName,
     )
   }, name)
@@ -210,6 +228,15 @@ test.describe('Protocol parameter options', () => {
     for (const name of SELF_FUNCTIONS) {
       await expect(edgeFunctionSelector.locator(`option[value="${name}"]`)).toHaveCount(0)
     }
+
+    const retryRow = parameterRow(entanglerEditor, 'retry_lock_time')
+    await retryRow.locator('.complexTypeSelector').selectOption('Nothing')
+    await expect(retryRow.locator('.param-value')).toHaveText('Nothing')
+    await expect.poll(() => serializedEdgeParameter(page, 'retry_lock_time')).toEqual({
+      name: 'retry_lock_time',
+      type: 'Nothing',
+      value: 'nothing',
+    })
   })
 
   test('offers readable predefined and custom choices for Union and standalone Function fields', async ({ page }) => {

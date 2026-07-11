@@ -68,6 +68,11 @@ export function useImportExport(
       alert('Invalid project structure: "net.protocols" must be an array.')
       return
     }
+
+    if (jsonData.variables !== undefined && !Array.isArray(jsonData.variables)) {
+      alert('Invalid project structure: "variables" must be an array when present.')
+      return
+    }
     
     const existingProjects = ProjectStore.listProjects()
     if (existingProjects.includes(jsonData.name)) {
@@ -167,4 +172,3 @@ export function useImportExport(
     cancelImportConflict
   }
 }
-

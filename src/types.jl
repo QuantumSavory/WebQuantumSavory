@@ -1,4 +1,24 @@
 """
+A globally-defined, typed simulation variable.
+
+`value` intentionally remains in its JSON-compatible form. Conversion is
+performed for each protocol assignment so context-dependent values (for
+example, predefined functions involving `self`) are resolved in the context of
+the protocol that uses the variable.
+"""
+struct Variable
+    id::String
+    name::String
+    type::String
+    value::Any
+end
+
+"""A reference from a protocol parameter to a global [`Variable`](@ref)."""
+struct VariableReference
+    id::String
+end
+
+"""
 Lambda type - a subtype of Function for representing anonymous functions coming from the UI
 """
 abstract type Lambda <: Function end

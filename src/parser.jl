@@ -41,7 +41,7 @@ end
 
 """Convert a raw parameter value to a target primitive, Wildcard, or simple Union type.
 
-Supported target strings: "Int", "Int64", "Float64", "Float32", "Bool",
+Supported target strings: "Int", "Int64", "Float64", "Float32", "String", "Nothing", "Bool",
 "Wildcard", "QuantumSavory.Wildcard", and Union types that include Nothing and
 one of the above primitives or String. Wildcard targets produce a fresh
 `QuantumSavory.Wildcard()` and do not use the supplied value.
@@ -77,6 +77,13 @@ function _convert_parameter_value(ptype::AbstractString, value)
       else
         return true => parse(Float64, string(value))
       end
+    elseif ts == "String"
+      return true => (value isa AbstractString ? String(value) : string(value))
+    elseif ts == "Nothing"
+      if value === nothing || (value isa AbstractString && lowercase(strip(value)) == "nothing")
+        return true => nothing
+      end
+      return false => nothing
     elseif ts == "Bool"
       if isa(value, Bool)
         return true => value
@@ -130,6 +137,151 @@ end
 """Coerce any AbstractVector implementation (e.g., JSON3.Array) to a plain Vector."""
 _to_vector(x) = isa(x, AbstractVector) ? collect(x) : x
 
+"""Return whether a parsed JSON value behaves like an object."""
+_is_object_like(x) = x isa AbstractDict || startswith(string(typeof(x)), "JSON3.Object")
+
+function _required_nonempty_string(object, field::String, context::String)
+  haskey(object, field) || throw(validation_error("$context missing required field: '$field'"))
+  raw_value = object[field]
+  raw_value isa AbstractString || throw(validation_error(
+    "$context field '$field' must be a string",
+    Dict{String,Any}("field" => field, "received_type" => string(typeof(raw_value))),
+  ))
+  value = strip(String(raw_value))
+  isempty(value) && throw(validation_error("$context field '$field' must not be blank"))
+  return value
+end
+
+"""
+Parse and validate top-level simulation variable definitions.
+
+The field is optional for backward compatibility. Values remain unconverted;
+conversion happens for each protocol assignment so context-sensitive function
+references and fresh wildcard values keep their existing behavior.
+"""
+function _parse_variables(payload)
+  raw_variables = haskey(payload, "variables") ? payload["variables"] : Any[]
+  raw_variables isa AbstractVector || throw(validation_error(
+    "Field 'variables' must be an array",
+    Dict{String,Any}("variables_type" => string(typeof(raw_variables))),
+  ))
+
+  variables = Dict{String,Variable}()
+  variable_names = Set{String}()
+
+  for (index, raw_variable) in enumerate(raw_variables)
+    context = "Variable $index"
+    _is_object_like(raw_variable) || throw(validation_error(
+      "$context must be an object",
+      Dict{String,Any}("received_type" => string(typeof(raw_variable))),
+    ))
+
+    id = _required_nonempty_string(raw_variable, "id", context)
+    name = _required_nonempty_string(raw_variable, "name", context)
+    variable_type = _required_nonempty_string(raw_variable, "type", context)
+    haskey(raw_variable, "value") || throw(validation_error("$context missing required field: 'value'"))
+    value = raw_variable["value"]
+
+    haskey(variables, id) && throw(validation_error(
+      "Duplicate variable ID: '$id'",
+      Dict{String,Any}("variable_id" => id),
+    ))
+    name in variable_names && throw(validation_error(
+      "Duplicate variable name: '$name'",
+      Dict{String,Any}("variable_name" => name),
+    ))
+
+    permits_null = lowercase(variable_type) == "default" ||
+      variable_type in ("Nothing", "Wildcard", "QuantumSavory.Wildcard")
+    value === nothing && !permits_null && throw(validation_error(
+      "$context field 'value' must not be null for type '$variable_type'",
+      Dict{String,Any}("variable_id" => id, "variable_type" => variable_type),
+    ))
+
+    variables[id] = Variable(id, name, variable_type, value)
+    push!(variable_names, name)
+  end
+
+  return variables
+end
+
+"""
+Parse the tagged protocol-parameter representation of a variable reference.
+
+Non-object and untagged object values are ordinary literal values and return
+`nothing`. An object tagged with `kind = "variable"` is validated strictly.
+"""
+function _parse_variable_reference(value; context::String="Protocol parameter")
+  _is_object_like(value) || return nothing
+  get(value, "kind", nothing) == "variable" || return nothing
+  id = _required_nonempty_string(value, "id", "$context variable reference")
+  return VariableReference(id)
+end
+
+function _collect_protocol_definitions(payload)
+  definitions = Tuple{Any,String}[]
+  net = get(payload, "net", nothing)
+  _is_object_like(net) || return definitions
+
+  nodes = get(net, "nodes", Any[])
+  if nodes isa AbstractVector
+    for (index, node) in enumerate(nodes)
+      _is_object_like(node) || continue
+      node_data = get(node, "data", nothing)
+      _is_object_like(node_data) || continue
+      protocols = get(node_data, "protocols", Any[])
+      protocols isa AbstractVector || continue
+      append!(definitions, ((protocol, "node $index") for protocol in protocols))
+    end
+  end
+
+  edges = get(net, "edges", Any[])
+  if edges isa AbstractVector
+    for (index, edge) in enumerate(edges)
+      _is_object_like(edge) || continue
+      edge_data = get(edge, "data", nothing)
+      _is_object_like(edge_data) || continue
+      protocols = get(edge_data, "protocols", Any[])
+      protocols isa AbstractVector || continue
+      append!(definitions, ((protocol, "edge $index") for protocol in protocols))
+    end
+  end
+
+  protocols = get(net, "protocols", Any[])
+  if protocols isa AbstractVector
+    append!(definitions, ((protocol, "floating protocol") for protocol in protocols))
+  end
+
+  return definitions
+end
+
+function _validate_variable_references(payload, variables)
+  for (protocol, location) in _collect_protocol_definitions(payload)
+    _is_object_like(protocol) || continue
+    parameters = get(protocol, "parameters", Any[])
+    parameters isa AbstractVector || continue
+
+    for parameter in parameters
+      _is_object_like(parameter) || continue
+      haskey(parameter, "value") || continue
+      parameter_name = string(get(parameter, "name", "unknown"))
+      context = "$location parameter '$parameter_name'"
+      reference = _parse_variable_reference(parameter["value"]; context=context)
+      reference === nothing && continue
+      haskey(variables, reference.id) || throw(validation_error(
+        "Unknown variable reference: '$(reference.id)'",
+        Dict{String,Any}(
+          "variable_id" => reference.id,
+          "parameter_name" => parameter_name,
+          "location" => location,
+        ),
+      ))
+    end
+  end
+
+  return true
+end
+
 function get_background_constructor_parameters(background_type)
   QuantumSavory.constructor_metadata(background_type)
 end
@@ -156,8 +308,13 @@ function parse_pt_type(parameters::AbstractVector)
   for p in parameters
     t = getfield(p, :type)
 
-    # Special case for SymbolicUtils.Symbolic
-    if startswith(string(t), "SymbolicUtils.Symbolic{")
+    # Normalize symbolic protocol values to the UI's stable symbolic type.
+    # QuantumSavory metadata has used both SymbolicUtils.Symbolic and
+    # QuantumSymbolics.SymQObj across releases.
+    type_string = string(t)
+    if startswith(type_string, "SymbolicUtils.Symbolic{") ||
+       type_string == "QuantumSymbolics.SymQObj" ||
+       startswith(type_string, "QuantumSymbolics.SymQObj{")
       push!(result, (field = p.field, type = "Symbolic", doc = p.doc))
       continue
     end
@@ -362,6 +519,12 @@ function validate_payload(payload)
 
       push!(edge_connections, Dict("source" => source, "target" => target))
     end
+
+    # Variables are optional for legacy projects. When present, validate both
+    # their definitions and every tagged protocol-parameter reference before
+    # creating backend state.
+    variables = _parse_variables(payload)
+    _validate_variable_references(payload, variables)
 
     # Prepare success response with graph info
     response = Dict(
@@ -729,7 +892,68 @@ function _handle_regular_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, ptyp
   return false
 end
 
-function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any}, state=nothing)
+function _special_parameter_type(p_raw_type)
+  declared_types = p_raw_type isa AbstractVector ? p_raw_type : (p_raw_type,)
+  for declared_type in declared_types
+    type_string = string(declared_type)
+    if type_string in ("Function", "Lambda")
+      return type_string
+    elseif type_string == "Symbolic" ||
+           startswith(type_string, "SymbolicUtils.Symbolic{") ||
+           type_string == "QuantumSymbolics.SymQObj" ||
+           startswith(type_string, "QuantumSymbolics.SymQObj{")
+      return "Symbolic"
+    end
+  end
+  return nothing
+end
+
+"""Convert and assign one concrete typed value to a protocol keyword."""
+function _handle_typed_parameter!(kwargs, name, p_raw_type, value, ctx, state=nothing)
+  ptype = p_raw_type === nothing ? "Any" : string(p_raw_type)
+  special_type = _special_parameter_type(p_raw_type)
+
+  try
+    debug_msg = "Processing parameter: $name, type: $ptype, special_type: $special_type"
+    if state !== nothing
+      @log_event state Logging.Debug debug_msg
+    else
+      @debug debug_msg
+    end
+
+    if special_type == "Function" || special_type == "Lambda"
+      return _handle_function_lambda_parameter!(
+        kwargs,
+        name,
+        special_type,
+        value,
+        state;
+        self_node_index=get(ctx, :node, nothing),
+      )
+    elseif special_type == "Symbolic"
+      return _handle_symbolic_parameter!(kwargs, name, value)
+    else
+      return _handle_regular_parameter!(kwargs, name, ptype, value)
+    end
+  catch e
+    isa(e, APIError) && rethrow(e)
+    msg = "Failed to convert parameter"
+    if state !== nothing
+      @log_event state Logging.Warn msg parameter_name=string(name) parameter_type=ptype value=value error=string(e)
+    else
+      @warn msg parameter_name=name parameter_type=ptype value=value error=e
+    end
+    # Don't set the parameter - let the constructor use its default value.
+    return false
+  end
+end
+
+function _instantiate_protocol(
+  prot_def,
+  ctx::Dict{Symbol,Any},
+  state=nothing;
+  variables=Dict{String,Variable}(),
+)
   # Handle both Dict{String,Any} and JSON3.Object types
   tstr = get(prot_def, "type", nothing)
   tstr === nothing && return nothing
@@ -745,6 +969,7 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any}, state=nothing)
 
   # Build keyword arguments from all parameters
   kwargs = Dict{Symbol, Any}()
+  variable_assignments = Dict{String,Any}[]
 
   # Add sim, net, and node(s) as keyword arguments
   kwargs[:sim] = ctx[:sim]
@@ -768,84 +993,91 @@ function _instantiate_protocol(prot_def, ctx::Dict{Symbol,Any}, state=nothing)
       continue
     end
 
-    # Skip parameters without values
-    if value === nothing
-      @warn "Parameter has no value, skipping" parameter_name=name
-      continue
-    end
-
-    # Skip empty strings for function/lambda parameters
-    if isa(value, String) && isempty(strip(value))
-      @warn "Parameter has empty value, skipping" parameter_name=name
-      continue
-    end
-
     # Apply keyword name mapping if it exists
     if haskey(keyword_mappings, original_name)
       name = Symbol(keyword_mappings[original_name])
     end
 
-    # Convert value based on type
-    p_raw_type = get(p, "type", nothing)
-    ptype = p_raw_type === nothing ? "Any" : string(p_raw_type)
+    # Variable references are intentionally resolved before the literal-value
+    # pipeline. The variable's concrete type controls conversion; the protocol
+    # parameter's declared type remains constructor-level validation.
+    reference = _parse_variable_reference(value; context="Protocol parameter '$original_name'")
+    if reference !== nothing
+      variable = get(variables, reference.id, nothing)
+      variable === nothing && throw(validation_error(
+        "Unknown variable reference: '$(reference.id)'",
+        Dict{String,Any}(
+          "variable_id" => reference.id,
+          "parameter_name" => original_name,
+        ),
+      ))
 
-    # Determine the special parameter type (mutually exclusive)
-    special_type = nothing
-    
-    if isa(p_raw_type, AbstractVector)
-      for t in p_raw_type
-        ts = string(t)
-        if ts in ("Function", "Lambda", "Symbolic")
-          special_type = ts
-          break
-        end
-      end
-    else
-      if ptype in ("Function", "Lambda", "Symbolic")
-        special_type = ptype
-      end
+      # A default variable means exactly what selecting "default" in a
+      # protocol editor means: omit the keyword and use the constructor default.
+      # The predefined-function selector also represents its default choice as
+      # a Function-typed value containing the string "default".
+      uses_default = lowercase(variable.type) == "default" || (
+        variable.type == "Function" &&
+        variable.value isa AbstractString &&
+        lowercase(strip(variable.value)) == "default"
+      )
+      uses_default && continue
+
+      converted = _handle_typed_parameter!(kwargs, name, variable.type, variable.value, ctx, state)
+      converted || throw(validation_error(
+        "Failed to convert variable '$(variable.name)' for parameter '$original_name'",
+        Dict{String,Any}(
+          "variable_id" => variable.id,
+          "variable_name" => variable.name,
+          "variable_type" => variable.type,
+          "parameter_name" => original_name,
+        ),
+      ))
+      push!(variable_assignments, Dict{String,Any}(
+        "variable_id" => variable.id,
+        "variable_name" => variable.name,
+        "variable_type" => variable.type,
+        "parameter_name" => original_name,
+        "parameter_type" => string(get(p, "type", "Any")),
+      ))
+      continue
     end
 
-    # Try to convert the value, fall back gracefully if it fails
-    try
-      # Debug logging to see which branch is taken
-      debug_msg = "Processing parameter: $name, type: $ptype, special_type: $special_type"
-      if state !== nothing
-        @log_event state Logging.Debug debug_msg
-      else
-        @debug debug_msg
-      end
-      
-      if special_type == "Function" || special_type == "Lambda"
-        _handle_function_lambda_parameter!(
-          kwargs,
-          name,
-          special_type,
-          value,
-          state;
-          self_node_index=get(ctx, :node, nothing),
-        )
-      elseif special_type == "Symbolic"
-        _handle_symbolic_parameter!(kwargs, name, value)
-      else
-        _handle_regular_parameter!(kwargs, name, ptype, value)
-      end
-    catch e
-      isa(e, APIError) && rethrow(e)
-      msg = "Failed to convert parameter"
-      if state !== nothing
-        @log_event state Logging.Warn msg parameter_name=string(name) parameter_type=ptype value=value error=string(e)
-      else
-        @warn msg parameter_name=name parameter_type=ptype value=value error=e
-      end
-      # Don't set the parameter - let the constructor use its default value
+    # Preserve existing literal semantics: absent and empty values leave the
+    # constructor keyword unset.
+    if value === nothing
+      @warn "Parameter has no value, skipping" parameter_name=name
+      continue
+    elseif isa(value, String) && isempty(strip(value))
+      @warn "Parameter has empty value, skipping" parameter_name=name
+      continue
     end
+
+    _handle_typed_parameter!(kwargs, name, get(p, "type", nothing), value, ctx, state)
   end
 
   # Instantiate with all keyword arguments
   @info "Instantiating protocol" protocol_type=T kwargs=kwargs
-  # Convert kwargs dict to keyword arguments
-  return T(; (k => v for (k, v) in kwargs)...)
+  # Preserve the existing constructor behavior for literal-only protocols.
+  # When variable-backed keywords were applied, translate constructor type or
+  # compatibility failures into a client-facing validation error instead of a
+  # generic 500 response.
+  isempty(variable_assignments) && return T(; (k => v for (k, v) in kwargs)...)
+
+  try
+    return T(; (k => v for (k, v) in kwargs)...)
+  catch e
+    isa(e, APIError) && rethrow(e)
+    parameter_names = join((assignment["parameter_name"] for assignment in variable_assignments), ", ")
+    throw(validation_error(
+      "Failed to instantiate protocol with variable-backed parameter(s): $parameter_names",
+      Dict{String,Any}(
+        "protocol_type" => string(T),
+        "variable_assignments" => variable_assignments,
+        "constructor_error" => sprint(showerror, e),
+      ),
+    ))
+  end
 end
 
 function simulation_is_running_exception(simulation_name)

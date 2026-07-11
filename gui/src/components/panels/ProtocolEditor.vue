@@ -27,116 +27,93 @@
     </div>
     <div class="protocol-container" v-if="isSelected">
         <div class="params-container">
-          
-          <!-- ---------------- PARAM ITEM (ROW) ---------------- -->
-            <div class="param-item" v-for="param in filteredParameters" :key="param.name">
-
-              <!-- ---------------- STRING PARAMETER ---------------- -->
-              <div class="param-item-row" v-if="typeof parseJuliaType(param.type) === 'string'" 
-                :class="{ 'grayed-parameter': isGrayedParameter(param), 'columnParamRow': param.type === 'Lambda' || param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic' }">
-                
-                <!-- ---------------- PARAM NAME ---------------- -->
-                <div 
+          <div class="param-item" v-for="param in filteredParameters" :key="param.name">
+              <div
+                class="param-item-row"
+                :class="{
+                  'grayed-parameter': isGrayedParameter(param),
+                  'columnParamRow': !isVariableAssigned(param) && isCodeType(effectiveParameterType(param))
+                }"
+              >
+                <div
                   v-tooltip.top="{
-                    value: getProtocolParameterDefinitoinText( category, protocol, param ),
-                    escape: false, // allow HTML instead of escaping
-                    pt: {
-                      arrow: {
-                        style: {
-                          borderTopColor: '#fff'
-                        }
-                      }
-                    }
+                    value: getProtocolParameterDefinitoinText(category, protocol, param),
+                    escape: false,
+                    pt: { arrow: { style: { borderTopColor: '#fff' } } }
                   }"
-                  class="param-name">
+                  class="param-name"
+                >
                   {{ param.name }}
-                   <div style="margin-left: 2px; display: inline-block;" v-if="!paramIsKnownType(param.type)">
-                    <i style="color: #ff0000; font-size: 8px; position: relative; top: -1px;" class="pi pi-exclamation-triangle"></i>
+                  <span v-if="paramUnknownTypes(param.type).length > 0" class="unknown-type-indicator">
+                    <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
+                  </span>
+                  <template v-if="parameterTypeChoices(param)">
+                    <br/>
+                    <select
+                      v-model="param.selectedType"
+                      class="complexTypeSelector"
+                      :disabled="isEditingDisabled || isVariableAssigned(param)"
+                      @change="onSelectedTypeChanged(param)"
+                    >
+                      <option
+                        v-for="type in parameterTypeChoices(param)"
+                        :key="type"
+                        :value="type"
+                        :disabled="!parameterTypeIsKnown(type)"
+                      >
+                        {{ getTypeOptionLabel(type) }}
+                      </option>
+                    </select>
+                  </template>
+                </div>
+
+                <div
+                  class="param-value"
+                  :class="{ noInteraction: isGrayedParameter(param) && !isVariableAssigned(param) }"
+                >
+                  <div v-if="isVariableAssigned(param)" class="variable-assignment">
+                    <i class="pi pi-link" aria-hidden="true"></i>
+                    <select
+                      class="variable-selector"
+                      :value="param.value.id"
+                      :disabled="isEditingDisabled"
+                      :aria-label="`Variable for ${param.name}`"
+                      @change="assignVariable(param, $event.target.value)"
+                    >
+                      <option
+                        v-if="!assignedVariable(param)"
+                        :value="param.value.id"
+                        disabled
+                      >
+                        Missing variable ({{ param.value.id }})
+                      </option>
+                      <option v-for="variable in variables" :key="variable.id" :value="variable.id">
+                        {{ variable.name }} ({{ getTypeOptionLabel(variable.type) }})
+                      </option>
+                    </select>
                   </div>
+                  <TypedValueInput
+                    v-else
+                    :parameter="param"
+                    :type="effectiveParameterType(param)"
+                    :disabled="isEditingDisabled"
+                    :category="category"
+                  />
                 </div>
 
-                <!-- ---------------- PARAM VALUE ---------------- -->
-                <div class="param-value" :class="{ noInteraction: isGrayedParameter(param) }">
-                    <input v-if="paramTypeIsNumber(param)" type="number" v-model="param.value" :min="param.min" :max="param.max" placeholder="default" :disabled="isEditingDisabled" />
-                    <Checkbox v-else-if="param.type === 'Bool'" v-model="param.value" binary :disabled="isEditingDisabled" />
-                    <div v-else-if="param.type === 'Lambda' || param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic'" style="width:100%;" >
-                      <CodeEditorWithSymbols
-                        :modelValue="param.value"
-                        :readOnly="isEditingDisabled || !unsafeCodeEvaluationEnabled"
-                        :evaluationEnabled="unsafeCodeEvaluationEnabled"
-                        :errorMessage="param.error"
-                        :showLatex="param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic'"
-                        :latexExpression="param.latex"
-                        :paramType="param.type"
-                        @update:modelValue="onCodeEditorValueChanged(param, $event)"
-                        @validate="validateFunction(param)"
-                      />
-                    </div>
-                    <span v-else-if="isWildcardType(param.type)">Wildcard</span>
-                  <input v-else type="text" v-model="param.value" style="border-color: transparent;" placeholder="default" :disabled="isEditingDisabled" />
-                </div>
+                <button
+                  type="button"
+                  class="variable-binding-button noborder"
+                  :class="{ active: isVariableAssigned(param) }"
+                  :disabled="variableButtonDisabled(param)"
+                  :title="variableButtonTitle(param)"
+                  :aria-label="variableButtonLabel(param)"
+                  @click="toggleVariableAssignment(param)"
+                >
+                  <i :class="isVariableAssigned(param) ? 'pi pi-times' : 'pi pi-link'" aria-hidden="true"></i>
+                </button>
               </div>
-
-              <!-- ---------------- COMPLEX PARAMETER ---------------- -->
-              <div class="param-item-row" :class="{ 'columnParamRow': param.selectedType === 'Lambda' || param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic' }" v-if="typeof parseJuliaType(param.type) === 'object'">
-
-                <!-- ---------------- PARAM NAME ---------------- -->
-                <div 
-                  v-tooltip.top="{
-                    value: getProtocolParameterDefinitoinText( category, protocol, param ),
-                    escape: false, // allow HTML instead of escaping
-                    pt: {
-                      arrow: {
-                        style: {
-                          borderTopColor: '#fff'
-                        }
-                      }
-                    }
-                  }"
-                  class="param-name">{{ param.name }} 
-                  <div style="margin-left: 2px; display: inline-block;" v-if="paramUnknownTypes(param.type).length > 0">
-                    <i style="color: #ff0000; font-size: 8px; position: relative; top: -1px;" class="pi pi-exclamation-triangle"></i>
-                  </div>
-                  <br/>
-                  <select v-model="param.selectedType" class="complexTypeSelector" :disabled="isEditingDisabled" @change="onSelectedTypeChanged(param)">
-                    <option :disabled="!paramIsKnownType(type)" v-for="type in parseJuliaType(param.type)" :key="type" :value="type">
-                      {{ getTypeOptionLabel(type) }}
-                    </option>
-                  </select>
-                </div>
-
-                <!-- ---------------- PARAM VALUE ---------------- -->
-                <div class="param-value">
-                    <input v-if="paramTypeIsNumber(param.selectedType)" type="number" v-model="param.value" :min="param.min" :max="param.max" :disabled="isEditingDisabled" />
-                    <Checkbox v-else-if="param.selectedType === 'Bool'" v-model="param.value" binary :disabled="isEditingDisabled" />
-                    <div v-else-if="param.selectedType === 'Lambda' || param.selectedType === 'SymbolicUtils.Symbolic' || param.selectedType === 'Symbolic'" style="width:100%;" >
-                      <CodeEditorWithSymbols
-                        :modelValue="param.value"
-                        :readOnly="isEditingDisabled || !unsafeCodeEvaluationEnabled"
-                        :evaluationEnabled="unsafeCodeEvaluationEnabled"
-                        :errorMessage="param.error"
-                        :showLatex="param.selectedType === 'SymbolicUtils.Symbolic' || param.selectedType === 'Symbolic'"
-                        :latexExpression="param.latex"
-                        :paramType="param.selectedType"
-                        @update:modelValue="onCodeEditorValueChanged(param, $event)"
-                        @validate="validateFunction(param)"
-                      />
-                    </div>
-
-                    <div v-else-if="param.selectedType === 'Function'" >
-                      <select v-model="param.value" class="functionSelector" :disabled="isEditingDisabled">
-                        <option value="default">Default</option>
-                        <option v-for="func in selectableFunctions" :key="func" :value="func">{{ func }}</option>
-                      </select>
-                    </div>
-
-                    <span v-else-if="param.selectedType === 'default'">Use protocol default</span>
-                    <span v-else-if="isWildcardType(param.selectedType)">Wildcard</span>
-                    
-                  <input v-else type="text" v-model="param.value" style="border-color: transparent;" :disabled="isEditingDisabled" />
-                </div>
-              </div>
-            </div>
+          </div>
         </div>
     </div>
   </div>
@@ -145,11 +122,18 @@
 
 
 <script setup>
-import { defineProps, defineEmits, onMounted, computed, ref, reactive, defineAsyncComponent } from 'vue'
-import Checkbox from 'primevue/checkbox';
+import { computed } from 'vue'
 import { api } from '../../utils/ApiConnector'
-
-const CodeEditorWithSymbols = defineAsyncComponent(() => import('./CodeEditorWithSymbols.vue'))
+import { VariableReference, isVariableReference } from '../../models/Variable'
+import {
+  getTypeOptionLabel,
+  isCodeType,
+  isWildcardType,
+  parameterTypeIsKnown,
+  parseJuliaType,
+  unknownParameterTypes
+} from '../../utils/parameterTypes'
+import TypedValueInput from './TypedValueInput.vue'
 
 const props = defineProps({
   protocol: {
@@ -173,20 +157,19 @@ const props = defineProps({
     type: Object,
     required: false,
     default: () => ({})
+  },
+  variables: {
+    type: Array,
+    default: () => []
   }
 })
 const emit = defineEmits(['select', 'delete'])
-
-const resultFromShowEndpoint = ref(`placeholder`);
 
 // Check if protocol editing should be disabled
 const isEditingDisabled = computed(() => {
   return props.simulationState?.hasSimulationRun || false
 })
-const unsafeCodeEvaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
-const selectableFunctions = computed(() => api.getKnownFunctions().filter(func =>
-  props.category === 'node' || !func.endsWith('(self)')
-))
+const directParameterValues = new WeakMap()
 
 function toggleDetails(){
   emit('select', props.protocol)
@@ -203,28 +186,6 @@ function showResults(){
 function isGrayedParameter(param){
   return param.type === "Any"
 }
-
-function parseJuliaType( inputType ) {
-  const isUnion = Array.isArray( inputType );
-  const declaredTypes = isUnion ? inputType : [inputType];
-
-  if( declaredTypes.includes('Function') ){
-    return ['default', ...declaredTypes, 'Lambda'];
-  }
-
-  return isUnion ? ['default', ...declaredTypes] : inputType;
-}
-
-const typeOptionLabels = {
-  default: 'Default',
-  Function: 'Predefined function',
-  Lambda: 'Custom function',
-}
-
-function getTypeOptionLabel(type) {
-  return typeOptionLabels[type] || type
-}
-
 
 function getProtocolTypeSimpleName( protocolType ){
   const simpleName = protocolType.split(".").pop();
@@ -250,22 +211,6 @@ const filteredParameters = computed(() => {
   return filtered;
 })
 
-const knownTypes = ['Float64', 'Int64', 'Bool', 'String', 'Function', 'Nothing', 'Symbolic', 'Vector{Int64}', 'Vector{Float64}', 'Lambda', 'SymbolicUtils.Symbolic', 'default' ];
-
-function isWildcardType(type) {
-  return type === 'Wildcard' || type === 'QuantumSavory.Wildcard'
-}
-
-function paramIsKnownType(param){
-  if( param == undefined ){
-    return false;
-  }
-
-  const originalType = typeof param === 'object' ? param.type : param;
-  const isKnownType = knownTypes.includes(originalType) || isWildcardType(originalType);
-  return isKnownType;
-}
-
 function getProtocolParameterDefinitoinText( category, protocol, param){
   let result = api.getProtocolParameterDefinition( category, protocol.type, param.name )?.doc || 'NO DOC';
   const unknownTypes = paramUnknownTypes(param.type);
@@ -277,32 +222,7 @@ function getProtocolParameterDefinitoinText( category, protocol, param){
 }
 
 function paramUnknownTypes(param){
-  if( param == undefined ){
-    return [];
-  }
-  let unknownTypes = [];
-  if( typeof param === 'string' && !knownTypes.includes(param) && !isWildcardType(param) ){
-    unknownTypes.push(param);
-  }
-  if( Array.isArray( param ) ){
-    unknownTypes = param.filter(type => !knownTypes.includes(type) && !isWildcardType(type));
-  }
-  return unknownTypes;
-}
-
-function paramTypeIsNumber(param){
-  if( param == undefined ){
-    return false;
-  }
-  const originalType = typeof param === 'object' ? param.type : param;
-  const lower = originalType.toLowerCase();
-  const isSupportedNumber = lower == 'int' || lower == 'int64' || lower.startsWith('float');
-  return isSupportedNumber;
-}
-
-function onCodeEditorValueChanged(paramObject, value) {
-  paramObject.value = value;
-  delete paramObject.error;
+  return unknownParameterTypes(param)
 }
 
 function onSelectedTypeChanged(param) {
@@ -310,44 +230,68 @@ function onSelectedTypeChanged(param) {
     param.value = null
   } else if (isWildcardType(param.selectedType)) {
     param.value = 'Wildcard'
-  } else if (param.value === 'Wildcard') {
+  } else if (param.selectedType === 'Nothing') {
+    param.value = 'nothing'
+  } else if (param.value === 'Wildcard' || param.value === 'nothing') {
     param.value = null
   }
 }
 
-async function validateFunction(param){
-  console.log( 'validateFunction', param );
-  if( !unsafeCodeEvaluationEnabled.value ){
-    param.error = '<pre>Server-side Julia evaluation is disabled.</pre>';
-    return;
-  }
+function parameterTypeChoices(param) {
+  const parsedType = parseJuliaType(param.type)
+  return Array.isArray(parsedType) ? parsedType : null
+}
 
-  let response;
-  if( param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic' ){
-    response = await api.validateSymbolicFunction( param.value );
-  }else{
-    response = await api.validateFunction( param.value );
-  }
-  if( response.success ){
-    delete param.error;
-    if( param.type === 'SymbolicUtils.Symbolic' || param.type === 'Symbolic' ){
-      param.latex = response.results.latex.replace(/^\$+|\$+$/g, '');
-    }
-  }else{
-    delete param.latex;
-    // Escape HTML first to prevent XSS
-    const escaped = response.error
-      .split('\\n').join('\n')
-      .split('\\"').join('"')
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+function effectiveParameterType(param) {
+  return parameterTypeChoices(param) ? (param.selectedType || '') : param.type
+}
 
-    // Preserve newlines with <br>, or wrap in <pre>
-    param.error = `<pre>${escaped}</pre>`;
+function isVariableAssigned(param) {
+  return isVariableReference(param.value)
+}
+
+function assignedVariable(param) {
+  if (!isVariableAssigned(param)) return null
+  return props.variables.find(variable => variable.id === param.value.id) || null
+}
+
+function assignVariable(param, variableId) {
+  if (isEditingDisabled.value) return
+  if (!isVariableAssigned(param)) directParameterValues.set(param, param.value)
+  param.value = new VariableReference(variableId)
+  delete param.error
+  delete param.latex
+}
+
+function clearVariableAssignment(param) {
+  if (isEditingDisabled.value) return
+  param.value = directParameterValues.has(param) ? directParameterValues.get(param) : null
+  directParameterValues.delete(param)
+}
+
+function toggleVariableAssignment(param) {
+  if (isVariableAssigned(param)) {
+    clearVariableAssignment(param)
+  } else if (props.variables.length > 0) {
+    assignVariable(param, props.variables[0].id)
   }
+}
+
+function variableButtonDisabled(param) {
+  return isEditingDisabled.value || (!isVariableAssigned(param) && props.variables.length === 0)
+}
+
+function variableButtonTitle(param) {
+  if (isEditingDisabled.value) return 'Reset the simulation to edit protocol parameters'
+  if (isVariableAssigned(param)) return 'Use a direct value'
+  if (props.variables.length === 0) return 'Create a variable in the Variables tab first'
+  return 'Set this parameter from a variable'
+}
+
+function variableButtonLabel(param) {
+  return isVariableAssigned(param)
+    ? `Use a direct value for ${param.name}`
+    : `Set ${param.name} from a variable`
 }
 
 function deleteProtocol(  ){
@@ -461,18 +405,23 @@ button.protocol-header-action:hover{
   display: flex;
   justify-content: end;
   align-items: center;
+  min-width: 0;
 }
 
-input[type="text"]{
+.param-value :deep(input[type="text"]){
   width: 60%;
   text-align: right;
   padding: 0px 10px;
 }
 
-input[type="number"]{
+.param-value :deep(input[type="number"]){
   width: 60%;
   text-align: right;
   padding: 0px 0px;
+}
+
+.param-value :deep(.code-value-input){
+  width: 100%;
 }
 
 .complexTypeSelector{
@@ -490,6 +439,17 @@ input[type="number"]{
 
 .columnParamRow{
   flex-direction: column;
+  position: relative;
+}
+
+.columnParamRow .param-value{
+  width: 100%;
+}
+
+.columnParamRow .variable-binding-button{
+  position: absolute;
+  top: 0;
+  right: 0;
 }
 
 .noInteraction{
@@ -498,8 +458,47 @@ input[type="number"]{
   cursor: not-allowed;
 }
 
-input::placeholder {
+.param-value :deep(input::placeholder) {
   font-size: 0.85em;
+}
+
+.unknown-type-indicator {
+  display: inline-block;
+  margin-left: 2px;
+  color: #f00;
+  font-size: 8px;
+  position: relative;
+  top: -1px;
+}
+
+.variable-assignment {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  color: #4345ac;
+}
+
+.variable-selector {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.variable-binding-button {
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border-radius: 4px;
+  color: #777;
+}
+
+.variable-binding-button:not(:disabled):hover,
+.variable-binding-button.active {
+  background: #eeeeff;
+  color: #4345ac;
 }
 
 </style>

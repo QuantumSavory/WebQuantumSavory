@@ -143,6 +143,10 @@
       @test virtual_protocol["virtual"] === true
       @test all(pt["group"] == "edge" for pt in physical_protocols)
       @test all(pt["virtual"] === false for pt in physical_protocols)
+
+      entangler_parameters = protocol_types_by_name[string(QuantumSavory.ProtocolZoo.EntanglerProt)]["parameters"]
+      pairstate = only(filter(parameter -> string(parameter.field) == "pairstate", entangler_parameters))
+      @test pairstate.type == "Symbolic"
   end
 
   @testset "Payload Extraction" begin
@@ -231,6 +235,216 @@
         @test e isa WebQuantumSavory.APIError
         @test e.message == "Edge 1 references non-existent target node: 'nonexistent'"
       end
+  end
+
+  @testset "Simulation Variables" begin
+      # Legacy payloads have no variables field and remain valid.
+      legacy_variables = WebQuantumSavory._parse_variables(test_payload)
+      @test isempty(legacy_variables)
+      @test WebQuantumSavory.validate_payload(test_payload)["success"] == true
+
+      variable_payload = deepcopy(test_payload)
+      variable_payload["variables"] = [
+        Dict(
+          "id" => "variable_retention",
+          "name" => "retention time",
+          "type" => "Float64",
+          "value" => 0.75,
+        ),
+        Dict(
+          "id" => "variable_default",
+          "name" => "use default",
+          "type" => "default",
+          "value" => nothing,
+        ),
+      ]
+      variable_payload["net"]["nodes"][1]["data"]["protocols"][1]["parameters"][4]["value"] = Dict(
+        "kind" => "variable",
+        "id" => "variable_retention",
+      )
+
+      validated = WebQuantumSavory.validate_payload(variable_payload)
+      @test validated["success"] == true
+      variables = WebQuantumSavory._parse_variables(variable_payload)
+      @test variables["variable_retention"] isa WebQuantumSavory.Variable
+      @test variables["variable_retention"].name == "retention time"
+      @test variables["variable_retention"].type == "Float64"
+      @test variables["variable_retention"].value == 0.75
+
+      reference = WebQuantumSavory._parse_variable_reference(Dict(
+        "kind" => "variable",
+        "id" => "variable_retention",
+      ))
+      @test reference isa WebQuantumSavory.VariableReference
+      @test reference.id == "variable_retention"
+      @test WebQuantumSavory._parse_variable_reference(Dict("kind" => "literal", "id" => "x")) === nothing
+      @test WebQuantumSavory._parse_variable_reference(3.0) === nothing
+
+      function variable_validation_error(mutator)
+        payload = deepcopy(variable_payload)
+        mutator(payload)
+        try
+          WebQuantumSavory.validate_payload(payload)
+          return nothing
+        catch e
+          return e
+        end
+      end
+
+      invalid_array = variable_validation_error(payload -> (payload["variables"] = Dict()))
+      @test invalid_array isa WebQuantumSavory.APIError
+      @test invalid_array.status_code == 400
+
+      duplicate_id = variable_validation_error(payload -> push!(
+        payload["variables"],
+        Dict("id" => "variable_retention", "name" => "other", "type" => "Int64", "value" => 2),
+      ))
+      @test duplicate_id isa WebQuantumSavory.APIError
+      @test occursin("Duplicate variable ID", duplicate_id.message)
+
+      duplicate_name = variable_validation_error(payload -> push!(
+        payload["variables"],
+        Dict("id" => "other", "name" => "retention time", "type" => "Int64", "value" => 2),
+      ))
+      @test duplicate_name isa WebQuantumSavory.APIError
+      @test occursin("Duplicate variable name", duplicate_name.message)
+
+      missing_value = variable_validation_error(payload -> delete!(payload["variables"][1], "value"))
+      @test missing_value isa WebQuantumSavory.APIError
+      @test occursin("missing required field: 'value'", missing_value.message)
+
+      malformed_reference = variable_validation_error(payload -> delete!(
+        payload["net"]["nodes"][1]["data"]["protocols"][1]["parameters"][4]["value"],
+        "id",
+      ))
+      @test malformed_reference isa WebQuantumSavory.APIError
+      @test occursin("missing required field: 'id'", malformed_reference.message)
+
+      dangling_reference = variable_validation_error(payload -> (
+        payload["net"]["nodes"][1]["data"]["protocols"][1]["parameters"][4]["value"]["id"] = "missing"
+      ))
+      @test dangling_reference isa WebQuantumSavory.APIError
+      @test dangling_reference.status_code == 400
+      @test occursin("Unknown variable reference", dangling_reference.message)
+
+      null_typed_value = variable_validation_error(payload -> (payload["variables"][1]["value"] = nothing))
+      @test null_typed_value isa WebQuantumSavory.APIError
+      @test occursin("must not be null", null_typed_value.message)
+  end
+
+  @testset "Variable-backed Protocol Parameters" begin
+      runtime_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+      simulation_name = "variable_backed_protocol_parameters"
+      runtime_payload["name"] = simulation_name
+      runtime_payload["variables"] = [
+        Dict("id" => "probability", "name" => "probability", "type" => "Float64", "value" => 0.25),
+        Dict("id" => "no_retry", "name" => "no retry", "type" => "Nothing", "value" => nothing),
+        Dict("id" => "protocol_default", "name" => "protocol default", "type" => "Function", "value" => "default"),
+      ]
+
+      protocol_definition = runtime_payload["net"]["edges"][1]["data"]["protocols"][1]
+      parameter_by_name(name) = only(filter(p -> p["name"] == name, protocol_definition["parameters"]))
+      parameter_by_name("success_prob")["value"] = Dict("kind" => "variable", "id" => "probability")
+      parameter_by_name("retry_lock_time")["value"] = Dict("kind" => "variable", "id" => "no_retry")
+      parameter_by_name("attempt_time")["value"] = Dict("kind" => "variable", "id" => "protocol_default")
+
+      try
+        state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(runtime_payload))
+        WebQuantumSavory.prepare_simulation(state, simulation_name)
+        protocol = state.protocol_mapping[protocol_definition["id"]]
+        @test protocol.success_prob == 0.25
+        @test protocol.retry_lock_time === nothing
+        @test protocol.attempt_time == 0.001
+
+        invalid_protocol_definition = Dict(
+          "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),
+          "parameters" => [Dict(
+            "name" => "success_prob",
+            "type" => "Float64",
+            "value" => Dict("kind" => "variable", "id" => "invalid_probability"),
+          )],
+        )
+        invalid_variables = Dict(
+          "invalid_probability" => WebQuantumSavory.Variable(
+            "invalid_probability",
+            "invalid probability",
+            "Float64",
+            "not-a-number",
+          ),
+        )
+        ctx = Dict{Symbol,Any}(
+          :sim => state.simulation,
+          :net => state.network,
+          :nodeA => 1,
+          :nodeB => 2,
+        )
+        conversion_error = try
+          WebQuantumSavory._instantiate_protocol(
+            invalid_protocol_definition,
+            ctx;
+            variables=invalid_variables,
+          )
+          nothing
+        catch e
+          e
+        end
+        @test conversion_error isa WebQuantumSavory.APIError
+        @test conversion_error.status_code == 400
+        @test occursin("Failed to convert variable", conversion_error.message)
+
+        incompatible_protocol_definition = Dict(
+          "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),
+          "parameters" => [Dict(
+            "name" => "success_prob",
+            "type" => "Float64",
+            "value" => Dict("kind" => "variable", "id" => "string_probability"),
+          )],
+        )
+        incompatible_variables = Dict(
+          "string_probability" => WebQuantumSavory.Variable(
+            "string_probability",
+            "string probability",
+            "String",
+            "0.25",
+          ),
+        )
+        constructor_error = try
+          WebQuantumSavory._instantiate_protocol(
+            incompatible_protocol_definition,
+            ctx;
+            variables=incompatible_variables,
+          )
+          nothing
+        catch e
+          e
+        end
+        @test constructor_error isa WebQuantumSavory.APIError
+        @test constructor_error.status_code == 400
+        @test occursin("variable-backed parameter", constructor_error.message)
+        @test constructor_error.details["variable_assignments"][1]["variable_id"] == "string_probability"
+        @test constructor_error.details["variable_assignments"][1]["parameter_name"] == "success_prob"
+
+        # Literal-only constructor failures preserve their pre-variable behavior.
+        literal_protocol_definition = deepcopy(incompatible_protocol_definition)
+        literal_protocol_definition["parameters"][1]["value"] = "0.25"
+        literal_protocol_definition["parameters"][1]["type"] = "String"
+        literal_constructor_error = try
+          WebQuantumSavory._instantiate_protocol(literal_protocol_definition, ctx)
+          nothing
+        catch e
+          e
+        end
+        @test literal_constructor_error !== nothing
+        @test !(literal_constructor_error isa WebQuantumSavory.APIError)
+      finally
+        haskey(WebQuantumSavory.STATE, simulation_name) && WebQuantumSavory.destroy_simulation(simulation_name)
+      end
+
+      # A function-valued variable still resolves in the assigned node context.
+      kwargs = Dict{Symbol,Any}()
+      ctx = Dict{Symbol,Any}(:node => 2)
+      @test WebQuantumSavory._handle_typed_parameter!(kwargs, :filter, "Function", "<(self)", ctx)
+      @test kwargs[:filter].(1:3) == [true, false, false]
   end
 
   @testset "Graph Building" begin
@@ -596,6 +810,12 @@
     ok, v = WebQuantumSavory._convert_parameter_value("Float32", 2)
     @test ok && v == 2.0
 
+    # Strings and explicit Nothing values do not require Julia evaluation.
+    ok, v = WebQuantumSavory._convert_parameter_value("String", 123)
+    @test ok && v == "123"
+    ok, v = WebQuantumSavory._convert_parameter_value("Nothing", nothing)
+    @test ok && v === nothing
+
     # Bool conversions
     ok, v = WebQuantumSavory._convert_parameter_value("Bool", "true")
     @test ok && v === true
@@ -689,6 +909,8 @@
       safe_primitive_kwargs = Dict{Symbol,Any}()
       @test WebQuantumSavory._handle_regular_parameter!(safe_primitive_kwargs, :rounds, "Int64", "3")
       @test safe_primitive_kwargs[:rounds] == 3
+      @test WebQuantumSavory._handle_regular_parameter!(safe_primitive_kwargs, :label, "String", "hello")
+      @test safe_primitive_kwargs[:label] == "hello"
 
       safe_noise = WebQuantumSavory._instantiate_noise(Dict(
         "type" => "AmplitudeDamping",
