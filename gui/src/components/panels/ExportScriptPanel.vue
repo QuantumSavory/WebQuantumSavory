@@ -1,9 +1,7 @@
 <template>
   <div class="export-script-panel">
     <aside class="export-script-warning" role="note" aria-labelledby="export-script-warning-title">
-      <div class="export-script-warning-icon" aria-hidden="true">
-        <i class="pi pi-exclamation-triangle"></i>
-      </div>
+      <TriangleAlert class="export-script-warning-icon" :size="18" aria-hidden="true" />
       <div>
         <h3 id="export-script-warning-title">About this generated script</h3>
         <p>
@@ -30,7 +28,7 @@
           :disabled="loading"
           @click="generateScript"
         >
-          <i class="pi pi-refresh" aria-hidden="true"></i>
+          <RefreshCw :size="15" aria-hidden="true" />
           {{ loading ? 'Generating…' : script ? 'Refresh' : 'Retry' }}
         </button>
         <button
@@ -39,14 +37,14 @@
           :disabled="loading || !script"
           @click="downloadScript"
         >
-          <i class="pi pi-download" aria-hidden="true"></i>
+          <Download :size="15" aria-hidden="true" />
           Download .jl
         </button>
       </div>
     </div>
 
     <div v-if="loading && !script" class="export-script-state" role="status" aria-live="polite">
-      <i class="pi pi-spin pi-spinner" aria-hidden="true"></i>
+      <LoaderCircle class="export-script-spinner" :size="16" aria-hidden="true" />
       Generating Julia script…
     </div>
 
@@ -70,6 +68,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { Download, LoaderCircle, RefreshCw, TriangleAlert } from '@lucide/vue'
 import hljs from 'highlight.js/lib/core'
 import julia from 'highlight.js/lib/languages/julia'
 import 'highlight.js/styles/github.css'
@@ -212,9 +211,8 @@ onBeforeUnmount(() => {
 }
 
 .export-script-warning-icon {
-  padding-top: 1px;
+  flex: 0 0 auto;
   color: #9a6b00;
-  font-size: 1.05rem;
 }
 
 .export-script-warning h3 {
@@ -288,6 +286,10 @@ onBeforeUnmount(() => {
   background: #f4f4f7;
 }
 
+.export-script-spinner {
+  animation: export-script-spin 1s linear infinite;
+}
+
 .export-script-error {
   align-items: flex-start;
   flex-direction: column;
@@ -327,5 +329,9 @@ onBeforeUnmount(() => {
   display: block;
   min-width: max-content;
   padding: 12px;
+}
+
+@keyframes export-script-spin {
+  to { transform: rotate(360deg); }
 }
 </style>
