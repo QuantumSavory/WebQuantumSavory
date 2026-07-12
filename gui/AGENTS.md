@@ -35,6 +35,7 @@
 
 - Keep `App.vue` focused on composition and orchestration. Put reusable domain behavior in a focused composable, model, or utility rather than expanding the root component further.
 - Declare component props and emitted events explicitly. Preserve object identity where map markers, selected items, and edge endpoint references depend on it.
+- Keep the Symbolic editor lifecycle in the shared typed-value components: protocol parameters start compact, newly selected Symbolic variables start open, only successful validation collapses to the rendered result, and clicking that result reopens editing. Failed validation must remain editable, and transient open/closed state must not be added to serialized parameters or variables.
 - Clean up MapLibre layers/sources/markers, DOM listeners, timers, polling, and window registrations on unmount or project changes.
 - Match the surrounding mixed legacy formatting in touched code; do not reformat unrelated files.
 - Keep CSS changes in the existing source stylesheets or component styles. Do not patch the minified CSS emitted under `../public/assets/`.
