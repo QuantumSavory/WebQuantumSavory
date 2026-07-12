@@ -1,0 +1,220 @@
+import { readFile } from 'node:fs/promises'
+import { test, expect } from '@playwright/test'
+
+const EMBEDDED_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlWlY4AAAAASUVORK5CYII='
+const MARKDOWN_DESCRIPTION = `# Bell network
+
+This description has **rendered Markdown** and inline math $x^2 + y^2$.
+
+$$
+\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}
+$$
+
+![Embedded pixel](${EMBEDDED_PNG})
+
+![Blocked vector](data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9ImFsZXJ0KDEpIj48L3N2Zz4=)
+
+<script>window.__descriptionXss = true</script>`
+
+async function mockBackend(page) {
+  await page.route('**/known_functions', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { known_functions: [] },
+  }))
+  await page.route('**/background_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { background_types: [] },
+  }))
+  await page.route('**/protocol_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { protocol_types: [] },
+  }))
+  await page.route('**/states_zoo_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { states_zoo_types: [] },
+  }))
+  await page.route('**/platform_info', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: {
+      versions: { julia: 'test', quantumsavory: 'test', app: 'test' },
+      capabilities: { unsafe_code_evaluation: false },
+    },
+  }))
+  await page.route('**/destroy_simulation', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { success: true },
+  }))
+  await page.route('**/get_state?**', route => route.fulfill({
+    status: 404,
+    contentType: 'application/json',
+    json: { success: false, message: 'Simulation not found' },
+  }))
+}
+
+async function loadApp(page) {
+  await mockBackend(page)
+  const protocolTypesLoaded = page.waitForResponse(
+    response => response.url().endsWith('/protocol_types') && response.ok(),
+  )
+  const platformInfoLoaded = page.waitForResponse(
+    response => response.url().endsWith('/platform_info') && response.ok(),
+  )
+  await page.goto('/')
+  await Promise.all([protocolTypesLoaded, platformInfoLoaded])
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+}
+
+test.describe('Project description', () => {
+  test.beforeEach(async ({ page }) => {
+    await loadApp(page)
+  })
+
+  test('edits from rendered mode and safely renders Markdown, math, and data images', async ({ page }) => {
+    await page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      setup.createNewProject('Description Markdown Test')
+    })
+
+    await page.getByRole('tab', { name: 'Description' }).click()
+    const panel = page.getByTestId('description-panel')
+    const editButton = panel.getByRole('button', { name: 'Edit project description' })
+
+    await expect(panel).toContainText('No description yet.')
+    await expect(panel.locator('textarea')).toHaveCount(0)
+    await expect(editButton.locator('svg.lucide-pencil-line')).toHaveCount(1)
+
+    await editButton.click()
+    const editor = panel.getByRole('textbox', { name: 'Project description in Markdown' })
+    await expect(editor).toBeFocused()
+    await editor.fill('This change should be discarded.')
+    const cancelButton = panel.getByRole('button', { name: 'Cancel description editing' })
+    await expect(cancelButton.locator('svg.lucide-x')).toHaveCount(1)
+    await cancelButton.click()
+    await expect(panel).toContainText('No description yet.')
+
+    await editButton.click()
+    await editor.fill(MARKDOWN_DESCRIPTION)
+    const saveButton = panel.getByRole('button', { name: 'Save project description' })
+    await expect(saveButton.locator('svg.lucide-save')).toHaveCount(1)
+    await saveButton.click()
+
+    const rendered = panel.getByTestId('rendered-description')
+    await expect(rendered.getByRole('heading', { name: 'Bell network' })).toBeVisible()
+    await expect(rendered.locator('strong')).toHaveText('rendered Markdown')
+    await expect(rendered.locator('.katex')).toHaveCount(2)
+    await expect(rendered.locator('.katex-display')).toBeVisible()
+
+    const embeddedImage = rendered.getByRole('img', { name: 'Embedded pixel' })
+    await expect(embeddedImage).toHaveAttribute('src', EMBEDDED_PNG)
+    await expect.poll(() => embeddedImage.evaluate(image => image.complete && image.naturalWidth === 1)).toBe(true)
+    await expect(rendered.getByRole('img', { name: 'Blocked vector' })).toHaveCount(0)
+
+    await expect(rendered.locator('script')).toHaveCount(0)
+    await expect(rendered).toContainText('<script>window.__descriptionXss = true</script>')
+    await expect.poll(() => page.evaluate(() => window.__descriptionXss)).toBeUndefined()
+  })
+
+  test('persists only in full saved and exported JSON, while legacy and import paths are normalized', async ({ page }) => {
+    const defaults = await page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      const initialDescription = setup.projectData.description
+      setup.createNewProject('Description Persistence Test')
+      const newDescription = setup.projectData.description
+      const legacy = setup.deserializeProjectData({
+        name: 'Legacy Project',
+        variables: [],
+        simulationConfig: { time: 1, timeStep: 0.1 },
+        net: { nodes: [], edges: [], protocols: [] },
+      })
+      return { initialDescription, newDescription, legacyDescription: legacy.description }
+    })
+    expect(defaults).toEqual({
+      initialDescription: '',
+      newDescription: '',
+      legacyDescription: '',
+    })
+
+    await page.getByRole('tab', { name: 'Description' }).click()
+    const panel = page.getByTestId('description-panel')
+    await panel.getByRole('button', { name: 'Edit project description' }).click()
+    await panel.getByRole('textbox', { name: 'Project description in Markdown' }).fill(MARKDOWN_DESCRIPTION)
+    await panel.getByRole('button', { name: 'Save project description' }).click()
+
+    const serialized = await page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      setup.saveProject()
+      const full = setup.serializeProjectData()
+      const minimized = setup.minimizedProjectData?.value ?? setup.minimizedProjectData
+      const saved = JSON.parse(localStorage.getItem('cqn_project_Description Persistence Test'))
+      return {
+        live: setup.projectData.description,
+        fullDescription: full.description,
+        savedDescription: saved.description,
+        minimizedHasDescription: Object.hasOwn(minimized, 'description'),
+      }
+    })
+    expect(serialized).toEqual({
+      live: MARKDOWN_DESCRIPTION,
+      fullDescription: MARKDOWN_DESCRIPTION,
+      savedDescription: MARKDOWN_DESCRIPTION,
+      minimizedHasDescription: false,
+    })
+
+    const downloadPromise = page.waitForEvent('download')
+    await page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      setup.exportProject()
+    })
+    const download = await downloadPromise
+    expect(download.suggestedFilename()).toBe('Description Persistence Test.json')
+    const exported = JSON.parse(await readFile(await download.path(), 'utf8'))
+    expect(exported.description).toBe(MARKDOWN_DESCRIPTION)
+
+    const invalidImport = {
+      name: 'Invalid Description Import',
+      description: ['not', 'a', 'string'],
+      variables: [],
+      net: { nodes: [], edges: [], protocols: [] },
+    }
+    const invalidImportCall = page.evaluate(project => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      setup.validateAndProcessImport(project)
+    }, invalidImport)
+    const invalidDialog = await page.waitForEvent('dialog')
+    expect(invalidDialog.message()).toBe('Invalid project structure: "description" must be a string when present.')
+    await invalidDialog.accept()
+    await invalidImportCall
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('cqn_project_Invalid Description Import'))).toBeNull()
+
+    const importedDescription = '# Imported\n\nWith $a+b$.'
+    const validImportCall = page.evaluate(({ description }) => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      setup.validateAndProcessImport({
+        name: 'Imported Description Project',
+        description,
+        variables: [],
+        simulationConfig: { time: 1, timeStep: 0.1 },
+        net: { nodes: [], edges: [], protocols: [] },
+      })
+    }, { description: importedDescription })
+    const validDialog = await page.waitForEvent('dialog')
+    expect(validDialog.message()).toBe('Project "Imported Description Project" imported successfully!')
+    await validDialog.accept()
+    await validImportCall
+
+    await expect.poll(() => page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      return setup.projectData.description
+    })).toBe(importedDescription)
+    await expect.poll(() => page.evaluate(() => {
+      const stored = JSON.parse(localStorage.getItem('cqn_project_Imported Description Project'))
+      return stored.description
+    })).toBe(importedDescription)
+  })
+})

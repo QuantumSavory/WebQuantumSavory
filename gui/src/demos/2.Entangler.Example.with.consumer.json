@@ -1,5 +1,6 @@
 {
   "name": "2. Entangler Example with consumer",
+  "description": "",
   "simulationConfig": {
     "time": 10
   },

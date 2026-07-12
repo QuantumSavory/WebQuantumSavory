@@ -9,6 +9,7 @@ import { definePreset } from '@primeuix/themes';
 import Aura from '@primeuix/themes/aura';
 import JsonViewer from "vue3-json-viewer";
 import "vue3-json-viewer/dist/vue3-json-viewer.css";
+import 'katex/dist/katex.min.css'
 import Tooltip from 'primevue/tooltip';
 
 const MyPreset = definePreset(Aura, {

@@ -43,6 +43,17 @@ async function mockConfiguration(page) {
   }))
   await page.route('**/test_symbolic_expression', route => {
     const { expr } = route.request().postDataJSON()
+    if (expr === 'valid_untrusted_expression') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        json: {
+          success: true,
+          results: { value: expr, latex: '$\\href{javascript:alert(1)}{x}$' },
+        },
+      })
+    }
+
     if (expr.startsWith('valid')) {
       return route.fulfill({
         status: 200,
@@ -148,6 +159,11 @@ test.describe('Symbolic editor lifecycle', () => {
     await renderedResult.click()
     await expect(valueEditor.locator('textarea')).toBeVisible()
     await expect(valueEditor.locator('textarea')).toHaveValue('valid_protocol_expression')
+
+    await valueEditor.locator('textarea').fill('valid_untrusted_expression')
+    await valueEditor.locator('.validate-button').click()
+    await expect(valueEditor.getByTestId('symbolic-collapsed-view').locator('.katex')).toBeVisible()
+    await expect(valueEditor.getByTestId('symbolic-collapsed-view').locator('a')).toHaveCount(0)
   })
 
   test('starts open for a new Symbolic variable and collapses after validation', async ({ page }) => {

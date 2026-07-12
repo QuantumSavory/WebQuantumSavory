@@ -73,6 +73,11 @@ export function useImportExport(
       alert('Invalid project structure: "variables" must be an array when present.')
       return
     }
+
+    if (jsonData.description !== undefined && typeof jsonData.description !== 'string') {
+      alert('Invalid project structure: "description" must be a string when present.')
+      return
+    }
     
     const existingProjects = ProjectStore.listProjects()
     if (existingProjects.includes(jsonData.name)) {
@@ -90,7 +95,8 @@ export function useImportExport(
       
       const projectDataToImport = {
         ...jsonData,
-        name: finalName
+        name: finalName,
+        description: jsonData.description ?? ''
       }
       
       ProjectStore.saveProject(finalName, projectDataToImport)

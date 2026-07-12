@@ -1,5 +1,6 @@
 {
   "name": "1. Entangler Example",
+  "description": "",
   "simulationConfig": {
     "time": 10
   },
