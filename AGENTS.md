@@ -95,6 +95,7 @@ The checked-in CI entry points install their own project dependencies and can al
 
 ## Change discipline
 
+- Base frontend work that adds or changes UI controls on the Lucide icon migration, and use the `@lucide/vue` conventions documented in `gui/AGENTS.md`; do not reintroduce PrimeIcons, icon-font classes, or plain Unicode control glyphs in follow-up branches.
 - Prefer the smallest relevant check first, then broaden based on risk. Run backend unit tests for `src/` changes, integration tests for routes/contracts, and the GUI checks in `gui/AGENTS.md` for frontend-facing changes.
 - GitHub Actions and Buildkite both run backend unit, frontend version/build, backend integration, and full headless Chromium checks through the shared `ci/` scripts.
 - Do not commit root or test manifests, `node_modules`, logs, SQLite runtime files, Genie build/cache/session output, Playwright results, or generated Vite output under `public/`.

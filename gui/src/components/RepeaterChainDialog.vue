@@ -156,7 +156,7 @@ function resetForm() {
 }
 
 function edgeLabel(edge) {
-  return `${edge.source?.name || edge.source?.id || edge.source} → ${edge.target?.name || edge.target?.id || edge.target}`
+  return `${edge.source?.name || edge.source?.id || edge.source} to ${edge.target?.name || edge.target?.id || edge.target}`
 }
 
 function handleConfirm() {

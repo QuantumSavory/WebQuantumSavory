@@ -36,6 +36,9 @@
 
 ## Component conventions
 
+- Use tree-shakeable components from the official `@lucide/vue` package for every first-party UI icon. Choose icons for the action's meaning rather than copying the shape of a legacy glyph; do not add PrimeIcons, icon-font class strings, hand-drawn control SVGs, or Unicode symbols such as `+`, `×`, and `⋮` as icons.
+- PrimeVue menu models store imported components in `lucideIcon` and render them through the `itemicon` slot with `LucideMenuIcon.vue`; customize other PrimeVue icon slots, including DataTable `sorticon`, instead of accepting non-Lucide defaults. When a third-party control exposes artwork only through stable DOM or CSS hooks, preserve its behavior and substitute Lucide components or documented Lucide SVG paths at that boundary.
+- Brand marks and genuine simulation/data geometry may keep their purpose-built artwork. Slot status controls, loading indicators, disclosure affordances, and map navigation are UI icons and must use Lucide.
 - Keep `App.vue` focused on composition and orchestration. Put reusable domain behavior in a focused composable, model, or utility rather than expanding the root component further.
 - Declare component props and emitted events explicitly. Preserve object identity where map markers, selected items, and edge endpoint references depend on it.
 - Keep the Symbolic editor lifecycle in the shared typed-value components: protocol parameters start compact, newly selected Symbolic variables start open, only successful validation collapses to the rendered result, and clicking that result reopens editing. Failed validation must remain editable, and transient open/closed state must not be added to serialized parameters or variables.
@@ -71,6 +74,7 @@ npm run test:headed
 Minimum checks:
 
 - Frontend source, styles, or build changes: `npm run build`.
+- Icon changes: run `tests/e2e/lucide-icons.spec.js` in Chromium in addition to the build.
 - UI behavior or API-flow changes: build, then the relevant Chromium Playwright specs with the backend running.
 - Backend/frontend contract changes: backend integration tests plus the affected Playwright workflow.
 

@@ -10,7 +10,8 @@
         :disabled="disabled || typesLoading || statesZooTypes.length === 0"
         @click="addStateVariable"
       >
-        + Add State
+        <Plus :size="15" aria-hidden="true" />
+        Add State
       </button>
     </div>
 
@@ -64,7 +65,7 @@
             :aria-label="`Delete state variable ${variable.name || variable.id}`"
             @click="deleteStateVariable(variable)"
           >
-            <i class="pi pi-trash" aria-hidden="true"></i>
+            <Trash2 :size="15" aria-hidden="true" />
           </button>
         </div>
 
@@ -159,7 +160,7 @@
                 role="status"
                 aria-label="Rendering state preview"
               >
-                <span class="states-zoo-preview-spinner" aria-hidden="true"></span>
+                <LoaderCircle class="states-zoo-preview-spinner" :size="28" aria-hidden="true" />
                 <span class="visually-hidden">Rendering state preview</span>
               </div>
             </div>
@@ -186,6 +187,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { LoaderCircle, Plus, Trash2 } from '@lucide/vue'
 import Variable, {
   STATES_ZOO_VALUE_KIND,
   isStatesZooVariable,
@@ -493,6 +495,12 @@ onUnmounted(() => {
   margin-bottom: 8px;
 }
 
+.add-states-zoo-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .states-zoo-description {
   margin: 0;
   color: #666;
@@ -667,11 +675,7 @@ onUnmounted(() => {
 }
 
 .states-zoo-preview-spinner {
-  width: 28px;
-  height: 28px;
-  border: 3px solid #d8d8eb;
-  border-top-color: #4345ac;
-  border-radius: 50%;
+  color: #4345ac;
   animation: states-zoo-spin 0.75s linear infinite;
 }
 

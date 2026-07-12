@@ -43,7 +43,7 @@
           class: 'reduce-y-tooltip'
         }"
       >
-        <i class="pi pi-exclamation-triangle"></i> &nbsp;
+        <TriangleAlert :size="14" aria-hidden="true" />
         Error!
       </div>
 
@@ -113,6 +113,7 @@ import { VueLatex } from 'vatex'
 import { HighCode } from 'vue-highlight-code';
 import 'vue-highlight-code/dist/style.css';
 import { api } from '../../utils/ApiConnector'
+import { TriangleAlert } from '@lucide/vue'
 
 const props = defineProps({
   modelValue: {

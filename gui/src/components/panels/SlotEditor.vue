@@ -7,7 +7,7 @@
             v-tooltip.top="'Toggle details'"
             @click.stop="toggleDetails"
         >
-            <i class="pi pi-pencil" aria-hidden="true"></i>
+            <SlidersHorizontal :size="15" aria-hidden="true" />
         </button>
         <button
             type="button"
@@ -16,7 +16,7 @@
             v-tooltip.top="'Show results'"
             @click.stop="showResults"
         >
-            <i class="pi pi-chart-line" aria-hidden="true"></i>
+            <ChartNoAxesCombined :size="15" aria-hidden="true" />
         </button>
         <button
             type="button"
@@ -25,12 +25,14 @@
             v-tooltip.top="'Delete slot'"
             @click.stop="deleteSlot"
         >
-            <i class="pi pi-trash" aria-hidden="true"></i>
+            <Trash2 :size="15" aria-hidden="true" />
         </button>
     </div>
 </template>
 
 <script setup>
+import { ChartNoAxesCombined, SlidersHorizontal, Trash2 } from '@lucide/vue'
+
 const props = defineProps({
     registerSlot: {
         type: Object,

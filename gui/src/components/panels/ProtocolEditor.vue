@@ -12,7 +12,7 @@
             v-tooltip.top="'Show results'"
             @click.stop="showResults"
           >
-            <i class="pi pi-chart-line" aria-hidden="true"></i>
+            <ChartNoAxesCombined :size="15" aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -21,7 +21,7 @@
             v-tooltip.top="'Delete protocol'"
             @click.stop="deleteProtocol"
           >
-            <i class="pi pi-trash" aria-hidden="true"></i>
+            <Trash2 :size="15" aria-hidden="true" />
           </button>
         </div>
     </div>
@@ -45,7 +45,7 @@
                 >
                   {{ param.name }}
                   <span v-if="paramUnknownTypes(param.type).length > 0" class="unknown-type-indicator">
-                    <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
+                    <TriangleAlert :size="13" aria-hidden="true" />
                   </span>
                   <template v-if="parameterTypeChoices(param)">
                     <br/>
@@ -79,7 +79,7 @@
                     v-if="isVariableAssigned(param) || isVariablePickerOpen(param)"
                     class="variable-assignment"
                   >
-                    <i class="pi pi-link" aria-hidden="true"></i>
+                    <Link2 :size="14" aria-hidden="true" />
                     <select
                       class="variable-selector"
                       :value="isVariableAssigned(param) ? param.value.id : ''"
@@ -135,7 +135,8 @@
                     :aria-label="variableButtonLabel(param)"
                     @click="toggleVariableAssignment(param)"
                   >
-                    <i :class="isVariableAssigned(param) ? 'pi pi-times' : 'pi pi-link'" aria-hidden="true"></i>
+                    <Unlink2 v-if="isVariableAssigned(param)" :size="14" aria-hidden="true" />
+                    <Link2 v-else :size="14" aria-hidden="true" />
                   </button>
                 </span>
               </div>
@@ -149,6 +150,7 @@
 
 <script setup>
 import { computed, shallowRef, watchEffect } from 'vue'
+import { ChartNoAxesCombined, Link2, Trash2, TriangleAlert, Unlink2 } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
 import { VariableReference, isVariableReference } from '../../models/Variable'
 import {
@@ -244,7 +246,7 @@ function getProtocolParameterDefinitoinText( category, protocol, param){
   const unknownTypes = paramUnknownTypes(param.type);
   if( unknownTypes.length > 0 ){
     result += '<br/><br/>';
-    result += '<i style="color: #ff0000; font-size: 10px; position: relative; top: -1px;" class="pi pi-exclamation-triangle"></i> <span style="color: #ff0000;"><b>' + unknownTypes.join(', ') + '</b> not supported</span>';
+    result += '<span style="color: #ff0000;"><b>Unsupported:</b> ' + unknownTypes.join(', ') + '</span>';
   }
   return result;
 }

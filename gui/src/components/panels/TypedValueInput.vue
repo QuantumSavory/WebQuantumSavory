@@ -15,7 +15,11 @@
     binary
     :aria-label="valueInputLabel"
     :disabled="disabled"
-  />
+  >
+    <template #icon="{ checked, class: iconClass }">
+      <Check v-if="checked" :class="iconClass" :size="14" aria-hidden="true" />
+    </template>
+  </Checkbox>
   <div v-else-if="isCodeType(type)" class="code-value-input" role="group" :aria-label="valueInputLabel">
     <CodeEditorWithSymbols
       :modelValue="parameter.value || ''"
@@ -58,6 +62,7 @@
 <script setup>
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import Checkbox from 'primevue/checkbox'
+import { Check } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
 import {
   isCodeType,

@@ -32,7 +32,7 @@
         @blur="showDefaultDocs"
         @click="emit('open-repeater-chain-generator')"
       >
-        <i class="pi pi-share-alt" aria-hidden="true"></i>
+        <Route :size="16" aria-hidden="true" />
         Repeater Chain Generator
       </button>
       <p v-if="disabled" id="layout-tools-disabled-help" class="disabled-help">
@@ -44,6 +44,7 @@
 
 <script setup>
 import { ref } from 'vue'
+import { Route } from '@lucide/vue'
 
 defineProps({
   disabled: {

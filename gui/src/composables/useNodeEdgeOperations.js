@@ -102,7 +102,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
       
       addLog('warning', `Deleted node: ${nodeName} (${connectedEdges.length} edges removed)`, 'Map')
     } else if (type === 'edge') {
-      const edgeName = `${item.source.name} → ${item.target.name}`
+      const edgeName = `${item.source.name} to ${item.target.name}`
       projectData.value.net.edges = projectData.value.net.edges.filter(edge => edge !== item)
       addLog('warning', `Deleted edge: ${edgeName}`, 'Map')
     }
@@ -118,7 +118,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
     }
 
     projectData.value.net.edges.push(edge)
-    addLog('info', `Created new edge: ${edge.source.name} → ${edge.target.name}`, 'Map')
+    addLog('info', `Created new edge: ${edge.source.name} to ${edge.target.name}`, 'Map')
   }
 
   function moveNode(fromIndex, toIndex) {

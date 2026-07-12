@@ -19,7 +19,9 @@
         >
           {{ currentView === 'png' ? 'HTML' : 'PNG' }}
         </button>
-        <button class="close-button" @click="handleClose" title="Close (Esc)">×</button>
+        <button class="close-button" @click="handleClose" title="Close (Esc)" aria-label="Close results">
+          <X :size="16" aria-hidden="true" />
+        </button>
       </div>
     </div>
 
@@ -27,7 +29,7 @@
     <div class="window-content">
       <!-- Loading State -->
       <div v-if="loading" class="loading-container">
-        <div class="spinner"></div>
+        <LoaderCircle class="spinner" :size="40" aria-hidden="true" />
         <div class="loading-message">Waiting for the plot to be generated</div>
       </div>
       
@@ -58,6 +60,7 @@
 
 <script setup>
 import { watch, onUnmounted, ref, onMounted, computed } from 'vue'
+import { LoaderCircle, X } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
 
 const props = defineProps({
@@ -121,7 +124,7 @@ const windowTitle = computed(() => {
     
     // Edge protocol
     if (context.sourceNodeName && context.targetNodeName) {
-      return `Edge '${context.sourceNodeName} → ${context.targetNodeName}' / ${protocolType}`
+      return `Edge '${context.sourceNodeName} to ${context.targetNodeName}' / ${protocolType}`
     }
     // Node protocol
     else if (context.nodeName) {
@@ -556,11 +559,7 @@ defineExpose({
 }
 
 .spinner {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #007bff;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
+  color: #007bff;
   animation: spin 1s linear infinite;
   margin-bottom: 16px;
 }

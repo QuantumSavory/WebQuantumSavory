@@ -52,7 +52,8 @@
                   ( {{ log.count }} )
                 </span>
                 <span v-if="log.extendedInfo || log.collapsedLogs?.length > 0" class="expand-indicator">
-                  {{ log.expanded ? '▼' : '▶' }}
+                  <ChevronDown v-if="log.expanded" :size="13" aria-hidden="true" />
+                  <ChevronRight v-else :size="13" aria-hidden="true" />
                 </span>
               </span>
               <span v-if="log.source" class="log-source">[{{ log.source }}]</span>
@@ -70,6 +71,7 @@
 
 <script setup>
 import { ref, computed, nextTick } from 'vue'
+import { ChevronDown, ChevronRight } from '@lucide/vue'
 
 // Props
 const props = defineProps({

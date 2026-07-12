@@ -14,8 +14,26 @@ import { api } from './utils/ApiConnector'
 import {JsonViewer} from "vue3-json-viewer"
 import { generateUUid, setEdgeCorrectNodeOrder } from './utils/Utils'
 //import "vue3-json-viewer/dist/vue3-json-viewer.css";
-import Menu from 'primevue/menu';
 import TieredMenu from 'primevue/tieredmenu';
+import {
+  Braces,
+  Check,
+  ChevronRight,
+  Copy,
+  CopyPlus,
+  Download,
+  FileJson,
+  FilePlus2,
+  FileUp,
+  FolderOpen,
+  Info,
+  Library,
+  Menu as MenuIcon,
+  PanelRightClose,
+  PanelRightOpen,
+  Save,
+  X
+} from '@lucide/vue'
 import EdgeListPanel from './components/panels/EdgeListPanel.vue'
 import EdgePanel from './components/panels/EdgePanel.vue'
 import BottomPanel from './components/panels/BottomPanel.vue'
@@ -29,6 +47,7 @@ import RepeaterChainDialog from './components/RepeaterChainDialog.vue'
 import packageJson from '../package.json'
 import VoidPanel from './components/panels/VoidPanel.vue'
 import ResultsView from './components/panels/ResultsView.vue'
+import LucideMenuIcon from './components/LucideMenuIcon.vue'
 
 // Import composables
 import { useSimulation } from './composables/useSimulation.js'
@@ -578,20 +597,20 @@ window.hideSlotState = ()=>{
 
 const mainMenuItems = computed(() => {
   let result = [
-    { label: 'New', icon: 'pi pi-plus', command: () => handleMenu('new') },
-    { label: 'Open', icon: 'pi pi-folder-open', command: () => handleMenu('open') },
-    { label: 'Import', icon: 'pi pi-upload', command: () => handleMenu('import') },
-    { label: 'Export', icon: 'pi pi-download', command: () => handleMenu('export') },
+    { label: 'New', lucideIcon: FilePlus2, command: () => handleMenu('new') },
+    { label: 'Open', lucideIcon: FolderOpen, command: () => handleMenu('open') },
+    { label: 'Import', lucideIcon: FileUp, command: () => handleMenu('import') },
+    { label: 'Export', lucideIcon: Download, command: () => handleMenu('export') },
   ];
   
   // Only show Save if not a demo project
   if (!isDemoProject.value) {
-    result.push({ label: 'Save', icon: 'pi pi-save', command: () => handleMenu('save') })
+    result.push({ label: 'Save', lucideIcon: Save, command: () => handleMenu('save') })
   }
   
   if( currentProjectName.value ){
     result.push(
-      { label: 'Save As', icon: 'pi pi-copy', command: () => handleMenu('saveas') }, 
+      { label: 'Save As', lucideIcon: CopyPlus, command: () => handleMenu('saveas') },
     )
   }
   result.push( { separator: true } );
@@ -599,16 +618,16 @@ const mainMenuItems = computed(() => {
   
   // Add About entry
   result.push(
-    { label: 'About', icon: 'pi pi-info-circle', command: () => handleMenu('about') }
+    { label: 'About', lucideIcon: Info, command: () => handleMenu('about') }
   )
   
   // Add Demos submenu at the end
   result.push({
     label: 'Demos', 
-    icon: 'pi pi-box',
+    lucideIcon: Library,
     items: demoProjects.map(demo => ({
       label: demo.name,
-      icon: 'pi pi-file',
+      lucideIcon: FileJson,
       command: () => {
         // Check for unsaved changes before loading demo
         if (hasUnsavedChanges()) {
@@ -623,7 +642,7 @@ const mainMenuItems = computed(() => {
 
 
   result.push(
-    { label: 'JSON Viewer', icon: 'pi pi-eye', command: () => handleMenu('json') }, 
+    { label: 'JSON Viewer', lucideIcon: Braces, command: () => handleMenu('json') },
   )
   
   
@@ -1084,13 +1103,16 @@ onUnmounted(() => {
           
           <div class="action-buttons">
             <button class="menu-btn hamburger-btn" @click="toggleMainMenu" aria-label="Menu">
-              <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect y="6" width="28" height="3.5" rx="1.5" fill="#4345ac"/>
-                <rect y="12.25" width="28" height="3.5" rx="1.5" fill="#4345ac"/>
-                <rect y="18.5" width="28" height="3.5" rx="1.5" fill="#4345ac"/>
-              </svg>
+              <MenuIcon :size="28" aria-hidden="true" />
             </button>
-            <TieredMenu ref="mainMenuElement" id="main_menu" :model="mainMenuItems" :popup="true" />
+            <TieredMenu ref="mainMenuElement" id="main_menu" :model="mainMenuItems" :popup="true">
+              <template #itemicon="{ item }">
+                <LucideMenuIcon :item="item" />
+              </template>
+              <template #submenuicon>
+                <ChevronRight :size="15" aria-hidden="true" />
+              </template>
+            </TieredMenu>
           </div>
         </div>
       </div>
@@ -1125,7 +1147,8 @@ onUnmounted(() => {
         @click="toggleRightSidebar"
         :title="isRightSidebarVisible ? 'Hide panel' : 'Show panel'"
       >
-        <i :class="isRightSidebarVisible ? 'pi pi-chevron-right' : 'pi pi-chevron-left'"></i>
+        <PanelRightClose v-if="isRightSidebarVisible" :size="15" aria-hidden="true" />
+        <PanelRightOpen v-else :size="15" aria-hidden="true" />
       </button>
       
       <div 
@@ -1338,10 +1361,18 @@ onUnmounted(() => {
         <h3 style="cursor: pointer; text-transform: capitalize;" @click="toggleJsonViewerMode">{{jsonViewerMode}}</h3>
         <!-- close button -->
         <button class="menu-btn hamburger-btn" @click="toggleJsonViewerVisibility" aria-label="Close">
-          <i class="pi pi-times"></i>
+          <X :size="22" aria-hidden="true" />
         </button>
       </div>
-      <JsonViewer :value="jsonViewerMode === 'full' ? projectData : minimizedProjectData" expanded :expandDepth="10" copyable boxed sort theme="light"  @onKeyClick="jsonViewerKeyClicked" />
+      <JsonViewer :value="jsonViewerMode === 'full' ? projectData : minimizedProjectData" expanded :expandDepth="10" copyable boxed sort theme="light"  @onKeyClick="jsonViewerKeyClicked">
+        <template #copy="{ copied }">
+          <span class="json-copy-control">
+            <Check v-if="copied" :size="15" aria-hidden="true" />
+            <Copy v-else :size="15" aria-hidden="true" />
+            <span class="visually-hidden">{{ copied ? 'Copied JSON' : 'Copy JSON' }}</span>
+          </span>
+        </template>
+      </JsonViewer>
     </div>
 
 

@@ -16,7 +16,10 @@
         />
     </div>
     <div class="action-buttons" style="margin-top: 10px;">
-        <button @click="toggleAddProtocolMenu" class="noborder add-protocol-btn"> + Add Protocol</button>
+        <button @click="toggleAddProtocolMenu" class="noborder add-protocol-btn">
+          <Plus :size="14" aria-hidden="true" />
+          Add Protocol
+        </button>
         <Menu ref="addProtocolMenu" id="overlay_menu" :model="items" :popup="true" />
     </div>
 </div>
@@ -32,6 +35,7 @@ import Menu from 'primevue/menu';
 import { api } from '../../utils/ApiConnector'
 import { getCurrentInstance } from 'vue'
 import { generateUUid } from '../../utils/Utils'
+import { Plus } from '@lucide/vue'
 const { proxy } = getCurrentInstance()
 
 const props = defineProps({
@@ -182,4 +186,9 @@ defineExpose({
 </script>
 
 <style scoped>
+.add-protocol-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 </style>

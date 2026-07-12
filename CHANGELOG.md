@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added an Export Script tools tab with highlighted, downloadable, backend-generated Julia for running the configured simulation, plus pedagogical animation and protocol-visualization recipes.
+- Replaced UI icon fonts, hand-drawn control artwork, and plain icon glyphs with semantically selected Lucide icons, including PrimeVue, MapLibre, and JSON viewer controls.
 - Added node reordering with visible simulator IDs, ID tooltips, and stable edge, selection, map, and project persistence behavior.
 - Moved log-level counters into the Logs tab and shortened the containing panel title to Tools.
 - Added simulation-wide typed variables that can be defined in the Variables tab and assigned to node, edge, or floating protocol parameters.

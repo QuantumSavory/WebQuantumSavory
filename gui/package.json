@@ -14,12 +14,12 @@
     "test:report": "playwright show-report"
   },
   "dependencies": {
+    "@lucide/vue": "^1.24.0",
     "@primeuix/themes": "^1.2.3",
     "clipboard": "^2.0.11",
     "highlight.js": "^11.11.1",
     "katex": "^0.13.24",
     "maplibre-gl": "^5.2.0",
-    "primeicons": "^7.0.0",
     "primevue": "^4.3.7",
     "splitpanes": "^4.0.4",
     "vatex": "^0.1.0",
