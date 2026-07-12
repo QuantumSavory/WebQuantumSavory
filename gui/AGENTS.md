@@ -39,6 +39,7 @@
 - Match the surrounding mixed legacy formatting in touched code; do not reformat unrelated files.
 - Keep CSS changes in the existing source stylesheets or component styles. Do not patch the minified CSS emitted under `../public/assets/`.
 - Prefer durable IDs, roles, or stable classes in Playwright selectors. The main workflow is intentionally serial and shares a browser page and saved project state across its cases.
+- Keep log-level count badges in the Logs tab label rather than the enclosing bottom-panel header, and preserve each nonzero badge's level-specific color, accessible label, and tooltip.
 
 ## Commands and verification
 
