@@ -34,6 +34,7 @@ include("evaluation_policy.jl")
 include("types.jl")
 include("Sandbox.jl")
 include("Logger.jl")
+include("states_zoo.jl")
 include("parser.jl")
 using .Logger: @log_event
 

@@ -50,6 +50,20 @@
             Variables
           </button>
           <button
+            id="bottom-panel-states-zoo-tab"
+            type="button"
+            role="tab"
+            class="bottom-tab"
+            :class="{ active: activeTab === 'states-zoo' }"
+            :aria-selected="activeTab === 'states-zoo'"
+            aria-controls="bottom-panel-states-zoo-content"
+            :tabindex="activeTab === 'states-zoo' ? 0 : -1"
+            @click="activeTab = 'states-zoo'"
+            @keydown="handleTabKeydown($event, 2)"
+          >
+            States Zoo
+          </button>
+          <button
             id="bottom-panel-layout-tools-tab"
             type="button"
             role="tab"
@@ -59,7 +73,7 @@
             aria-controls="bottom-panel-layout-tools-content"
             :tabindex="activeTab === 'layout-tools' ? 0 : -1"
             @click="activeTab = 'layout-tools'"
-            @keydown="handleTabKeydown($event, 2)"
+            @keydown="handleTabKeydown($event, 3)"
           >
             Layout Tools
           </button>
@@ -99,6 +113,21 @@
         </section>
 
         <section
+          v-show="activeTab === 'states-zoo'"
+          id="bottom-panel-states-zoo-content"
+          class="bottom-tab-panel states-zoo-tab-panel"
+          role="tabpanel"
+          aria-labelledby="bottom-panel-states-zoo-tab"
+          tabindex="0"
+        >
+          <StatesZooPanel
+            :variables="variables"
+            :project-data="projectData"
+            :disabled="variablesDisabled"
+          />
+        </section>
+
+        <section
           v-show="activeTab === 'layout-tools'"
           id="bottom-panel-layout-tools-content"
           class="bottom-tab-panel layout-tools-tab-panel"
@@ -121,6 +150,7 @@ import { computed, ref } from 'vue'
 import BasePanel from './BasePanel.vue'
 import LayoutToolsPanel from './LayoutToolsPanel.vue'
 import LogsPanel from './LogsPanel.vue'
+import StatesZooPanel from './StatesZooPanel.vue'
 import VariablesPanel from './VariablesPanel.vue'
 
 const props = defineProps({
@@ -174,7 +204,7 @@ const emit = defineEmits([
 ])
 
 const activeTab = ref('logs')
-const tabNames = ['logs', 'variables', 'layout-tools']
+const tabNames = ['logs', 'variables', 'states-zoo', 'layout-tools']
 
 const logCounts = computed(() => {
   const counts = {
@@ -301,7 +331,8 @@ function handleTabKeydown(event, currentIndex) {
   padding-bottom: 4px;
 }
 
-.variables-tab-panel {
+.variables-tab-panel,
+.states-zoo-tab-panel {
   padding-right: 4px;
 }
 

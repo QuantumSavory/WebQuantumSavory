@@ -861,6 +861,9 @@ function _handle_symbolic_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, val
       isa(e, APIError) && rethrow(e)
       @warn "Failed to create symbolic expression from string" parameter_name=name value=value error=e
     end
+  elseif _states_zoo_object_like(value) && get(value, "kind", nothing) == "states_zoo"
+    kwargs[name] = construct_states_zoo_recipe(value)
+    return true
   else
     @warn "Symbolic parameter has unsupported value type; skipping" parameter_name=name value_type=typeof(value)
   end
