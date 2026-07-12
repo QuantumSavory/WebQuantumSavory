@@ -54,7 +54,11 @@ export function isWildcardType(type) {
 }
 
 export function isSymbolicType(type) {
-  return type === 'Symbolic' || type === 'SymbolicUtils.Symbolic'
+  return typeof type === 'string' && (type === 'Symbolic'
+    || type === 'SymbolicUtils.Symbolic'
+    || type.startsWith('SymbolicUtils.Symbolic{')
+    || type === 'QuantumSymbolics.SymQObj'
+    || type.startsWith('QuantumSymbolics.SymQObj{'))
 }
 
 export function isCodeType(type) {
@@ -74,7 +78,34 @@ export function parameterTypeIsNumber(typeOrParameter) {
 }
 
 export function parameterTypeIsKnown(type) {
-  return KNOWN_PARAMETER_TYPES.includes(type) || isWildcardType(type)
+  return KNOWN_PARAMETER_TYPES.includes(type) || isWildcardType(type) || isSymbolicType(type)
+}
+
+/**
+ * Whether a variable's concrete type is accepted by a protocol field.
+ *
+ * Compatibility is directional: a Function field accepts a custom Lambda,
+ * while a Lambda-only field does not accept every predefined Function. A
+ * default variable is valid for every field because it omits that protocol
+ * keyword, just like leaving the field at its protocol default.
+ */
+export function parameterTypeSupportsVariableType(parameterType, variableType) {
+  if (typeof variableType !== 'string' || variableType.length === 0) return false
+  if (variableType.toLowerCase() === 'default') return true
+
+  const declaredTypes = Array.isArray(parameterType) ? parameterType : [parameterType]
+  return declaredTypes.some(declaredType => {
+    if (typeof declaredType !== 'string') return false
+    if (declaredType === 'Any') return true
+    if (declaredType === 'Function') {
+      return variableType === 'Function' || variableType === 'Lambda'
+    }
+    if (isSymbolicType(declaredType)) return isSymbolicType(variableType)
+    if (isWildcardType(declaredType)) return isWildcardType(variableType)
+    if (declaredType === 'Int') return variableType === 'Int' || variableType === 'Int64'
+    if (declaredType === 'Int64') return variableType === 'Int' || variableType === 'Int64'
+    return declaredType === variableType
+  })
 }
 
 export function unknownParameterTypes(type) {
