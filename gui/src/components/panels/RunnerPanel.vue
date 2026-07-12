@@ -159,10 +159,11 @@ function toggleAdvancedControls() {
         
         <!-- Run/Pause/Resume/Stop buttons -->
         <button 
-          v-if="canRunSimulation"
+          v-if="!isSimulationRunning && !isSimulationPaused"
           class="run-btn" 
+          :disabled="!canRunSimulation"
           @click="handleRun"
-          title="Run simulation"
+          :title="canRunSimulation ? 'Run simulation' : 'Define the simulation network before running it'"
         >
           <Play :size="16" aria-hidden="true" />
         </button>

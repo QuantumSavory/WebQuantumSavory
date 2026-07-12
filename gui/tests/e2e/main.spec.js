@@ -56,6 +56,14 @@ test.describe.serial('Main Workflow', () => {
     await page.waitForTimeout(1000);
     await expect(page.locator('.project-name-label')).toContainText('Edge Test Project');
 
+    const runButton = page.locator('#runnerPanel .main-buttons .run-btn');
+    await expect(runButton).toBeVisible();
+    await expect(runButton).toBeDisabled();
+    await expect(runButton).toHaveAttribute(
+      'title',
+      'Define the simulation network before running it',
+    );
+
     // Current QuantumSavory may expose no floating protocol types.
     const floatingProtocolsPanel = page.locator('#floatingProtocolsPanel');
     if (await floatingProtocolsPanel.count()) {
