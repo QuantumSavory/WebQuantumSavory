@@ -29,6 +29,15 @@ async function mockBackendMetadata(page) {
       capabilities: { unsafe_code_evaluation: false },
     },
   }))
+  await page.route('**/export_script', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: {
+      success: true,
+      script: 'using QuantumSavory\n\nsim = Simulation()\nrun(sim, 1.0)\n',
+      filename: 'simulation.jl',
+    },
+  }))
 }
 
 async function loadApp(page) {
@@ -101,6 +110,7 @@ test.describe('Bottom panel log counters', () => {
     await expect(page.locator('#bottom-panel-variables-tab .log-count-badge')).toHaveCount(0)
     await expect(page.locator('#bottom-panel-states-zoo-tab .log-count-badge')).toHaveCount(0)
     await expect(page.locator('#bottom-panel-layout-tools-tab .log-count-badge')).toHaveCount(0)
+    await expect(page.locator('#bottom-panel-export-script-tab .log-count-badge')).toHaveCount(0)
 
     for (const { level, count } of expectedBadges) {
       const badge = logsTab.locator(`.badge-${level}`)
@@ -121,18 +131,21 @@ test.describe('Bottom panel log counters', () => {
     const variablesTab = page.locator('#bottom-panel-variables-tab')
     const statesZooTab = page.locator('#bottom-panel-states-zoo-tab')
     const layoutToolsTab = page.locator('#bottom-panel-layout-tools-tab')
+    const exportScriptTab = page.locator('#bottom-panel-export-script-tab')
 
     await expect(page.locator('#logsPanel .bottom-tabs').getByRole('tab')).toHaveText([
       /Logs/,
       'Variables',
       'States Zoo',
       'Layout Tools',
+      'Export Script',
     ])
     await expect(logsTab).toHaveAttribute('aria-selected', 'true')
     await expect(logsTab).toHaveAttribute('tabindex', '0')
     await expect(variablesTab).toHaveAttribute('tabindex', '-1')
     await expect(statesZooTab).toHaveAttribute('tabindex', '-1')
     await expect(layoutToolsTab).toHaveAttribute('tabindex', '-1')
+    await expect(exportScriptTab).toHaveAttribute('tabindex', '-1')
 
     await logsTab.focus()
     await page.keyboard.press('ArrowRight')
@@ -152,10 +165,20 @@ test.describe('Bottom panel log counters', () => {
       'bottom-panel-states-zoo-tab',
     )
 
-    await page.keyboard.press('End')
+    await page.keyboard.press('ArrowRight')
     await expect(layoutToolsTab).toBeFocused()
     await expect(layoutToolsTab).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('#bottom-panel-layout-tools-content')).toBeVisible()
+
+    await page.keyboard.press('End')
+    await expect(exportScriptTab).toBeFocused()
+    await expect(exportScriptTab).toHaveAttribute('aria-selected', 'true')
+    await expect(exportScriptTab).toHaveAttribute('aria-controls', 'bottom-panel-export-script-content')
+    await expect(page.locator('#bottom-panel-export-script-content')).toBeVisible()
+    await expect(page.locator('#bottom-panel-export-script-content')).toHaveAttribute(
+      'aria-labelledby',
+      'bottom-panel-export-script-tab',
+    )
 
     await page.keyboard.press('Home')
     await expect(logsTab).toBeFocused()
@@ -164,7 +187,7 @@ test.describe('Bottom panel log counters', () => {
     await expect(page.locator('#bottom-panel-logs-content')).toBeVisible()
 
     await page.keyboard.press('ArrowLeft')
-    await expect(layoutToolsTab).toBeFocused()
-    await expect(layoutToolsTab).toHaveAttribute('aria-selected', 'true')
+    await expect(exportScriptTab).toBeFocused()
+    await expect(exportScriptTab).toHaveAttribute('aria-selected', 'true')
   })
 })

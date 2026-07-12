@@ -77,6 +77,20 @@
           >
             Layout Tools
           </button>
+          <button
+            id="bottom-panel-export-script-tab"
+            type="button"
+            role="tab"
+            class="bottom-tab"
+            :class="{ active: activeTab === 'export-script' }"
+            :aria-selected="activeTab === 'export-script'"
+            aria-controls="bottom-panel-export-script-content"
+            :tabindex="activeTab === 'export-script' ? 0 : -1"
+            @click="activeTab = 'export-script'"
+            @keydown="handleTabKeydown($event, 4)"
+          >
+            Export Script
+          </button>
         </div>
 
         <section
@@ -140,6 +154,20 @@
             @open-repeater-chain-generator="emit('open-repeater-chain-generator')"
           />
         </section>
+
+        <section
+          v-show="activeTab === 'export-script'"
+          id="bottom-panel-export-script-content"
+          class="bottom-tab-panel export-script-tab-panel"
+          role="tabpanel"
+          aria-labelledby="bottom-panel-export-script-tab"
+          tabindex="0"
+        >
+          <ExportScriptPanel
+            :active="activeTab === 'export-script'"
+            :payload="exportScriptPayload"
+          />
+        </section>
       </div>
     </template>
   </BasePanel>
@@ -148,6 +176,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import BasePanel from './BasePanel.vue'
+import ExportScriptPanel from './ExportScriptPanel.vue'
 import LayoutToolsPanel from './LayoutToolsPanel.vue'
 import LogsPanel from './LogsPanel.vue'
 import StatesZooPanel from './StatesZooPanel.vue'
@@ -182,6 +211,10 @@ const props = defineProps({
     type: Object,
     required: true
   },
+  exportScriptPayload: {
+    type: Object,
+    required: true
+  },
   variablesDisabled: {
     type: Boolean,
     default: false
@@ -204,7 +237,7 @@ const emit = defineEmits([
 ])
 
 const activeTab = ref('logs')
-const tabNames = ['logs', 'variables', 'states-zoo', 'layout-tools']
+const tabNames = ['logs', 'variables', 'states-zoo', 'layout-tools', 'export-script']
 
 const logCounts = computed(() => {
   const counts = {
@@ -329,6 +362,10 @@ function handleTabKeydown(event, currentIndex) {
 .layout-tools-tab-panel {
   padding-right: 4px;
   padding-bottom: 4px;
+}
+
+.export-script-tab-panel {
+  padding-right: 4px;
 }
 
 .variables-tab-panel,

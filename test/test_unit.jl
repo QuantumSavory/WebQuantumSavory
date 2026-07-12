@@ -10,6 +10,172 @@
   # Load test data
   test_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload.json"))
 
+  @testset "Julia Script Export" begin
+    payload = JSON.parsefile(joinpath(@__DIR__, "..", "gui", "src", "demos", "1.Entangler.Example.json"))
+    payload["name"] = "../Export Demo?"
+    payload["simulationConfig"] = Dict("time" => 0.02, "timeStep" => 0.01)
+    payload["variables"] = Any[
+      Dict(
+        "id" => "state-variable",
+        "name" => "pair fidelity",
+        "type" => "Symbolic",
+        "value" => Dict(
+          "kind" => "states_zoo",
+          "state_type" => "DepolarizedBellPair",
+          "parameters" => Dict("p" => 0.9),
+        ),
+      ),
+      Dict(
+        "id" => "probability-variable",
+        "name" => "pair-fidelity",
+        "type" => "Float64",
+        "value" => 0.8,
+      ),
+      Dict(
+        "id" => "default-function-variable",
+        "name" => "default chooser",
+        "type" => "Function",
+        "value" => "default",
+      ),
+    ]
+
+    payload["net"]["nodes"][1]["data"]["slots"][1]["backgroundNoise"] = Dict(
+      "type" => "T2Dephasing",
+      "parameters" => [Dict("name" => "t2", "value" => 5)],
+    )
+    parameters = payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+    parameter_by_name = Dict(parameter["name"] => parameter for parameter in parameters)
+    parameter_by_name["pairstate"]["value"] = Dict("kind" => "variable", "id" => "state-variable")
+    parameter_by_name["success_prob"]["value"] = Dict("kind" => "variable", "id" => "probability-variable")
+    parameter_by_name["chooseA"]["value"] = Dict("kind" => "variable", "id" => "default-function-variable")
+
+    state_names_before = Set(keys(WebQuantumSavory.STATE))
+    script = WebQuantumSavory.generate_julia_script(payload)
+    @test script == WebQuantumSavory.generate_julia_script(payload)
+    @test Set(keys(WebQuantumSavory.STATE)) == state_names_before
+    @test WebQuantumSavory.generate_julia_script_export(payload)["filename"] == "export-demo.jl"
+    @test Meta.parseall(script) isa Expr
+    @test occursin("# Variables", script)
+    @test occursin("variable_pair_fidelity = QuantumSavory.StatesZoo.DepolarizedBellPair(0.9)", script)
+    @test occursin("variable_pair_fidelity_2 = 0.8", script)
+    @test occursin("variable_default_chooser = nothing", script)
+    @test occursin("QuantumSavory.T2Dephasing(; t2 = 5.0)", script)
+    @test occursin("# Registers", script)
+    @test occursin("# Register network and simulation clock", script)
+    @test occursin("# Protocol construction and initialization", script)
+    @test occursin("nodeA = 1, nodeB = 2", script)
+    @test occursin("ConcurrentSim.run(sim, simulation_duration)", script)
+    @test occursin("CairoMakie.record", script)
+    @test occursin("show(io, MIME\"image/png\"(), protocol)", script)
+
+    generated_module = Module(gensym(:GeneratedExport))
+    Core.eval(generated_module, :(using Base))
+    Base.include_string(generated_module, script, "generated-export.jl")
+    generated_sim = getfield(generated_module, :sim)
+    @test ConcurrentSim.now(generated_sim) == 0.02
+    generated_protocols = getfield(generated_module, :protocols)
+    @test length(generated_protocols) == 1
+
+    invalid_config = deepcopy(payload)
+    invalid_config["simulationConfig"]["time"] = 0
+    invalid_config_error = try
+      WebQuantumSavory.generate_julia_script(invalid_config)
+      nothing
+    catch error
+      error
+    end
+    @test invalid_config_error isa WebQuantumSavory.APIError
+    @test invalid_config_error.status_code == 400
+    @test occursin("positive finite", invalid_config_error.message)
+
+    invalid_protocol = deepcopy(payload)
+    invalid_protocol["net"]["edges"][1]["data"]["protocols"][1]["type"] = "Main.NotAProtocol"
+    invalid_protocol_error = try
+      WebQuantumSavory.generate_julia_script(invalid_protocol)
+      nothing
+    catch error
+      error
+    end
+    @test invalid_protocol_error isa WebQuantumSavory.APIError
+    @test invalid_protocol_error.status_code == 400
+    @test occursin("unknown type", invalid_protocol_error.message)
+
+    empty_network_error = try
+      WebQuantumSavory.generate_julia_script(Dict(
+        "name" => "Empty Network",
+        "net" => Dict("nodes" => Any[], "edges" => Any[], "protocols" => Any[]),
+      ))
+      nothing
+    catch error
+      error
+    end
+    @test empty_network_error isa WebQuantumSavory.APIError
+    @test occursin("at least one node", empty_network_error.message)
+
+    empty_register_payload = Dict(
+      "name" => "Empty Register",
+      "net" => Dict(
+        "nodes" => [Dict(
+          "id" => "node",
+          "name" => "Node",
+          "position" => [0, 0],
+          "data" => Dict("slots" => Any[], "protocols" => Any[]),
+        )],
+        "edges" => Any[],
+        "protocols" => Any[],
+      ),
+    )
+    empty_register_error = try
+      WebQuantumSavory.generate_julia_script(empty_register_payload)
+      nothing
+    catch error
+      error
+    end
+    @test empty_register_error isa WebQuantumSavory.APIError
+    @test occursin("at least one slot", empty_register_error.message)
+
+    wildcard_payload = deepcopy(payload)
+    push!(wildcard_payload["variables"], Dict(
+      "id" => "wildcard-variable",
+      "name" => "any remote node",
+      "type" => "QuantumSavory.Wildcard",
+      "value" => nothing,
+    ))
+    push!(wildcard_payload["net"]["nodes"][1]["data"]["protocols"], Dict(
+      "id" => "wildcard-swapper",
+      "type" => "QuantumSavory.ProtocolZoo.SwapperProt",
+      "parameters" => [
+        Dict(
+          "name" => "nodeL",
+          "type" => ["QuantumSavory.Wildcard", "Int64", "Function"],
+          "value" => Dict("kind" => "variable", "id" => "wildcard-variable"),
+        ),
+        Dict(
+          "name" => "nodeH",
+          "type" => "QuantumSavory.Wildcard",
+          "value" => "Wildcard",
+        ),
+      ],
+    ))
+    wildcard_script = WebQuantumSavory.generate_julia_script(wildcard_payload)
+    @test occursin("variable_any_remote_node = (() -> QuantumSavory.Wildcard())", wildcard_script)
+    @test length(findall("variable_any_remote_node()", wildcard_script)) == 1
+    @test occursin("nodeH = QuantumSavory.Wildcard()", wildcard_script)
+
+    nested_protocol_payload = deepcopy(payload)
+    nested_protocol = nested_protocol_payload["net"]["edges"][1]["data"]["protocols"][1]
+    nested_protocol["id"] = "show"
+    nested_protocol["type"] = "QuantumSavory.ProtocolZoo.QTCP.LinkController"
+    nested_protocol["parameters"] = Any[]
+    nested_protocol_script = WebQuantumSavory.generate_julia_script(nested_protocol_payload)
+    @test occursin(
+      "QuantumSavory.ProtocolZoo.QTCP.LinkController(; sim = sim, net = network, nodeA = 1, nodeB = 2)",
+      nested_protocol_script,
+    )
+    @test occursin("protocol_instance_show = QuantumSavory.ProtocolZoo.QTCP.LinkController", nested_protocol_script)
+    @test occursin("show(io, MIME\"image/png\"(), protocol)", nested_protocol_script)
+  end
+
   @testset "Background Types" begin
       background_types = WebQuantumSavory.get_background_types()
       @test isa(background_types, Vector)

@@ -36,6 +36,7 @@ include("Sandbox.jl")
 include("Logger.jl")
 include("states_zoo.jl")
 include("parser.jl")
+include("script_export.jl")
 using .Logger: @log_event
 
 const up = Genie.up

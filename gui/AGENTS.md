@@ -12,7 +12,7 @@
 - `index.html` is the editable HTML entry point. `src/main.js` loads global styles and plugins, initializes the shared API client, and mounts `App.vue`.
 - `src/App.vue` is the composition root. It owns canonical reactive `projectData`, derives the minimized backend payload, wires composables, and coordinates menus, dialogs, panels, maps, logs, and result windows.
 - `src/components/map/` contains the MapLibre map, node/edge/slot rendering, and entanglement overlays.
-- `src/components/panels/` contains node/edge/protocol editors, the simulation runner, logs, and result views. Direct children of `src/components/` are project and confirmation dialogs.
+- `src/components/panels/` contains node/edge/protocol editors, the simulation runner, logs, Julia script export, and result views. Direct children of `src/components/` are project and confirmation dialogs.
 - `src/composables/` separates project management, import/export, simulation control, polling, panel layout, unsaved-change handling, and result-window state.
 - `src/models/` contains the in-memory node, edge, slot, and protocol objects plus the local-storage `ProjectStore`.
 - `src/utils/ApiConnector.js` is the singleton backend client and runtime metadata store. Other utilities contain project validation/serialization, backend log conversion, and map/window helpers.
@@ -47,6 +47,7 @@
 - Keep CSS changes in the existing source stylesheets or component styles. Do not patch the minified CSS emitted under `../public/assets/`.
 - Prefer durable IDs, roles, or stable classes in Playwright selectors. The main workflow is intentionally serial and shares a browser page and saved project state across its cases.
 - Keep log-level count badges in the Logs tab label rather than the enclosing bottom-panel header, and preserve each nonzero badge's level-specific color, accessible label, and tooltip.
+- The Export Script tab is a viewer for backend-generated Julia, not a second implementation of project-to-QuantumSavory translation. Send the cleaned simulation payload plus `simulationConfig`, fetch when the tab is opened or explicitly refreshed, highlight the returned text as read-only Julia, and download exactly that text with the backend-provided safe `.jl` filename.
 
 ## Commands and verification
 

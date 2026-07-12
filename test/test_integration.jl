@@ -141,6 +141,68 @@
       @test data["known_functions"] == WebQuantumSavory.known_functions()
   end
 
+  @testset "Export Script Endpoint" begin
+      export_payload = Dict(
+        "name" => "Integration Export",
+        "variables" => Any[],
+        "simulationConfig" => Dict("time" => 1.5, "timeStep" => 0.25),
+        "net" => Dict(
+          "nodes" => [
+            Dict(
+              "id" => "left-node",
+              "name" => "Left",
+              "position" => [0.0, 0.0],
+              "data" => Dict(
+                "slots" => [Dict("id" => "left-slot", "type" => "Qubit", "backgroundNoise" => nothing)],
+                "protocols" => Any[],
+              ),
+            ),
+            Dict(
+              "id" => "right-node",
+              "name" => "Right",
+              "position" => [1.0, 1.0],
+              "data" => Dict(
+                "slots" => [Dict("id" => "right-slot", "type" => "Qubit", "backgroundNoise" => nothing)],
+                "protocols" => Any[],
+              ),
+            ),
+          ],
+          "edges" => [
+            Dict(
+              "id" => "connection",
+              "source" => "left-node",
+              "target" => "right-node",
+              "data" => Dict("protocols" => Any[]),
+            ),
+          ],
+          "protocols" => Any[],
+        ),
+      )
+
+      response = make_request("POST", "/export_script"; body=export_payload)
+      @test response.status == 200
+      data = parse_response(response)
+      @test data["success"] == true
+      @test data["filename"] == "integration-export.jl"
+      @test occursin("simulation_duration = 1.5", data["script"])
+      @test occursin("Graphs.add_edge!(graph, 1, 2)", data["script"])
+      @test occursin("CairoMakie.record", data["script"])
+      @test occursin("MIME\"image/png\"", data["script"])
+
+      simulations_response = make_request("GET", "/simulations")
+      simulations = parse_response(simulations_response)["simulations"]
+      @test all(simulation["name"] != "Integration Export" for simulation in simulations)
+
+      invalid_payload = deepcopy(export_payload)
+      invalid_payload["simulationConfig"]["timeStep"] = 0
+      invalid_response = make_request("POST", "/export_script"; body=invalid_payload)
+      @test invalid_response.status == 400
+      invalid_data = parse_response(invalid_response)
+      @test invalid_data["success"] == false
+      @test invalid_data["error_code"] == "VALIDATION_ERROR"
+      @test occursin("positive finite", invalid_data["error"])
+  end
+
   @testset "Protocol Types Endpoint" begin
       response = make_request("GET", "/protocol_types")
       @test response.status == 200

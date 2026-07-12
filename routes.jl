@@ -361,6 +361,87 @@ end
 ########################################################
 
 @swagger """
+/export_script:
+  post:
+    description: Generate a standalone pedagogical Julia script from a WebQuantumSavory project without creating a server-side simulation.
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - name
+              - net
+            properties:
+              name:
+                type: string
+              variables:
+                type: array
+                items:
+                  type: object
+              simulationConfig:
+                type: object
+                properties:
+                  time:
+                    type: number
+                    minimum: 0
+                    exclusiveMinimum: true
+                  timeStep:
+                    type: number
+                    minimum: 0
+                    exclusiveMinimum: true
+              net:
+                type: object
+                required:
+                  - nodes
+                  - edges
+    responses:
+      '200':
+        description: Generated Julia source and a safe download filename.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - success
+                - script
+                - filename
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                script:
+                  type: string
+                filename:
+                  type: string
+                  example: repeater-chain.jl
+      '400':
+        description: The project is invalid or contains a value that cannot be translated reliably.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                status_code:
+                  type: integer
+                  example: 400
+                error_code:
+                  type: string
+                  example: VALIDATION_ERROR
+"""
+route("/export_script", method="POST") do
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  json(generate_julia_script_export(payload))
+end
+
+########################################################
+
+@swagger """
 /parse_network_graph:
   post:
     description: Parse a network graph JSON payload and return the parsed object
