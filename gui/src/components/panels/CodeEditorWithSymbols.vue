@@ -1,85 +1,109 @@
 <template>
   <div class="code-editor-with-symbols">
-    <div
-      v-if="!evaluationEnabled"
-      class="evaluation-disabled-notice"
-      role="status"
-      data-testid="evaluation-disabled-notice"
+    <button
+      v-if="collapsible && collapsed"
+      type="button"
+      class="symbolic-collapsed-view"
+      :class="{ 'symbolic-compact-value': !latexExpression }"
+      data-testid="symbolic-collapsed-view"
+      :aria-label="latexExpression ? 'Edit symbolic expression' : 'Enter symbolic expression'"
+      @click="emit('edit')"
     >
-      Server-side Julia evaluation is disabled. Raw lambda and symbolic
-      validation are unavailable; choose a listed function when supported.
-    </div>
-
-    <div
-      v-if="hasError"
-      class="function-error-badge"
-      v-tooltip.top="{
-        value: errorMessage,
-        escape: false, 
-        autoHide: false, 
-        class: 'reduce-y-tooltip'
-      }"
-    >
-      <i class="pi pi-exclamation-triangle"></i> &nbsp;
-      Error!
-    </div>
-
-    <div 
-      v-if="showLatex && latexExpression"
-      class="latex-wrap-container">
-      <vue-latex :expression="latexExpression" 
-        display-mode 
+      <vue-latex
+        v-if="latexExpression"
+        :expression="latexExpression"
+        display-mode
         :fontsize="10"
         :options="latexOptions"
         class="latex-wrap"
       />
-    </div>
+      <span v-else :class="{ 'symbolic-placeholder': !modelValue }">
+        {{ modelValue || 'default' }}
+      </span>
+    </button>
 
-    <HighCode 
-      ref="codeEditorRef"
-      :codeValue="modelValue" 
-      @getCodeValue="handleValueChange"
-      :textEditor="true" 
-      lang="julia" 
-      width="100%" 
-      height="150px" 
-      theme="light" 
-      fontSize="12px" 
-      :copy="false" 
-      borderRadius="4px" 
-      :readOnly="interactionDisabled"
-      :class="{ 
-        'function-container': true, 
-        'function-syntax-error': hasError,
-        'noInteraction': interactionDisabled
-      }"
-      @click="captureCursorPosition"
-      @mousedown="captureCursorPosition"
-      @keyup="captureCursorPosition"
-    />
-    
-    <div class="buttons-row">
-      <div class="symbol-buttons-container">
-        <button 
-          v-for="symbol in unicodeSymbols" 
-          :key="symbol"
-          class="symbol-button"
-          :class="{ 'subscript-char': isSubscriptChar(symbol) }"
-          @mousedown="handleSymbolClick($event, symbol)"
-          :disabled="interactionDisabled"
-          :title="'Insert ' + symbol"
-        >
-          <span class="symbol-content">{{ symbol }}</span>
-        </button>
+    <template v-else>
+      <div
+        v-if="!evaluationEnabled"
+        class="evaluation-disabled-notice"
+        role="status"
+        data-testid="evaluation-disabled-notice"
+      >
+        Server-side Julia evaluation is disabled. Raw lambda and symbolic
+        validation are unavailable; choose a listed function when supported.
       </div>
+
+      <div
+        v-if="hasError"
+        class="function-error-badge"
+        v-tooltip.top="{
+          value: errorMessage,
+          escape: false,
+          autoHide: false,
+          class: 'reduce-y-tooltip'
+        }"
+      >
+        <i class="pi pi-exclamation-triangle"></i> &nbsp;
+        Error!
+      </div>
+
+      <div
+        v-if="showLatex && latexExpression && !collapsible"
+        class="latex-wrap-container">
+        <vue-latex :expression="latexExpression"
+          display-mode
+          :fontsize="10"
+          :options="latexOptions"
+          class="latex-wrap"
+        />
+      </div>
+
+      <HighCode
+        ref="codeEditorRef"
+        :codeValue="modelValue"
+        @getCodeValue="handleValueChange"
+        :textEditor="true"
+        lang="julia"
+        width="100%"
+        height="150px"
+        theme="light"
+        fontSize="12px"
+        :copy="false"
+        borderRadius="4px"
+        :readOnly="interactionDisabled"
+        :class="{
+          'function-container': true,
+          'function-syntax-error': hasError,
+          'noInteraction': interactionDisabled
+        }"
+        @click="captureCursorPosition"
+        @mousedown="captureCursorPosition"
+        @keyup="captureCursorPosition"
+      />
       
-      <button
-        @click="handleValidate"
-        :disabled="interactionDisabled"
-        :title="evaluationEnabled ? 'Validate' : 'Server-side Julia evaluation is disabled'"
-        class="validate-button"
-      >Validate</button>
-    </div>
+      <div class="buttons-row">
+        <div class="symbol-buttons-container">
+          <button
+            v-for="symbol in unicodeSymbols"
+            :key="symbol"
+            class="symbol-button"
+            :class="{ 'subscript-char': isSubscriptChar(symbol) }"
+            @mousedown="handleSymbolClick($event, symbol)"
+            :disabled="interactionDisabled"
+            :title="'Insert ' + symbol"
+          >
+            <span class="symbol-content">{{ symbol }}</span>
+          </button>
+        </div>
+
+        <button
+          @click="handleValidate"
+          :disabled="interactionDisabled"
+          :title="evaluationEnabled ? 'Validate' : 'Server-side Julia evaluation is disabled'"
+          class="validate-button"
+        >Validate</button>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -118,10 +142,18 @@ const props = defineProps({
   paramType: {
     type: String,
     default: ''
+  },
+  collapsible: {
+    type: Boolean,
+    default: false
+  },
+  collapsed: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'validate'])
+const emit = defineEmits(['update:modelValue', 'validate', 'edit'])
 
 const codeEditorRef = ref(null)
 const cursorPosition = ref(0)
@@ -242,6 +274,38 @@ onMounted(() => {
 <style scoped>
 .code-editor-with-symbols {
   width: 100%;
+}
+
+.symbolic-collapsed-view {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+}
+
+.symbolic-collapsed-view:hover {
+  border-color: #c7c7df;
+  background: #f8f8fd;
+}
+
+.symbolic-compact-value {
+  width: 60%;
+  min-height: 22px;
+  margin-left: auto;
+  padding: 1px 10px;
+  border-color: #ccc;
+  border-radius: 2px;
+  background: #fff;
+  text-align: right;
+}
+
+.symbolic-placeholder {
+  color: #999;
 }
 
 .evaluation-disabled-notice {
