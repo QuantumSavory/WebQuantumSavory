@@ -95,6 +95,16 @@ export class ApiConnector {
     return readJsonResponse(res, 'States Zoo preview failed')
   }
 
+  async exportScript(data, { signal } = {}) {
+    const res = await fetch(`${this.baseUrl}/export_script`, {
+      headers: this.requestHeaders,
+      method: 'POST',
+      body: JSON.stringify(data),
+      signal,
+    })
+    return readJsonResponse(res, 'Julia script export failed')
+  }
+
   getKnownFunctions(){
     return this.known_functions.value
   }

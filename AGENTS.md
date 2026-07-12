@@ -14,6 +14,7 @@
 - `routes.jl` owns HTTP handlers, adjacent Swagger descriptions, the common safe route wrapper, the root UI route, and startup of the stale-simulation service.
 - `src/WebQuantumSavory.jl` defines `State`, the process-global `STATE` dictionary, serialization, protocol launching, simulation control, log access, and resource cleanup.
 - `src/parser.jl` discovers QuantumSavory metadata, validates request payloads, constructs graphs/registers/networks, converts parameters, and instantiates protocols.
+- `src/script_export.jl` translates validated project payloads into standalone, pedagogical QuantumSavory Julia scripts without creating server-side simulation state.
 - `src/errors.jl` standardizes `APIError` responses. `evaluation_policy.jl` gates unsafe server-process evaluation, `Logger.jl` captures per-simulation events, `Sandbox.jl` evaluates user expressions, `types.jl` implements lambda/symbolic adapters, and `services.jl` manages idle simulations.
 - `config/env/` contains Genie settings for dev, test, and production. `public/index.html` and `public/assets/` are generated from `gui/` at launch.
 
@@ -49,6 +50,8 @@ The normal lifecycle is:
 - Keep each route's Swagger block beside and synchronized with its handler.
 - Reuse `validation_error`, `not_found_error`, `bad_request_error`, and `server_error`; do not hand-roll incompatible error payloads.
 - When a request or response changes, review all four contract surfaces: the backend implementation, the adjacent Swagger schema, `test/test_integration.jl`, and `gui/src/utils/ApiConnector.js` plus affected GUI models/composables.
+- Keep `POST /export_script` and the normal parser aligned for node ordering, registers, background noise, variables, and node/edge/floating protocol construction. Source generation must remain deterministic and side-effect free: validate input, but do not create `STATE` entries or evaluate user-provided Julia while exporting.
+- Exported scripts are standalone QuantumSavory onboarding material, not WebQuantumSavory runtime clients. Keep the fixed-duration path executable by default and the animation and protocol-PNG examples clearly separated so a script does not accidentally advance one simulation through multiple recipes.
 - Keep serialized responses free of live QuantumSavory objects. Return stable IDs, primitive metadata, and explicitly rendered HTML/PNG data only where the existing endpoints require it.
 
 ## Setup and commands

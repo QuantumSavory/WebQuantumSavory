@@ -218,6 +218,14 @@ const minimizedProjectData = computed(() => {
   return projectCopy
 })
 
+const exportScriptPayload = computed(() => ({
+  ...minimizedProjectData.value,
+  simulationConfig: {
+    time: projectData.value.simulationConfig.time,
+    timeStep: projectData.value.simulationConfig.timeStep
+  }
+}))
+
 // Provide a temporary no-op for stopPolling to satisfy useSimulation signature
 const stopPollingForSim = () => {}
 
@@ -1257,6 +1265,7 @@ onUnmounted(() => {
         :helpers-disabled="hasSimulationRun"
         :variables="projectData.variables"
         :project-data="projectData"
+        :export-script-payload="exportScriptPayload"
         :variables-disabled="hasSimulationRun"
         @clear-logs="clearLogs"
         @open-repeater-chain-generator="openRepeaterChainGenerator"
