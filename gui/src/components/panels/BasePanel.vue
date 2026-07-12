@@ -1,6 +1,16 @@
 <template>
   <div class="panel" :class="{ collapsed: collapsed }">
-    <div class="panel-title collapsable" v-if="collapsable" @click="toggleCollapsedPanel">
+    <div
+      v-if="collapsable"
+      class="panel-title collapsable"
+      role="button"
+      tabindex="0"
+      :aria-expanded="!collapsed"
+      :aria-controls="`${panel_id}-content`"
+      @click="toggleCollapsedPanel"
+      @keydown.enter.prevent="toggleCollapsedPanel"
+      @keydown.space.prevent="toggleCollapsedPanel"
+    >
         <div class="panel-title-text">
           <div class="panel-title-text-title" v-html="title"></div>
           <div class="panel-title-text-indicator" v-if="$slots.indicator || indicator">
@@ -31,7 +41,7 @@
         </div>
     </div>
 
-    <div v-if="!collapsed" class="panel-content">
+    <div v-if="!collapsed" :id="`${panel_id}-content`" class="panel-content">
         <slot name="content"></slot>
       </div>
   </div>
@@ -99,5 +109,11 @@ function toggleCollapsedPanel() {
   position: relative;
   flex-shrink: 0;
   padding-right :6px;
+}
+
+.panel-title.collapsable:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid #4345ac;
+  outline-offset: 2px;
 }
 </style>

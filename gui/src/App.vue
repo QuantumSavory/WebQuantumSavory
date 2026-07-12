@@ -1316,6 +1316,7 @@ onUnmounted(() => {
         :project-data="projectData"
         :export-script-payload="exportScriptPayload"
         :variables-disabled="hasSimulationRun"
+        :right-sidebar-visible="isRightSidebarVisible"
         @clear-logs="clearLogs"
         @update-description="projectData.description = $event"
         @open-repeater-chain-generator="openRepeaterChainGenerator"

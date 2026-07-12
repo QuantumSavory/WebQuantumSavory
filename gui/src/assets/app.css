@@ -480,10 +480,7 @@ button:disabled:hover {
   position: fixed;
   bottom: 0;
   left: 50px;
-  /* transform: translateX(-50%); */
-  width: calc(100vw - 390px);
-  max-width: 800px;
-  /* max-width: 900px; */
+  width: fit-content;
   z-index: 2000;
   background: transparent;
   pointer-events: none;
