@@ -47,6 +47,7 @@
 - States Zoo previews are automatic: request one for a newly added or loaded row, debounce parameter and type changes by 500 ms, and reset parameters to catalog-provided `good` values when the type changes. Track a generation per row and abort obsolete requests so only the newest response can change the image, error, or busy state.
 - While a States Zoo preview is pending, retain the last successful image beneath an accessible `aria-busy` overlay. Keep preview failures retryable and inline without clearing that image, and clear every pending debounce timer and abort controller when a row is deleted or the panel unmounts.
 - Clean up MapLibre layers/sources/markers, DOM listeners, timers, polling, and window registrations on unmount or project changes.
+- Keep the compact-viewport warning as a full-screen native dialog for viewports at or below 900px wide or 600px high. Its dismissal is intentionally in-memory for the current app mount; continue observing viewport changes and remove the media-query listener on unmount.
 - Match the surrounding mixed legacy formatting in touched code; do not reformat unrelated files.
 - Keep CSS changes in the existing source stylesheets or component styles. Do not patch the minified CSS emitted under `../public/assets/`.
 - Prefer durable IDs, roles, or stable classes in Playwright selectors. The main workflow is intentionally serial and shares a browser page and saved project state across its cases.

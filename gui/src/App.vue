@@ -48,6 +48,7 @@ import packageJson from '../package.json'
 import VoidPanel from './components/panels/VoidPanel.vue'
 import ResultsView from './components/panels/ResultsView.vue'
 import LucideMenuIcon from './components/LucideMenuIcon.vue'
+import SmallScreenWarning from './components/SmallScreenWarning.vue'
 
 // Import composables
 import { useSimulation } from './composables/useSimulation.js'
@@ -1013,6 +1014,7 @@ onUnmounted(() => {
 
 <template>
   <div>
+    <SmallScreenWarning />
     <div class="topbar">
       <div class="topbar-title">
         <img src="./assets/logo.png" alt="WebQuantumSavory Logo" class="topbar-logo">
