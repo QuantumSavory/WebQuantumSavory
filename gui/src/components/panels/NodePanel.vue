@@ -3,9 +3,11 @@
     panel_id="node_panel" 
     :collapsable="true"
     :title="`Selected Node`" 
-    :indicator="'<span style=\'color: #999; font-weight: 400; margin-right: 2px;\'>#</span>' + (props.nodeIndex + 1)"
     @collapsed-changed="$emit('collapsed-changed', $event)"
   >
+    <template #indicator>
+      <NodeIndex :index="props.nodeIndex" />
+    </template>
     <template #content>
       <!-- Section 1: Name -->
       <section class="panel-section">
@@ -239,6 +241,7 @@ import ProtocolsManager from './ProtocolsManager.vue'
 import SlotIcon from '../map/SlotIcon.vue'
 import SlotEditor from './SlotEditor.vue'
 import Menu from 'primevue/menu'
+import NodeIndex from './NodeIndex.vue'
 
 // Props: node (Node instance), justCreated (bool: true if node was just created and selected)
 const props = defineProps({

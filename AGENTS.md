@@ -28,7 +28,7 @@ The normal lifecycle is:
 5. state polling, pause/resume, result/log access, and eventual destruction
 
 - Always validate a raw project payload before calling `parse_network_graph`; the parser expects the validation result containing `data` and `graph_info`.
-- Preserve node ordering. External string node IDs are translated to Julia's 1-based register indices, and edge protocol contexts depend on that mapping.
+- Preserve node ordering. The payload array position is the user-visible, 1-based simulator node ID; durable external string IDs are translated through that order to Julia register indices, and edge protocol `nodeA`/`nodeB` roles follow the submitted source/target IDs under that mapping.
 - Protocol placement is part of the API contract: node protocols live under each node's `data.protocols`, edge protocols under each edge's `data.protocols`, and floating protocols under `net.protocols`.
 - Protocol, background, and slot catalogs come from QuantumSavory metadata. Do not duplicate hard-coded catalogs in the API or GUI.
 - `STATE` is in-memory and process-local. Restarts lose simulations, and tests which use fixed names or mutate state must run serially and clean up after themselves.

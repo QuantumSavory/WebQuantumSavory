@@ -404,7 +404,8 @@ const {
   proceedToPosition,
   createNewSlotClicked,
   deleteSelected,
-  handleEdgeCreated
+  handleEdgeCreated,
+  moveNode
 } = useNodeEdgeOperations(projectData, hasSimulationRun, addLog)
 
 // Initialize app state composable
@@ -1189,6 +1190,7 @@ onUnmounted(() => {
                 :simulationState="{ ...simulationState, hasSimulationRun }"
                 @select="node => handleSelect(node, 'node')" 
                 @addNewNode="addNodeClickHandler"
+                @move-node="moveNode"
                 @collapsed-changed="(collapsed) => handlePanelCollapse('node_list', collapsed)"
               />
             </div>

@@ -46,6 +46,31 @@ const props = defineProps({
 
 const emit = defineEmits(['select', 'map-click', 'edge-created', 'map-state-change', 'delete'])
 
+// MapLibre moves each marker element outside Vue's normal DOM tree. Keep the
+// component render order stable when simulator IDs change so Vue updates the
+// existing marker instances instead of trying to move MapLibre-owned elements.
+const renderedNodes = ref([])
+watch(
+  () => props.nodes.map(node => node),
+  (nodes) => {
+    const nodesById = new Map(nodes.map(node => [node.id, node]))
+    const renderedIds = renderedNodes.value
+      .map(node => node.id)
+      .filter(id => nodesById.has(id))
+    const renderedIdSet = new Set(renderedIds)
+
+    nodes.forEach(node => {
+      if (!renderedIdSet.has(node.id)) {
+        renderedIds.push(node.id)
+        renderedIdSet.add(node.id)
+      }
+    })
+
+    renderedNodes.value = renderedIds.map(id => nodesById.get(id))
+  },
+  { immediate: true }
+)
+
 // SlotConnectionState management functions
 function showSlotConnectionState(slotConnectionState) {
   if (!map.value || !isMapLoaded.value) {
@@ -424,7 +449,7 @@ defineExpose({
       />
       <!-- Render markers on top -->
       <NodeMarker
-        v-for="node in nodes"
+        v-for="node in renderedNodes"
         :key="node.id"
         :node="node"
         :map="map"
@@ -471,4 +496,4 @@ defineExpose({
   height: calc(100% - 40px);
   position: relative;
 }
-</style> 
+</style>

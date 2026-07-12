@@ -3,7 +3,11 @@
     <div class="panel-title collapsable" v-if="collapsable" @click="toggleCollapsedPanel">
         <div class="panel-title-text">
           <div class="panel-title-text-title" v-html="title"></div>
-          <div class="panel-title-text-indicator" v-if="indicator" v-html="indicator"></div>
+          <div class="panel-title-text-indicator" v-if="$slots.indicator || indicator">
+            <slot name="indicator">
+              <span v-html="indicator"></span>
+            </slot>
+          </div>
         </div>
         <div class="panel-title-badges">
           <slot name="title-badges"></slot>
@@ -16,7 +20,11 @@
     <div class="panel-title" v-else>
         <div class="panel-title-text">
           <div class="panel-title-text-title" v-html="title"></div>
-          <div class="panel-title-text-indicator" v-if="indicator" v-html="indicator"></div>
+          <div class="panel-title-text-indicator" v-if="$slots.indicator || indicator">
+            <slot name="indicator">
+              <span v-html="indicator"></span>
+            </slot>
+          </div>
         </div>
         <div class="panel-title-badges">
           <slot name="title-badges"></slot>

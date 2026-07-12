@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import Node from '../models/Node'
-import { generateUUid } from '../utils/Utils'
+import { generateUUid, setEdgeCorrectNodeOrder } from '../utils/Utils'
 
 /**
  * useNodeEdgeOperations - Composable for node and edge operations
@@ -121,6 +121,32 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
     addLog('info', `Created new edge: ${edge.source.name} → ${edge.target.name}`, 'Map')
   }
 
+  function moveNode(fromIndex, toIndex) {
+    if (hasSimulationRun.value) return false
+
+    const nodes = projectData.value.net.nodes
+    if (
+      !Number.isInteger(fromIndex)
+      || !Number.isInteger(toIndex)
+      || fromIndex < 0
+      || toIndex < 0
+      || fromIndex >= nodes.length
+      || toIndex >= nodes.length
+      || fromIndex === toIndex
+    ) {
+      return false
+    }
+
+    const [node] = nodes.splice(fromIndex, 1)
+    nodes.splice(toIndex, 0, node)
+
+    // Edge protocol nodeA/nodeB follows list order. Re-normalizing only swaps
+    // endpoint references; the edge and both durable Node objects stay intact.
+    projectData.value.net.edges.forEach(edge => setEdgeCorrectNodeOrder(edge, nodes))
+    addLog('info', `Changed ${node.name} to node ID ${toIndex + 1}`, 'Map')
+    return true
+  }
+
   function handleMapStateChange(mapState) {
     mapCenter.value = [...mapState.center]
     mapZoom.value = mapState.zoom
@@ -164,6 +190,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
     createNewSlotClicked,
     deleteSelected,
     handleEdgeCreated,
+    moveNode,
     handleMapStateChange,
     startCreateNode,
     cancelCreateNode,
