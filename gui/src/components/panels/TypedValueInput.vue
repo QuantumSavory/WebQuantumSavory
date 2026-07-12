@@ -25,8 +25,11 @@
       :showLatex="isSymbolicType(type)"
       :latexExpression="parameter.latex"
       :paramType="type"
+      :collapsible="isSymbolicType(type)"
+      :collapsed="isSymbolicType(type) && !symbolicEditorOpen"
       @update:modelValue="onCodeEditorValueChanged"
       @validate="validateCode"
+      @edit="openSymbolicEditor"
     />
   </div>
   <select
@@ -53,7 +56,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import Checkbox from 'primevue/checkbox'
 import { api } from '../../utils/ApiConnector'
 import {
@@ -85,6 +88,10 @@ const props = defineProps({
   placeholder: {
     type: String,
     default: 'default'
+  },
+  symbolicInitiallyOpen: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -93,6 +100,7 @@ const valueInputLabel = computed(() => `${props.parameter.name || 'Parameter'} v
 const selectableFunctions = computed(() => api.getKnownFunctions().filter(func => (
   props.category === 'node' || !func.endsWith('(self)')
 )))
+const symbolicEditorOpen = ref(false)
 
 watch(
   () => props.type,
@@ -109,6 +117,10 @@ watch(
     ) {
       props.parameter.value = null
     }
+
+    symbolicEditorOpen.value = isSymbolicType(type)
+      ? props.symbolicInitiallyOpen && !props.parameter.latex
+      : false
   },
   { immediate: true }
 )
@@ -116,6 +128,10 @@ watch(
 function onCodeEditorValueChanged(value) {
   props.parameter.value = value
   delete props.parameter.error
+}
+
+function openSymbolicEditor() {
+  if (isSymbolicType(props.type)) symbolicEditorOpen.value = true
 }
 
 async function validateCode() {
@@ -132,10 +148,12 @@ async function validateCode() {
     delete props.parameter.error
     if (isSymbolicType(props.type)) {
       props.parameter.latex = response.results.latex.replace(/^\$+|\$+$/g, '')
+      symbolicEditorOpen.value = false
     }
     return
   }
 
+  if (isSymbolicType(props.type)) symbolicEditorOpen.value = true
   delete props.parameter.latex
   const escaped = response.error
     .split('\\n').join('\n')

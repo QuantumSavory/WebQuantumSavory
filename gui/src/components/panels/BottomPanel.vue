@@ -3,22 +3,10 @@
     id="logsPanel"
     class="bottom-panel"
     :panel_id="panelId"
-    title="Logs, Variables, and Layout Tools"
+    title="Tools"
     :collapsable="collapsable"
     @collapsed-changed="emit('collapsed-changed', $event)"
   >
-    <template #title-badges>
-      <span
-        v-for="badge in visibleLogBadges"
-        :key="badge.level"
-        :class="['log-count-badge', `badge-${badge.level}`]"
-        :aria-label="`${badge.count} ${badge.level} logs`"
-        :title="`${badge.count} ${badge.level} logs`"
-      >
-        {{ badge.count }}
-      </span>
-    </template>
-
     <template #content>
       <div class="bottom-panel-body">
         <div class="bottom-tabs" role="tablist" aria-label="Bottom panel">
@@ -34,7 +22,18 @@
             @click="activeTab = 'logs'"
             @keydown="handleTabKeydown($event, 0)"
           >
-            Logs
+            <span>Logs</span>
+            <span v-if="visibleLogBadges.length" class="log-tab-badges">
+              <span
+                v-for="badge in visibleLogBadges"
+                :key="badge.level"
+                :class="['log-count-badge', `badge-${badge.level}`]"
+                :aria-label="`${badge.count} ${badge.level} logs`"
+                :title="`${badge.count} ${badge.level} logs`"
+              >
+                {{ badge.count }}
+              </span>
+            </span>
           </button>
           <button
             id="bottom-panel-variables-tab"
@@ -304,6 +303,13 @@ function handleTabKeydown(event, currentIndex) {
 
 .variables-tab-panel {
   padding-right: 4px;
+}
+
+.log-tab-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
 }
 
 .log-count-badge {
