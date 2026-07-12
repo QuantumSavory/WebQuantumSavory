@@ -44,6 +44,8 @@ import AboutModal from './components/AboutModal.vue'
 import UnsavedChangesDialog from './components/UnsavedChangesDialog.vue'
 import AlertModal from './components/AlertModal.vue'
 import RepeaterChainDialog from './components/RepeaterChainDialog.vue'
+import StarNetworkDialog from './components/StarNetworkDialog.vue'
+import GraphNetworkDialog from './components/GraphNetworkDialog.vue'
 import packageJson from '../package.json'
 import VoidPanel from './components/panels/VoidPanel.vue'
 import ResultsView from './components/panels/ResultsView.vue'
@@ -68,6 +70,8 @@ import { showEntangledSlots as showEntangledSlotsUtil, hideSlotState } from './u
 import { fetchBackendLogs, mapBackendLogLevel, compareVersionsMismatch } from './utils/backendHelpers.js'
 import { isEntangledStateStillValid } from './utils/SlotConnectionUtils.js'
 import { generateRepeaterChain } from './utils/repeaterChain.js'
+import { generateStarNetwork } from './utils/starNetwork.js'
+import { generateGraphNetwork, GRAPH_TOPOLOGIES } from './utils/graphNetwork.js'
 
 // Import demo projects
 import demo1 from './demos/1.Entangler.Example.json'
@@ -132,6 +136,8 @@ function addLog(level, message, source = 'App', extendedInfo = null) {
 const applicationLogs = ref([])
 const maxLogs = ref(1000)
 const showRepeaterChainDialog = ref(false)
+const showStarNetworkDialog = ref(false)
+const showGraphNetworkDialog = ref(false)
 
 // Minimized project data - cleans up project data for API calls
 const minimizedProjectData = computed(() => {
@@ -767,6 +773,100 @@ function handleGenerateRepeaterChain(options) {
   }
 }
 
+function openStarNetworkGenerator() {
+  if (hasSimulationRun.value) {
+    showAlert(
+      'Layout tools unavailable',
+      'Reset or stop the simulation before changing the network layout.'
+    )
+    return
+  }
+  showStarNetworkDialog.value = true
+}
+
+function closeStarNetworkGenerator() {
+  showStarNetworkDialog.value = false
+}
+
+function handleGenerateStarNetwork(options) {
+  if (hasSimulationRun.value) {
+    closeStarNetworkGenerator()
+    showAlert(
+      'Layout tools unavailable',
+      'Reset or stop the simulation before changing the network layout.'
+    )
+    return
+  }
+
+  try {
+    const centerName = projectData.value.net.nodes.find(node => node.id === options.centerNodeId)?.name
+    const result = generateStarNetwork(projectData.value.net, options)
+
+    if (
+      selectedItem.value?.id === result.removedNode.id
+      || selectedItem.value?.id === result.removedEdge.id
+    ) {
+      handleSelect(null, null)
+    }
+
+    closeStarNetworkGenerator()
+    addLog(
+      'success',
+      `Generated a star with ${result.generatedNodes.length} peripheral nodes around ${centerName}`,
+      'Layout Tools'
+    )
+  } catch (error) {
+    closeStarNetworkGenerator()
+    showAlert('Unable to generate star network', error.message)
+  }
+}
+
+function openGraphNetworkGenerator() {
+  if (hasSimulationRun.value) {
+    showAlert(
+      'Layout tools unavailable',
+      'Reset or stop the simulation before changing the network layout.'
+    )
+    return
+  }
+  showGraphNetworkDialog.value = true
+}
+
+function closeGraphNetworkGenerator() {
+  showGraphNetworkDialog.value = false
+}
+
+function handleGenerateGraphNetwork(options) {
+  if (hasSimulationRun.value) {
+    closeGraphNetworkGenerator()
+    showAlert(
+      'Layout tools unavailable',
+      'Reset or stop the simulation before changing the network layout.'
+    )
+    return
+  }
+
+  try {
+    const result = generateGraphNetwork(projectData.value.net, options)
+    const removedIds = new Set([
+      ...result.removedNodes.map(node => node.id),
+      result.removedEdge.id
+    ])
+    if (removedIds.has(selectedItem.value?.id)) {
+      handleSelect(null, null)
+    }
+
+    const topologyDescription = result.topology === GRAPH_TOPOLOGIES.GRID
+      ? `${result.summary.xCount} by ${result.summary.yCount} grid`
+      : `${result.generatedNodes.length}-node all-to-all network`
+    closeGraphNetworkGenerator()
+    addLog('success', `Generated a ${topologyDescription}`, 'Layout Tools')
+  } catch (error) {
+    closeGraphNetworkGenerator()
+    showAlert('Unable to generate graph network', error.message)
+  }
+}
+
 
 function handleMenu(action) {
   showMenu.value = false
@@ -1219,6 +1319,8 @@ onUnmounted(() => {
         @clear-logs="clearLogs"
         @update-description="projectData.description = $event"
         @open-repeater-chain-generator="openRepeaterChainGenerator"
+        @open-star-network-generator="openStarNetworkGenerator"
+        @open-graph-network-generator="openGraphNetworkGenerator"
       />
     </div>
 
@@ -1228,6 +1330,22 @@ onUnmounted(() => {
       :edges="projectData.net.edges"
       @confirm="handleGenerateRepeaterChain"
       @cancel="closeRepeaterChainGenerator"
+    />
+
+    <StarNetworkDialog
+      :show="showStarNetworkDialog"
+      :nodes="projectData.net.nodes"
+      :edges="projectData.net.edges"
+      @confirm="handleGenerateStarNetwork"
+      @cancel="closeStarNetworkGenerator"
+    />
+
+    <GraphNetworkDialog
+      :show="showGraphNetworkDialog"
+      :nodes="projectData.net.nodes"
+      :edges="projectData.net.edges"
+      @confirm="handleGenerateGraphNetwork"
+      @cancel="closeGraphNetworkGenerator"
     />
 
     <!-- Open Project Dialog Component -->

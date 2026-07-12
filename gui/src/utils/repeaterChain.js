@@ -1,17 +1,16 @@
 import Edge from '../models/Edge'
 import Node from '../models/Node'
-import { generateUUid, setEdgeCorrectNodeOrder } from './Utils'
+import {
+  cloneEdgeData,
+  cloneNodeData,
+  createIdGenerator,
+  edgeHasNode,
+  isMapPosition,
+  normalizeEdges
+} from './layoutTemplates'
 
 const MIN_REPEATER_COUNT = 1
 const MAX_REPEATER_COUNT = 100
-
-function endpointId(endpoint) {
-  return endpoint?.id ?? endpoint
-}
-
-function edgeHasNode(edge, nodeId) {
-  return endpointId(edge.source) === nodeId || endpointId(edge.target) === nodeId
-}
 
 function resolveSelection(net, options) {
   if (!net || !Array.isArray(net.nodes) || !Array.isArray(net.edges)) {
@@ -88,7 +87,7 @@ function resolveSelection(net, options) {
     }
   }
 
-  if (!isPosition(startNode.position) || !isPosition(endNode.position)) {
+  if (!isMapPosition(startNode.position) || !isMapPosition(endNode.position)) {
     return {
       valid: false,
       error: 'The start and end nodes must have valid map positions.'
@@ -109,12 +108,6 @@ function resolveSelection(net, options) {
   }
 }
 
-function isPosition(position) {
-  return Array.isArray(position)
-    && position.length === 2
-    && position.every(coordinate => Number.isFinite(coordinate))
-}
-
 /**
  * Validate the selections for a repeater-chain transformation.
  *
@@ -125,113 +118,6 @@ function isPosition(position) {
 export function validateRepeaterChain(net, options) {
   const { valid, error } = resolveSelection(net, options)
   return { valid, error }
-}
-
-function deepClone(value, seen = new WeakMap()) {
-  if (value === null || typeof value !== 'object') return value
-  if (seen.has(value)) return seen.get(value)
-
-  if (value instanceof Date) return new Date(value.getTime())
-  if (value instanceof RegExp) return new RegExp(value.source, value.flags)
-
-  if (value instanceof Map) {
-    const clone = new Map()
-    seen.set(value, clone)
-    value.forEach((item, key) => clone.set(deepClone(key, seen), deepClone(item, seen)))
-    return clone
-  }
-
-  if (value instanceof Set) {
-    const clone = new Set()
-    seen.set(value, clone)
-    value.forEach(item => clone.add(deepClone(item, seen)))
-    return clone
-  }
-
-  const clone = Array.isArray(value)
-    ? []
-    : Object.create(Object.getPrototypeOf(value))
-  seen.set(value, clone)
-
-  Reflect.ownKeys(value).forEach(key => {
-    if (Array.isArray(value) && key === 'length') return
-
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if ('value' in descriptor) {
-      descriptor.value = deepClone(descriptor.value, seen)
-    }
-    Object.defineProperty(clone, key, descriptor)
-  })
-
-  return clone
-}
-
-function collectUsedIds(net) {
-  const ids = new Set()
-  const addId = item => {
-    if (item?.id != null) ids.add(item.id)
-  }
-
-  net.nodes.forEach(node => {
-    addId(node)
-    node.data?.slots?.forEach(addId)
-    node.data?.protocols?.forEach(addId)
-  })
-  net.edges.forEach(edge => {
-    addId(edge)
-    edge.data?.protocols?.forEach(addId)
-  })
-  net.protocols?.forEach(addId)
-
-  return ids
-}
-
-function createIdGenerator(net) {
-  const usedIds = collectUsedIds(net)
-
-  return prefix => {
-    const generatedId = generateUUid(prefix)
-    let candidate = generatedId
-    let suffix = 2
-
-    while (usedIds.has(candidate)) {
-      candidate = `${generatedId}_${suffix}`
-      suffix += 1
-    }
-
-    usedIds.add(candidate)
-    return candidate
-  }
-}
-
-function cloneNodeData(templateData, nextId) {
-  const data = deepClone(templateData || {})
-
-  if (Array.isArray(data.slots)) {
-    data.slots.forEach(slot => {
-      if (slot && typeof slot === 'object') slot.id = nextId('slot')
-    })
-  }
-
-  if (Array.isArray(data.protocols)) {
-    data.protocols.forEach(protocol => {
-      if (protocol && typeof protocol === 'object') protocol.id = nextId('protocol')
-    })
-  }
-
-  return data
-}
-
-function cloneEdgeData(templateData, nextId) {
-  const data = deepClone(templateData || {})
-
-  if (Array.isArray(data.protocols)) {
-    data.protocols.forEach(protocol => {
-      if (protocol && typeof protocol === 'object') protocol.id = nextId('protocol')
-    })
-  }
-
-  return data
 }
 
 /**
@@ -306,7 +192,7 @@ export function generateRepeaterChain(net, options) {
     ...net.nodes.slice(templateNodeIndex + 1)
   ]
 
-  generatedEdges.forEach(edge => setEdgeCorrectNodeOrder(edge, nodes))
+  normalizeEdges(generatedEdges, nodes)
 
   const edges = [
     ...net.edges.slice(0, templateEdgeIndex),

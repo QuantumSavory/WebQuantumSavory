@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added a dismissible full-screen warning when the simulator is opened on a phone or other small viewport.
+- Added template-driven star, 2D grid, and all-to-all network layout helpers with deterministic geometry and 1-based clone names.
 - Added a default-on repeater-chain option for a direct virtual edge between the endpoints and stabilized generated edge ordering across save/reload.
 - Added an Export Script tools tab with highlighted, downloadable, backend-generated Julia for running the configured simulation, plus pedagogical animation and protocol-visualization recipes.
 - Replaced UI icon fonts, hand-drawn control artwork, and plain icon glyphs with semantically selected Lucide icons, including PrimeVue and JSON viewer controls, while retaining MapLibre's native navigation controls.
