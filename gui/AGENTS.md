@@ -26,6 +26,8 @@
 - Development API calls default to `http://localhost:8000`; production builds default to the browser origin. `VITE_API_BASE_URL` overrides both when a separate API host is intentional.
 - Runtime API metadata supplies available background, slot, and protocol types. Protocols are grouped as `node`, `edge`, or `floating`; do not replace this with a frontend-only catalog.
 - In memory, edges reference `Node` instances. Serialized projects use source and target node IDs. A project-schema change must update serialization, deserialization, import validation, demos, backend payload minimization, and relevant tests together.
+- A node's position in `net.nodes` is its user-visible, 1-based simulator ID; its string `Node.id` and object identity are durable. Reorder the array in place, preserve selection/map/edge references, and re-normalize each edge so its source is the lower-index endpoint.
+- MapLibre takes marker elements out of Vue's normal DOM tree. Keep `BaseMap`'s marker-component render order stable and decoupled from simulator node order; changing that render order can make Vue move MapLibre-owned elements and abort other reactive updates.
 - `App.vue` strips UI-only and read-only slot/protocol fields before sending data to the API. Do not submit saved UI state directly to the backend.
 - Projects, the user UUID, panel state, and view preferences use established `localStorage` keys. Preserve keys and migration/rebuild behavior so existing projects remain readable.
 - Switching, importing, resetting, or deleting a project must stop both polling loops, reset simulation state, close stale result windows, and remove obsolete entanglement overlays.

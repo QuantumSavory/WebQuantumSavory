@@ -9,14 +9,39 @@
       <div v-if="!nodes.length" class="empty-list">No nodes</div>
       <div v-else style="max-height: 20vh; overflow-y: auto;">
         <div
-          v-for="node in nodes"
+          v-for="(node, index) in nodes"
           :key="node.id"
           class="node-list-item"
           :class="{ selected: selectedNode === node }"
+          :data-node-id="node.id"
+          :data-node-index="index + 1"
           @click="handleSelect(node)"
         >
-          <span class="node-list-name">{{ node.name }}</span>
-          <span class="node-list-slotcount">{{ node.data.slots.length }} <span style="font-size: 0.8rem; opacity: 0.6;">slots</span></span>
+          <span class="node-list-identity">
+            <NodeIndex :index="index" />
+            <span class="node-list-name">{{ node.name }}</span>
+          </span>
+          <span class="node-list-details">
+            <span class="node-list-slotcount">{{ node.data.slots.length }} <span style="font-size: 0.8rem; opacity: 0.6;">slots</span></span>
+            <span class="node-order-controls" @click.stop>
+              <button
+                class="node-order-button noborder"
+                type="button"
+                :aria-label="`Move ${node.name} up`"
+                :disabled="index === 0 || isReorderingLocked"
+                v-tooltip.top="reorderTooltip(index === 0)"
+                @click="moveNode(index, index - 1)"
+              ><i class="pi pi-chevron-up" aria-hidden="true"></i></button>
+              <button
+                class="node-order-button noborder"
+                type="button"
+                :aria-label="`Move ${node.name} down`"
+                :disabled="index === nodes.length - 1 || isReorderingLocked"
+                v-tooltip.top="reorderTooltip(index === nodes.length - 1)"
+                @click="moveNode(index, index + 1)"
+              ><i class="pi pi-chevron-down" aria-hidden="true"></i></button>
+            </span>
+          </span>
         </div>
       </div>
       <div class="action-buttons">
@@ -28,8 +53,9 @@
 
 
 <script setup>
-import { defineProps, defineEmits } from 'vue'
+import { computed } from 'vue'
 import BasePanel from './BasePanel.vue'
+import NodeIndex from './NodeIndex.vue'
 
 const props = defineProps({
   nodes: {
@@ -39,9 +65,15 @@ const props = defineProps({
   selectedNode: {
     type: Object,
     default: null
+  },
+  simulationState: {
+    type: Object,
+    default: () => ({})
   }
 })
-const emit = defineEmits(['select', 'addNewNode', 'collapsed-changed'])
+const emit = defineEmits(['select', 'addNewNode', 'move-node', 'collapsed-changed'])
+
+const isReorderingLocked = computed(() => props.simulationState?.hasSimulationRun || false)
 
 function handleSelect(node) {
   emit('select', node)
@@ -49,6 +81,16 @@ function handleSelect(node) {
 
 function handleNewNode() {
   emit('addNewNode')
+}
+
+function moveNode(fromIndex, toIndex) {
+  emit('move-node', fromIndex, toIndex)
+}
+
+function reorderTooltip(atBoundary) {
+  if (isReorderingLocked.value) return 'Reset the simulation to reorder nodes'
+  if (atBoundary) return 'This node cannot move farther in that direction'
+  return 'Change this node\'s ID by moving it in the list'
 }
 </script>
 
@@ -81,12 +123,63 @@ function handleNewNode() {
   background: var(--p-primary-700);
 }
 
+.node-list-identity,
+.node-list-details,
+.node-order-controls {
+  display: flex;
+  align-items: center;
+}
+
+.node-list-identity {
+  gap: 7px;
+  min-width: 0;
+}
+
+.node-list-details {
+  flex-shrink: 0;
+  gap: 5px;
+}
+
+.node-order-controls {
+  gap: 1px;
+}
+
+.node-order-button {
+  align-items: center;
+  background: transparent;
+  border-radius: 3px;
+  color: inherit;
+  display: inline-flex;
+  font-size: 0.65rem;
+  height: 20px;
+  justify-content: center;
+  padding: 0;
+  width: 18px;
+}
+
+.node-order-button:not(:disabled):hover {
+  background: rgb(67 69 172 / 15%);
+}
+
+.node-list-item.selected .node-order-button:not(:disabled):hover {
+  background: rgb(255 255 255 / 20%);
+}
+
+.node-order-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.25;
+}
+
+.node-list-item.selected :deep(.node-index) {
+  color: #e0e0ff;
+}
+
 .node-list-name {
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 80%;
+  max-width: 170px;
 }
 
 .node-list-type {
@@ -104,4 +197,4 @@ function handleNewNode() {
   padding: 10px 18px;
   text-align: center;
 }
-</style> 
+</style>
