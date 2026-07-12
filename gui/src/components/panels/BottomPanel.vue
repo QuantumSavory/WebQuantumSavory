@@ -247,16 +247,11 @@
       data-testid="bottom-panel-width-resize-target"
       @keydown="handleResizeKeydown('width', $event)"
     />
-
-    <template #knob>
-      <Grip class="resize-knob" :size="15" aria-hidden="true" />
-    </template>
   </ResizeBounding>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Grip } from '@lucide/vue'
 import ResizeBounding from 'vue3-resize-bounding'
 import BasePanel from './BasePanel.vue'
 import DescriptionPanel from './DescriptionPanel.vue'
@@ -397,8 +392,7 @@ const resizeOptions = {
     vertical: 'ns-resize'
   },
   knob: {
-    show: true,
-    normalHidden: false
+    show: false
   }
 }
 
@@ -562,6 +556,10 @@ onUnmounted(() => {
   position: relative;
 }
 
+.bottom-panel-resizer :deep(.resize-bounding__splitter) {
+  background: transparent;
+}
+
 .bottom-panel {
   width: 100%;
   height: 100%;
@@ -676,10 +674,6 @@ onUnmounted(() => {
   bottom: 18px;
   width: 4px;
   cursor: ew-resize;
-}
-
-.resize-knob {
-  color: #4345ac;
 }
 
 .layout-tools-tab-panel {

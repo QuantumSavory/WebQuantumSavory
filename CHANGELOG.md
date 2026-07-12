@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Made the bottom Tools panel resizable upward and to the right, with persistent dimensions, viewport-aware bounds, and compact collapse behavior.
+- Made the bottom Tools panel resizable upward and to the right with cursor-only border affordances, persistent dimensions, viewport-aware bounds, and compact collapse behavior.
 - Added a dismissible full-screen warning when the simulator is opened on a phone or other small viewport.
 - Added template-driven star, 2D grid, and all-to-all network layout helpers with deterministic geometry and 1-based clone names.
 - Added a default-on repeater-chain option for a direct virtual edge between the endpoints and stabilized generated edge ordering across save/reload.

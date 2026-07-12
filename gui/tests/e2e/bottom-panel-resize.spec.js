@@ -61,6 +61,28 @@ test.describe('Resizable bottom Tools panel', () => {
 
     const resizer = page.locator('#bottom-panel-resizer')
     const initial = await bounds(resizer)
+    const resizePanes = resizer.locator('[data-testid="resize-bounding-pane"]')
+
+    await expect(resizePanes).toHaveCount(2)
+    await expect(resizer.locator('[data-testid="resize-bounding-knob"]')).toHaveCount(0)
+
+    const paneDimensions = await resizePanes.evaluateAll(panes => (
+      panes.map((pane, index) => {
+        const { width, height } = pane.getBoundingClientRect()
+        return { index, width, height }
+      })
+    ))
+    const topPane = resizePanes.nth(paneDimensions.find(pane => pane.width > pane.height).index)
+    const rightPane = resizePanes.nth(paneDimensions.find(pane => pane.height > pane.width).index)
+
+    await topPane.hover()
+    await expect(topPane).toHaveCSS('cursor', 'ns-resize')
+    await expect(topPane.locator('[data-testid="resize-bounding-splitter"]'))
+      .toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+    await rightPane.hover()
+    await expect(rightPane).toHaveCSS('cursor', 'ew-resize')
+    await expect(rightPane.locator('[data-testid="resize-bounding-splitter"]'))
+      .toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
 
     await dragFrom(page, initial.x + initial.width / 2, initial.y + 1, 0, -120)
     const taller = await bounds(resizer)
