@@ -69,25 +69,47 @@
 
                 <div
                   class="param-value"
-                  :class="{ noInteraction: isGrayedParameter(param) && !isVariableAssigned(param) }"
+                  :class="{
+                    noInteraction: isGrayedParameter(param)
+                      && !isVariableAssigned(param)
+                      && !isVariablePickerOpen(param)
+                  }"
                 >
-                  <div v-if="isVariableAssigned(param)" class="variable-assignment">
+                  <div
+                    v-if="isVariableAssigned(param) || isVariablePickerOpen(param)"
+                    class="variable-assignment"
+                  >
                     <i class="pi pi-link" aria-hidden="true"></i>
                     <select
                       class="variable-selector"
-                      :value="param.value.id"
+                      :value="isVariableAssigned(param) ? param.value.id : ''"
                       :disabled="isEditingDisabled"
                       :aria-label="`Variable for ${param.name}`"
                       @change="assignVariable(param, $event.target.value)"
                     >
+                      <option v-if="!isVariableAssigned(param)" value="" disabled>
+                        Select a variable
+                      </option>
                       <option
-                        v-if="!assignedVariable(param)"
+                        v-else-if="!assignedVariable(param)"
                         :value="param.value.id"
                         disabled
                       >
                         Missing variable ({{ param.value.id }})
                       </option>
-                      <option v-for="variable in variables" :key="variable.id" :value="variable.id">
+                      <option
+                        v-else-if="!variableIsCompatible(param, assignedVariable(param))"
+                        :value="param.value.id"
+                        disabled
+                      >
+                        Incompatible variable: {{ assignedVariable(param).name }}
+                        ({{ getTypeOptionLabel(assignedVariable(param).type) }})
+                      </option>
+                      <option
+                        v-for="variable in compatibleVariables(param)"
+                        :key="variable.id"
+                        :value="variable.id"
+                      >
                         {{ variable.name }} ({{ getTypeOptionLabel(variable.type) }})
                       </option>
                     </select>
@@ -101,17 +123,21 @@
                   />
                 </div>
 
-                <button
-                  type="button"
-                  class="variable-binding-button noborder"
-                  :class="{ active: isVariableAssigned(param) }"
-                  :disabled="variableButtonDisabled(param)"
-                  :title="variableButtonTitle(param)"
-                  :aria-label="variableButtonLabel(param)"
-                  @click="toggleVariableAssignment(param)"
+                <span
+                  class="variable-binding-control"
+                  v-tooltip.top="variableButtonTitle(param)"
                 >
-                  <i :class="isVariableAssigned(param) ? 'pi pi-times' : 'pi pi-link'" aria-hidden="true"></i>
-                </button>
+                  <button
+                    type="button"
+                    class="variable-binding-button noborder"
+                    :class="{ active: isVariableAssigned(param) || isVariablePickerOpen(param) }"
+                    :disabled="variableButtonDisabled(param)"
+                    :aria-label="variableButtonLabel(param)"
+                    @click="toggleVariableAssignment(param)"
+                  >
+                    <i :class="isVariableAssigned(param) ? 'pi pi-times' : 'pi pi-link'" aria-hidden="true"></i>
+                  </button>
+                </span>
               </div>
           </div>
         </div>
@@ -122,7 +148,7 @@
 
 
 <script setup>
-import { computed } from 'vue'
+import { computed, shallowRef, watchEffect } from 'vue'
 import { api } from '../../utils/ApiConnector'
 import { VariableReference, isVariableReference } from '../../models/Variable'
 import {
@@ -130,6 +156,7 @@ import {
   isCodeType,
   isWildcardType,
   parameterTypeIsKnown,
+  parameterTypeSupportsVariableType,
   parseJuliaType,
   unknownParameterTypes
 } from '../../utils/parameterTypes'
@@ -170,6 +197,7 @@ const isEditingDisabled = computed(() => {
   return props.simulationState?.hasSimulationRun || false
 })
 const directParameterValues = new WeakMap()
+const variablePickerParameter = shallowRef(null)
 
 function toggleDetails(){
   emit('select', props.protocol)
@@ -255,10 +283,33 @@ function assignedVariable(param) {
   return props.variables.find(variable => variable.id === param.value.id) || null
 }
 
+function declaredParameterType(param) {
+  const protocolDefinition = api.getProtocolDefinition(props.category, props.protocol.type)
+  return protocolDefinition?.parameters?.find(definition => definition.field === param.name)?.type
+    ?? param.type
+}
+
+function variableIsCompatible(param, variable) {
+  return !!variable && parameterTypeSupportsVariableType(
+    declaredParameterType(param),
+    variable.type
+  )
+}
+
+function compatibleVariables(param) {
+  return props.variables.filter(variable => variableIsCompatible(param, variable))
+}
+
+function isVariablePickerOpen(param) {
+  return variablePickerParameter.value === param
+}
+
 function assignVariable(param, variableId) {
   if (isEditingDisabled.value) return
+  if (!compatibleVariables(param).some(variable => variable.id === variableId)) return
   if (!isVariableAssigned(param)) directParameterValues.set(param, param.value)
   param.value = new VariableReference(variableId)
+  variablePickerParameter.value = null
   delete param.error
   delete param.latex
 }
@@ -267,32 +318,46 @@ function clearVariableAssignment(param) {
   if (isEditingDisabled.value) return
   param.value = directParameterValues.has(param) ? directParameterValues.get(param) : null
   directParameterValues.delete(param)
+  if (isVariablePickerOpen(param)) variablePickerParameter.value = null
 }
 
 function toggleVariableAssignment(param) {
   if (isVariableAssigned(param)) {
     clearVariableAssignment(param)
-  } else if (props.variables.length > 0) {
-    assignVariable(param, props.variables[0].id)
+  } else if (isVariablePickerOpen(param)) {
+    variablePickerParameter.value = null
+  } else if (compatibleVariables(param).length > 0) {
+    variablePickerParameter.value = param
   }
 }
 
 function variableButtonDisabled(param) {
-  return isEditingDisabled.value || (!isVariableAssigned(param) && props.variables.length === 0)
+  return isEditingDisabled.value
+    || (!isVariableAssigned(param) && compatibleVariables(param).length === 0)
 }
 
 function variableButtonTitle(param) {
   if (isEditingDisabled.value) return 'Reset the simulation to edit protocol parameters'
   if (isVariableAssigned(param)) return 'Use a direct value'
-  if (props.variables.length === 0) return 'Create a variable in the Variables tab first'
-  return 'Set this parameter from a variable'
+  if (isVariablePickerOpen(param)) return 'Cancel choosing a variable'
+  if (compatibleVariables(param).length === 0) {
+    return props.variables.length === 0
+      ? 'Create a compatible variable in the Variables tab first'
+      : 'No variables have a type supported by this parameter'
+  }
+  return 'Choose a compatible variable for this parameter'
 }
 
 function variableButtonLabel(param) {
-  return isVariableAssigned(param)
-    ? `Use a direct value for ${param.name}`
-    : `Set ${param.name} from a variable`
+  if (isVariableAssigned(param)) return `Use a direct value for ${param.name}`
+  if (isVariablePickerOpen(param)) return `Cancel choosing a variable for ${param.name}`
+  return `Set ${param.name} from a variable`
 }
+
+watchEffect(() => {
+  const param = variablePickerParameter.value
+  if (param && compatibleVariables(param).length === 0) variablePickerParameter.value = null
+})
 
 function deleteProtocol(  ){
   emit('delete', props.protocol)
@@ -446,7 +511,7 @@ button.protocol-header-action:hover{
   width: 100%;
 }
 
-.columnParamRow .variable-binding-button{
+.columnParamRow .variable-binding-control{
   position: absolute;
   top: 0;
   right: 0;
@@ -486,10 +551,16 @@ button.protocol-header-action:hover{
   max-width: 100%;
 }
 
-.variable-binding-button {
+.variable-binding-control {
   flex: 0 0 25px;
   width: 25px;
   height: 25px;
+  display: inline-flex;
+}
+
+.variable-binding-button {
+  width: 100%;
+  height: 100%;
   padding: 0;
   border-radius: 4px;
   color: #777;
