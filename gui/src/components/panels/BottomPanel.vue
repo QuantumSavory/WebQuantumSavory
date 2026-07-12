@@ -181,6 +181,8 @@
           <LayoutToolsPanel
             :disabled="helpersDisabled"
             @open-repeater-chain-generator="emit('open-repeater-chain-generator')"
+            @open-star-network-generator="emit('open-star-network-generator')"
+            @open-graph-network-generator="emit('open-graph-network-generator')"
           />
         </section>
 
@@ -264,6 +266,8 @@ const emit = defineEmits([
   'log-click',
   'update-description',
   'open-repeater-chain-generator',
+  'open-star-network-generator',
+  'open-graph-network-generator',
   'collapsed-changed'
 ])
 

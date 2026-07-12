@@ -2,12 +2,11 @@
   <div class="layout-tools">
     <section class="layout-tools-card docs-card" aria-labelledby="layout-tools-docs-title">
       <h3 id="layout-tools-docs-title" class="card-title">
-        {{ showingHelperDocs ? 'Repeater Chain Generator' : 'Layout controls' }}
+        {{ activeHelper ? activeHelper.label : 'Layout controls' }}
       </h3>
 
-      <p v-if="showingHelperDocs" class="helper-description" aria-live="polite">
-        Create an evenly spaced chain between two endpoints by cloning a configured
-        repeater node and its template edge.
+      <p v-if="activeHelper" class="helper-description" aria-live="polite">
+        {{ activeHelper.description }}
       </p>
 
       <ul v-else class="layout-instructions" aria-live="polite">
@@ -22,18 +21,20 @@
     <section class="layout-tools-card helpers-card" aria-labelledby="layout-tools-helpers-title">
       <h3 id="layout-tools-helpers-title" class="card-title">Helpers</h3>
       <button
+        v-for="helper in helpers"
+        :key="helper.id"
         type="button"
         class="helper-button"
         :disabled="disabled"
         :aria-describedby="disabled ? 'layout-tools-disabled-help' : undefined"
-        @mouseenter="showHelperDocs"
+        @mouseenter="activeHelper = helper"
         @mouseleave="showDefaultDocs"
-        @focus="showHelperDocs"
+        @focus="activeHelper = helper"
         @blur="showDefaultDocs"
-        @click="emit('open-repeater-chain-generator')"
+        @click="emit(helper.event)"
       >
-        <Waypoints :size="16" aria-hidden="true" />
-        Repeater Chain Generator
+        <component :is="helper.icon" :size="16" aria-hidden="true" />
+        {{ helper.label }}
       </button>
       <p v-if="disabled" id="layout-tools-disabled-help" class="disabled-help">
         Layout helpers are unavailable after a simulation has started.
@@ -44,7 +45,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { Waypoints } from '@lucide/vue'
+import { Network, Star, Waypoints } from '@lucide/vue'
 
 defineProps({
   disabled: {
@@ -53,16 +54,40 @@ defineProps({
   }
 })
 
-const emit = defineEmits(['open-repeater-chain-generator'])
+const emit = defineEmits([
+  'open-repeater-chain-generator',
+  'open-star-network-generator',
+  'open-graph-network-generator'
+])
 
-const showingHelperDocs = ref(false)
+const helpers = [
+  {
+    id: 'repeater-chain',
+    label: 'Repeater Chain Generator',
+    description: 'Create an evenly spaced chain between two endpoints by cloning a configured repeater node and its template edge.',
+    icon: Waypoints,
+    event: 'open-repeater-chain-generator'
+  },
+  {
+    id: 'star-network',
+    label: 'Star Network Generator',
+    description: 'Arrange up to 12 configured peripheral nodes evenly around a selected center node.',
+    icon: Star,
+    event: 'open-star-network-generator'
+  },
+  {
+    id: 'graph-network',
+    label: 'Graph Network Generator',
+    description: 'Replace isolated templates with a deterministic 2D grid or an all-to-all network.',
+    icon: Network,
+    event: 'open-graph-network-generator'
+  }
+]
 
-function showHelperDocs() {
-  showingHelperDocs.value = true
-}
+const activeHelper = ref(null)
 
 function showDefaultDocs() {
-  showingHelperDocs.value = false
+  activeHelper.value = null
 }
 </script>
 
@@ -71,7 +96,7 @@ function showDefaultDocs() {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(14rem, 1fr);
   gap: 10px;
-  height: 120px;
+  min-height: 150px;
   color: #2b2b2b;
 }
 
@@ -135,6 +160,7 @@ kbd {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  gap: 5px;
 }
 
 .helper-button {
@@ -170,7 +196,7 @@ kbd {
 @media (max-width: 620px) {
   .layout-tools {
     grid-template-columns: 1fr;
-    height: 230px;
+    min-height: 300px;
   }
 
   .layout-instructions {
