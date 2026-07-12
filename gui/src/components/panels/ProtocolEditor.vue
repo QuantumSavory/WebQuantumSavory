@@ -533,9 +533,6 @@ button.protocol-header-action:hover{
   display: inline-block;
   margin-left: 2px;
   color: #f00;
-  font-size: 8px;
-  position: relative;
-  top: -1px;
 }
 
 .variable-assignment {

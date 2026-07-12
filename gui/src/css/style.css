@@ -108,6 +108,9 @@ button:hover{
 }
 
 button.noborder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: solid 1px transparent;
   background: transparent;
   padding: 0px;

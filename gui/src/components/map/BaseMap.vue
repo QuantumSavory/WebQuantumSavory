@@ -1,8 +1,7 @@
 <script setup>
-import { h, ref, render, onMounted, onUnmounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { Compass, Minus, Plus } from '@lucide/vue'
 import NodeMarker from './NodeMarker.vue'
 import EdgeLine from './EdgeLine.vue'
 import StateNode from './StateNode.vue'
@@ -21,33 +20,6 @@ const mapContainer = ref(null)
 const map = ref(null)
 const isMapLoaded = ref(false)
 const shiftDown = ref(false);
-const navigationIconMounts = []
-
-function mountNavigationIcons() {
-  const controls = [
-    ['.maplibregl-ctrl-zoom-in', Plus],
-    ['.maplibregl-ctrl-zoom-out', Minus],
-    ['.maplibregl-ctrl-compass', Compass]
-  ]
-
-  controls.forEach(([selector, icon]) => {
-    const mountPoint = mapContainer.value
-      ?.querySelector(`${selector} .maplibregl-ctrl-icon`)
-    if (!mountPoint) return
-
-    mountPoint.classList.add('lucide-navigation-icon')
-    render(h(icon, {
-      size: 19,
-      'stroke-width': 2,
-      'aria-hidden': 'true'
-    }), mountPoint)
-    navigationIconMounts.push(mountPoint)
-  })
-}
-
-function unmountNavigationIcons() {
-  navigationIconMounts.splice(0).forEach(mountPoint => render(null, mountPoint))
-}
 
 // Connection state
 const sourceNode = ref(null)
@@ -296,7 +268,6 @@ onMounted(() => {
 
     // Add navigation controls
     map.value.addControl(new maplibregl.NavigationControl(), 'bottom-left')
-    mountNavigationIcons()
 
     // Wait for map to load before allowing markers and edges
     map.value.on('load', () => {
@@ -398,7 +369,6 @@ onBeforeUnmount(() => {
 
 
 onUnmounted(() => {
-  unmountNavigationIcons()
   if (map.value) {
     map.value.remove()
   }
@@ -527,14 +497,4 @@ defineExpose({
   position: relative;
 }
 
-:global(.maplibregl-ctrl .lucide-navigation-icon) {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-image: none !important;
-}
-
-:global(.maplibregl-ctrl .lucide-navigation-icon .lucide) {
-  color: #333;
-}
 </style>

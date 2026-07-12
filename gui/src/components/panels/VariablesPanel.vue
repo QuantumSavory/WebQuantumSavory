@@ -259,10 +259,8 @@ function variableNameError(variable) {
 }
 
 .delete-variable-button {
-  width: 28px;
-  height: 28px;
+  width: 25px;
   margin-top: 17px;
-  padding: 0;
   color: #666;
 }
 

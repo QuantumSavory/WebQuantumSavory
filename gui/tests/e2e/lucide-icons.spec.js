@@ -77,14 +77,21 @@ test('renders Lucide artwork across application and third-party controls', async
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
 
   await expect(page.getByRole('button', { name: 'Menu' }).locator('.lucide-menu')).toBeVisible()
-  await expect(page.locator('.maplibregl-ctrl-zoom-in .lucide-plus')).toBeVisible()
-  await expect(page.locator('.maplibregl-ctrl-zoom-out .lucide-minus')).toBeVisible()
-  await expect(page.locator('.maplibregl-ctrl-compass .lucide-compass')).toBeVisible()
+  for (const selector of [
+    '.maplibregl-ctrl-zoom-in',
+    '.maplibregl-ctrl-zoom-out',
+    '.maplibregl-ctrl-compass',
+  ]) {
+    const mapControlIcon = page.locator(`${selector} .maplibregl-ctrl-icon`)
+    await expect(mapControlIcon).toBeVisible()
+    await expect(mapControlIcon.locator('.lucide')).toHaveCount(0)
+    await expect(mapControlIcon).not.toHaveCSS('background-image', 'none')
+  }
   await expect(page.locator('.settings-toggle-btn .lucide-settings-2')).toBeVisible()
   await expect(page.locator('.stop-btn .lucide-square')).toBeVisible()
 
   await page.getByRole('tab', { name: 'Layout Tools' }).click()
-  await expect(page.getByRole('button', { name: 'Repeater Chain Generator' }).locator('.lucide-route')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Repeater Chain Generator' }).locator('.lucide-waypoints')).toBeVisible()
 
   await page.getByRole('button', { name: 'Menu' }).click()
   const mainMenu = page.getByRole('menubar')

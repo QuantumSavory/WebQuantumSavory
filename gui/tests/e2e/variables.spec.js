@@ -97,6 +97,17 @@ function parameterRow(editor, name) {
   return editor.locator('.param-item').filter({ hasText: name })
 }
 
+async function expectIconCentered(button) {
+  const buttonBox = await button.boundingBox()
+  const iconBox = await button.locator('.lucide').boundingBox()
+  if (!buttonBox || !iconBox) throw new Error('Expected the button and icon to be visible')
+
+  expect(Math.abs(iconBox.x + iconBox.width / 2 - (buttonBox.x + buttonBox.width / 2)))
+    .toBeLessThanOrEqual(1)
+  expect(Math.abs(iconBox.y + iconBox.height / 2 - (buttonBox.y + buttonBox.height / 2)))
+    .toBeLessThanOrEqual(1)
+}
+
 async function setCumulativeTargetTime(page, value) {
   await page.evaluate(targetTime => {
     const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
@@ -149,6 +160,10 @@ test.describe('Global protocol variables', () => {
     const valueInput = variableRow.locator('.variable-value-input input[type="number"]')
     const deleteButton = variableRow.locator('.delete-variable-button')
 
+    await expect(deleteButton).toHaveCSS('width', '25px')
+    await expect(deleteButton).toHaveCSS('height', '25px')
+    await expectIconCentered(deleteButton)
+
     await nameInput.fill('max_rounds')
     await typeSelect.selectOption('Int64')
     await valueInput.fill('7')
@@ -164,6 +179,7 @@ test.describe('Global protocol variables', () => {
     const roundsRow = parameterRow(editor, 'rounds')
     const bindingButton = roundsRow.getByRole('button', { name: 'Set rounds from a variable' })
     await expect(bindingButton).toBeEnabled()
+    await expectIconCentered(bindingButton)
     await bindingButton.click()
 
     const variableSelector = roundsRow.getByRole('combobox', { name: 'Variable for rounds' })
@@ -236,6 +252,15 @@ test.describe('Global protocol variables', () => {
     await expect(variableSelector).toBeEnabled()
     await expect(roundsRow.getByRole('button', { name: 'Use a direct value for rounds' })).toBeEnabled()
     await expect(deleteButton).toBeDisabled()
+
+    await page.evaluate(() => {
+      const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      setupState.projectData.net.edges[0].data.protocols[0].parameters[0].type = 'UnsupportedType'
+    })
+    const unknownTypeIndicator = roundsRow.locator('.unknown-type-indicator')
+    await expect(unknownTypeIndicator).toBeVisible()
+    await expect(unknownTypeIndicator).toHaveCSS('position', 'static')
+    await expect(unknownTypeIndicator).toHaveCSS('top', 'auto')
   })
 
   test('filters the picker, explains availability, and preserves incompatible assignments', async ({ page }) => {
