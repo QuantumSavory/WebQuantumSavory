@@ -1,6 +1,6 @@
 import Edge from '../models/Edge'
 import Node from '../models/Node'
-import { generateUUid } from './Utils'
+import { generateUUid, setEdgeCorrectNodeOrder } from './Utils'
 
 const MIN_REPEATER_COUNT = 1
 const MAX_REPEATER_COUNT = 100
@@ -26,7 +26,8 @@ function resolveSelection(net, options) {
     endNodeId,
     templateNodeId,
     templateEdgeId,
-    repeaterCount
+    repeaterCount,
+    createVirtualEdge = true
   } = options || {}
 
   const startNode = net.nodes.find(node => node.id === startNodeId)
@@ -65,6 +66,13 @@ function resolveSelection(net, options) {
     }
   }
 
+  if (typeof createVirtualEdge !== 'boolean') {
+    return {
+      valid: false,
+      error: 'The end-to-end virtual edge option must be enabled or disabled.'
+    }
+  }
+
   if (!edgeHasNode(templateEdge, templateNodeId)) {
     return {
       valid: false,
@@ -95,7 +103,8 @@ function resolveSelection(net, options) {
       endNode,
       templateNode,
       templateEdge,
-      repeaterCount
+      repeaterCount,
+      createVirtualEdge
     }
   }
 }
@@ -110,7 +119,7 @@ function isPosition(position) {
  * Validate the selections for a repeater-chain transformation.
  *
  * @param {Object} net Network object containing `nodes` and `edges` arrays.
- * @param {Object} options Selected entity IDs and `repeaterCount`.
+ * @param {Object} options Selected entity IDs, `repeaterCount`, and optional `createVirtualEdge`.
  * @returns {{ valid: boolean, error: string|null }}
  */
 export function validateRepeaterChain(net, options) {
@@ -230,7 +239,7 @@ function cloneEdgeData(templateData, nextId) {
  * The replacement arrays are completely built before the network is mutated.
  *
  * @param {Object} net Network object containing `nodes` and `edges` arrays.
- * @param {Object} options Selected entity IDs and `repeaterCount`.
+ * @param {Object} options Selected entity IDs, `repeaterCount`, and optional `createVirtualEdge`.
  * @returns {Object} Generated and removed entities plus a logging summary.
  * @throws {Error} When the selections are no longer valid.
  */
@@ -243,7 +252,8 @@ export function generateRepeaterChain(net, options) {
     endNode,
     templateNode,
     templateEdge,
-    repeaterCount
+    repeaterCount,
+    createVirtualEdge
   } = validation.selection
   const nextId = createIdGenerator(net)
   const generatedNodes = []
@@ -264,9 +274,9 @@ export function generateRepeaterChain(net, options) {
   }
 
   const chainNodes = [startNode, ...generatedNodes, endNode]
-  const generatedEdges = []
+  const chainEdges = []
   for (let index = 0; index < chainNodes.length - 1; index += 1) {
-    generatedEdges.push(new Edge({
+    chainEdges.push(new Edge({
       id: nextId('edge'),
       source: chainNodes[index],
       target: chainNodes[index + 1],
@@ -275,6 +285,19 @@ export function generateRepeaterChain(net, options) {
     }))
   }
 
+  const virtualEdge = createVirtualEdge
+    ? new Edge({
+        id: nextId('edge'),
+        source: startNode,
+        target: endNode,
+        data: { type: 'connection', protocols: [] },
+        isLogic: true
+      })
+    : null
+  const generatedEdges = virtualEdge
+    ? [...chainEdges, virtualEdge]
+    : chainEdges
+
   const templateNodeIndex = net.nodes.indexOf(templateNode)
   const templateEdgeIndex = net.edges.indexOf(templateEdge)
   const nodes = [
@@ -282,6 +305,9 @@ export function generateRepeaterChain(net, options) {
     ...generatedNodes,
     ...net.nodes.slice(templateNodeIndex + 1)
   ]
+
+  generatedEdges.forEach(edge => setEdgeCorrectNodeOrder(edge, nodes))
+
   const edges = [
     ...net.edges.slice(0, templateEdgeIndex),
     ...generatedEdges,
@@ -293,6 +319,8 @@ export function generateRepeaterChain(net, options) {
   return {
     generatedNodes,
     generatedEdges,
+    chainEdges,
+    virtualEdge,
     removedNode: templateNode,
     removedEdge: templateEdge,
     summary: {
@@ -301,6 +329,8 @@ export function generateRepeaterChain(net, options) {
       templateNodeId: templateNode.id,
       templateEdgeId: templateEdge.id,
       repeaterCount,
+      createVirtualEdge,
+      virtualEdgeId: virtualEdge?.id ?? null,
       generatedNodeIds: generatedNodes.map(node => node.id),
       generatedEdgeIds: generatedEdges.map(edge => edge.id)
     }
