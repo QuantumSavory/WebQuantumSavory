@@ -108,6 +108,7 @@ test.describe('Bottom panel log counters', () => {
     await expect(logsTab.locator('.log-count-badge')).toHaveCount(expectedBadges.length)
     await expect(panelHeader.locator('.log-count-badge')).toHaveCount(0)
     await expect(page.locator('#bottom-panel-variables-tab .log-count-badge')).toHaveCount(0)
+    await expect(page.locator('#bottom-panel-description-tab .log-count-badge')).toHaveCount(0)
     await expect(page.locator('#bottom-panel-states-zoo-tab .log-count-badge')).toHaveCount(0)
     await expect(page.locator('#bottom-panel-layout-tools-tab .log-count-badge')).toHaveCount(0)
     await expect(page.locator('#bottom-panel-export-script-tab .log-count-badge')).toHaveCount(0)
@@ -128,6 +129,7 @@ test.describe('Bottom panel log counters', () => {
 
   test('retains roving focus and keyboard tab selection', async ({ page }) => {
     const logsTab = page.locator('#bottom-panel-logs-tab')
+    const descriptionTab = page.locator('#bottom-panel-description-tab')
     const variablesTab = page.locator('#bottom-panel-variables-tab')
     const statesZooTab = page.locator('#bottom-panel-states-zoo-tab')
     const layoutToolsTab = page.locator('#bottom-panel-layout-tools-tab')
@@ -135,6 +137,7 @@ test.describe('Bottom panel log counters', () => {
 
     await expect(page.locator('#logsPanel .bottom-tabs').getByRole('tab')).toHaveText([
       /Logs/,
+      'Description',
       'Variables',
       'States Zoo',
       'Layout Tools',
@@ -142,12 +145,24 @@ test.describe('Bottom panel log counters', () => {
     ])
     await expect(logsTab).toHaveAttribute('aria-selected', 'true')
     await expect(logsTab).toHaveAttribute('tabindex', '0')
+    await expect(descriptionTab).toHaveAttribute('tabindex', '-1')
     await expect(variablesTab).toHaveAttribute('tabindex', '-1')
     await expect(statesZooTab).toHaveAttribute('tabindex', '-1')
     await expect(layoutToolsTab).toHaveAttribute('tabindex', '-1')
     await expect(exportScriptTab).toHaveAttribute('tabindex', '-1')
 
     await logsTab.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(descriptionTab).toBeFocused()
+    await expect(descriptionTab).toHaveAttribute('aria-selected', 'true')
+    await expect(descriptionTab).toHaveAttribute('tabindex', '0')
+    await expect(descriptionTab).toHaveAttribute('aria-controls', 'bottom-panel-description-content')
+    await expect(page.locator('#bottom-panel-description-content')).toBeVisible()
+    await expect(page.locator('#bottom-panel-description-content')).toHaveAttribute(
+      'aria-labelledby',
+      'bottom-panel-description-tab',
+    )
+
     await page.keyboard.press('ArrowRight')
     await expect(variablesTab).toBeFocused()
     await expect(variablesTab).toHaveAttribute('aria-selected', 'true')

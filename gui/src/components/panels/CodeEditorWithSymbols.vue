@@ -9,13 +9,10 @@
       :aria-label="latexExpression ? 'Edit symbolic expression' : 'Enter symbolic expression'"
       @click="emit('edit')"
     >
-      <vue-latex
+      <span
         v-if="latexExpression"
-        :expression="latexExpression"
-        display-mode
-        :fontsize="10"
-        :options="latexOptions"
         class="latex-wrap"
+        v-html="renderedLatex"
       />
       <span v-else :class="{ 'symbolic-placeholder': !modelValue }">
         {{ modelValue || 'default' }}
@@ -49,13 +46,9 @@
 
       <div
         v-if="showLatex && latexExpression && !collapsible"
-        class="latex-wrap-container">
-        <vue-latex :expression="latexExpression"
-          display-mode
-          :fontsize="10"
-          :options="latexOptions"
-          class="latex-wrap"
-        />
+        class="latex-wrap-container"
+      >
+        <div class="latex-wrap" v-html="renderedLatex" />
       </div>
 
       <HighCode
@@ -109,10 +102,11 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
-import { VueLatex } from 'vatex'
+import katex from 'katex'
 import { HighCode } from 'vue-highlight-code';
 import 'vue-highlight-code/dist/style.css';
 import { api } from '../../utils/ApiConnector'
+import { SAFE_KATEX_OPTIONS } from '../../utils/katexOptions'
 import { TriangleAlert } from '@lucide/vue'
 
 const props = defineProps({
@@ -168,19 +162,21 @@ function isSubscriptChar(symbol) {
   return (code >= 0x2080 && code <= 0x2089) || (code >= 0x2090 && code <= 0x209C)
 }
 
-const latexOptions = ref({
-  displayMode: true,
-  throwOnError: false,
-  fleqn: false,
-  maxSize: Infinity,
-  maxExpand: Infinity,
-  strict: false,
-  output: 'html',
-  trust: true
-})
-
 const hasError = computed(() => !!props.errorMessage)
 const interactionDisabled = computed(() => props.readOnly || !props.evaluationEnabled)
+const renderedLatex = computed(() => {
+  if (!props.latexExpression) return ''
+
+  try {
+    return katex.renderToString(props.latexExpression, {
+      ...SAFE_KATEX_OPTIONS,
+      displayMode: true
+    })
+  } catch (error) {
+    console.warn('Unable to render symbolic expression:', error)
+    return ''
+  }
+})
 
 function handleValueChange(value) {
   emit('update:modelValue', value)
@@ -347,6 +343,10 @@ onMounted(() => {
   word-break: break-word;
   overflow: auto;
   width: 100%;
+}
+
+.latex-wrap :deep(.katex) {
+  font-size: 10px;
 }
 
 :deep(.katex-display) {

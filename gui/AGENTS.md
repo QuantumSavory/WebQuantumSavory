@@ -28,6 +28,7 @@
 - Derive protocol-variable compatibility from runtime parameter metadata and keep alias rules centralized in `src/utils/parameterTypes.js`. Opening a variable picker must not create a reference until the user explicitly selects one; keep missing or newly incompatible saved references visible so users can replace or unlink them.
 - In memory, edges reference `Node` instances. Serialized projects use source and target node IDs. A project-schema change must update serialization, deserialization, import validation, demos, backend payload minimization, and relevant tests together.
 - A node's position in `net.nodes` is its user-visible, 1-based simulator ID; its string `Node.id` and object identity are durable. Reorder the array in place, preserve selection/map/edge references, and re-normalize each edge so its source is the lower-index endpoint.
+- Keep `description` as a top-level string in every full project serialization, normalize missing legacy descriptions to an empty string, validate its type on import, and explicitly strip it from minimized backend payloads.
 - MapLibre takes marker elements out of Vue's normal DOM tree. Keep `BaseMap`'s marker-component render order stable and decoupled from simulator node order; changing that render order can make Vue move MapLibre-owned elements and abort other reactive updates.
 - `App.vue` strips UI-only and read-only slot/protocol fields before sending data to the API. Do not submit saved UI state directly to the backend.
 - Projects, the user UUID, panel state, and view preferences use established `localStorage` keys. Preserve keys and migration/rebuild behavior so existing projects remain readable.
@@ -51,6 +52,7 @@
 - Prefer durable IDs, roles, or stable classes in Playwright selectors. The main workflow is intentionally serial and shares a browser page and saved project state across its cases.
 - Keep log-level count badges in the Logs tab label rather than the enclosing bottom-panel header, and preserve each nonzero badge's level-specific color, accessible label, and tooltip.
 - The Export Script tab is a viewer for backend-generated Julia, not a second implementation of project-to-QuantumSavory translation. Send the cleaned simulation payload plus `simulationConfig`, fetch when the tab is opened or explicitly refreshed, highlight the returned text as read-only Julia, and download exactly that text with the backend-provided safe `.jl` filename.
+- Render project descriptions with the shared `markdown-it` and `@vscode/markdown-it-katex` stack. Leave raw HTML disabled, retain markdown-it's built-in safe data-image allowlist, and keep KaTeX untrusted with finite expansion and sizing limits; do not replace this path with handwritten Markdown, math, or HTML parsing.
 
 ## Commands and verification
 

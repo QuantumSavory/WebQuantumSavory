@@ -151,6 +151,7 @@ export function useProjectManagement(
     isDemoProject.value = false
     projectData.value = {
       name: currentProjectName.value,
+      description: '',
       variables: [],
       simulationConfig: { time: 1.0, timeStep: 0.1 },
       net: { nodes: [], edges: [], protocols: [] }
@@ -213,6 +214,7 @@ export function useProjectManagement(
         currentProjectName.value = ''
         projectData.value = {
           name: 'New Project',
+          description: '',
           variables: [],
           simulationConfig: { time: 1.0, timeStep: 0.1 },
           net: { nodes: [], edges: [], protocols: [] }
@@ -236,6 +238,9 @@ export function useProjectManagement(
     const platformInfo = api.getPlatformInfo()
     return {
       name: currentProjectName.value,
+      description: typeof projectData.value.description === 'string'
+        ? projectData.value.description
+        : '',
       variables: (projectData.value.variables || []).map(variable => (
         variable.toJSON ? variable.toJSON() : {
           id: variable.id,
@@ -315,6 +320,7 @@ export function useProjectManagement(
     
     return {
       name: data.name,
+      description: typeof data.description === 'string' ? data.description : '',
       variables,
       simulationConfig: {
         time: Math.max(1.0, (data.simulationConfig?.time || 1.0)),

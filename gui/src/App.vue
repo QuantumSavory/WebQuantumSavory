@@ -84,6 +84,7 @@ const DEFAULT_MAP_ZOOM = 4 // Zoom level to show most of the US
 // Initialize composables
 const projectData = ref({
   name: 'New Project',
+  description: '',
   variables: [],
   simulationConfig: {
     time: 1.0,
@@ -137,6 +138,8 @@ const minimizedProjectData = computed(() => {
   
   // Remove simulation config from the project data
   delete projectCopy.simulationConfig
+  // Descriptions are project documentation, not simulator input.
+  delete projectCopy.description
 
   // Keep global variable definitions free of editor-only validation state.
   projectCopy.variables = (projectCopy.variables || []).map(variable => ({
@@ -516,6 +519,7 @@ const alertModalMessage = ref('')
 const {
   importProject,
   exportProject,
+  validateAndProcessImport,
   handleImportConflictOverwrite,
   handleImportConflictNewName,
   cancelImportConflict
@@ -880,86 +884,6 @@ function toggleJsonViewerMode(){
 }
 
 
-function validateAndProcessImport(jsonData) {
-  // Validate structure
-  if (!jsonData.name || typeof jsonData.name !== 'string') {
-    alert('Invalid project structure: Missing or invalid "name" property.')
-    return
-  }
-  
-  if (!jsonData.net || typeof jsonData.net !== 'object') {
-    alert('Invalid project structure: Missing or invalid "net" property.')
-    return
-  }
-  
-  const net = jsonData.net
-  if (!Array.isArray(net.nodes)) {
-    alert('Invalid project structure: "net.nodes" must be an array.')
-    return
-  }
-  
-  if (!Array.isArray(net.edges)) {
-    alert('Invalid project structure: "net.edges" must be an array.')
-    return
-  }
-  
-  if (!Array.isArray(net.protocols)) {
-    alert('Invalid project structure: "net.protocols" must be an array.')
-    return
-  }
-  
-  // Check for name conflicts
-  const existingProjects = ProjectStore.listProjects()
-  if (existingProjects.includes(jsonData.name)) {
-    // Show conflict resolution dialog
-    importedProjectData.value = jsonData
-    conflictProjectName.value = jsonData.name
-    showImportConflictDialog.value = true
-  } else {
-    // No conflict, import directly
-    processImport(jsonData, jsonData.name)
-  }
-}
-
-function processImport(jsonData, finalName) {
-  try {
-    // Clear logs when importing project
-    clearLogs()
-    
-    // Create project data with the final name
-    const projectDataToImport = {
-      ...jsonData,
-      name: finalName
-    }
-    
-    // Save the project
-    ProjectStore.saveProject(finalName, projectDataToImport)
-    
-    // Load the imported project (this will also clear logs again, but that's fine)
-    openProject(finalName)
-    
-    addLog('info', `Project imported: ${finalName}`, 'System')
-    alert(`Project "${finalName}" imported successfully!`)
-  } catch (error) {
-    addLog('error', `Failed to import project: ${error.message}`, 'System')
-    alert(`Failed to import project: ${error.message}`)
-  }
-}
-
-function generateUniqueName(baseName) {
-  const existingProjects = ProjectStore.listProjects()
-  let counter = 2
-  let uniqueName = `${baseName} ${counter}`
-  
-  while (existingProjects.includes(uniqueName)) {
-    counter++
-    uniqueName = `${baseName} ${counter}`
-  }
-  
-  return uniqueName
-}
-
-
 function handleSaveAs() {
   if (!currentProjectName.value) {
     alert('No project to save. Please create or open a project first.')
@@ -1291,6 +1215,7 @@ onUnmounted(() => {
         :export-script-payload="exportScriptPayload"
         :variables-disabled="hasSimulationRun"
         @clear-logs="clearLogs"
+        @update-description="projectData.description = $event"
         @open-repeater-chain-generator="openRepeaterChainGenerator"
       />
     </div>

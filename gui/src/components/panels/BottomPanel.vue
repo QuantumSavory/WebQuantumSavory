@@ -36,6 +36,20 @@
             </span>
           </button>
           <button
+            id="bottom-panel-description-tab"
+            type="button"
+            role="tab"
+            class="bottom-tab"
+            :class="{ active: activeTab === 'description' }"
+            :aria-selected="activeTab === 'description'"
+            aria-controls="bottom-panel-description-content"
+            :tabindex="activeTab === 'description' ? 0 : -1"
+            @click="activeTab = 'description'"
+            @keydown="handleTabKeydown($event, 1)"
+          >
+            Description
+          </button>
+          <button
             id="bottom-panel-variables-tab"
             type="button"
             role="tab"
@@ -45,7 +59,7 @@
             aria-controls="bottom-panel-variables-content"
             :tabindex="activeTab === 'variables' ? 0 : -1"
             @click="activeTab = 'variables'"
-            @keydown="handleTabKeydown($event, 1)"
+            @keydown="handleTabKeydown($event, 2)"
           >
             Variables
           </button>
@@ -59,7 +73,7 @@
             aria-controls="bottom-panel-states-zoo-content"
             :tabindex="activeTab === 'states-zoo' ? 0 : -1"
             @click="activeTab = 'states-zoo'"
-            @keydown="handleTabKeydown($event, 2)"
+            @keydown="handleTabKeydown($event, 3)"
           >
             States Zoo
           </button>
@@ -73,7 +87,7 @@
             aria-controls="bottom-panel-layout-tools-content"
             :tabindex="activeTab === 'layout-tools' ? 0 : -1"
             @click="activeTab = 'layout-tools'"
-            @keydown="handleTabKeydown($event, 3)"
+            @keydown="handleTabKeydown($event, 4)"
           >
             Layout Tools
           </button>
@@ -87,7 +101,7 @@
             aria-controls="bottom-panel-export-script-content"
             :tabindex="activeTab === 'export-script' ? 0 : -1"
             @click="activeTab = 'export-script'"
-            @keydown="handleTabKeydown($event, 4)"
+            @keydown="handleTabKeydown($event, 5)"
           >
             Export Script
           </button>
@@ -108,6 +122,21 @@
             :allow-clear="allowClear"
             @clear-logs="emit('clear-logs')"
             @log-click="forwardLogClick"
+          />
+        </section>
+
+        <section
+          v-show="activeTab === 'description'"
+          id="bottom-panel-description-content"
+          class="bottom-tab-panel description-tab-panel"
+          role="tabpanel"
+          aria-labelledby="bottom-panel-description-tab"
+          tabindex="0"
+        >
+          <DescriptionPanel
+            :key="projectData.name"
+            :model-value="projectData.description"
+            @update:model-value="emit('update-description', $event)"
           />
         </section>
 
@@ -176,6 +205,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import BasePanel from './BasePanel.vue'
+import DescriptionPanel from './DescriptionPanel.vue'
 import ExportScriptPanel from './ExportScriptPanel.vue'
 import LayoutToolsPanel from './LayoutToolsPanel.vue'
 import LogsPanel from './LogsPanel.vue'
@@ -232,12 +262,13 @@ const props = defineProps({
 const emit = defineEmits([
   'clear-logs',
   'log-click',
+  'update-description',
   'open-repeater-chain-generator',
   'collapsed-changed'
 ])
 
 const activeTab = ref('logs')
-const tabNames = ['logs', 'variables', 'states-zoo', 'layout-tools', 'export-script']
+const tabNames = ['logs', 'description', 'variables', 'states-zoo', 'layout-tools', 'export-script']
 
 const logCounts = computed(() => {
   const counts = {
@@ -369,7 +400,8 @@ function handleTabKeydown(event, currentIndex) {
 }
 
 .variables-tab-panel,
-.states-zoo-tab-panel {
+.states-zoo-tab-panel,
+.description-tab-panel {
   padding-right: 4px;
 }
 
