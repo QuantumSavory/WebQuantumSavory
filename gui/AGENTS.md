@@ -35,6 +35,7 @@
 - `App.vue` strips UI-only and read-only slot/protocol fields before sending data to the API. Do not submit saved UI state directly to the backend.
 - Projects, the user UUID, panel state, and view preferences use established `localStorage` keys. Preserve keys and migration/rebuild behavior so existing projects remain readable.
 - Switching, importing, resetting, or deleting a project must stop both polling loops, reset simulation state, close stale result windows, and remove obsolete entanglement overlays.
+- Keep the Runner's Play control visible but disabled with an explanatory tooltip while the network is empty; replace it with Pause or Resume only while a simulation is running or paused.
 - Existing `window.projectData`, `window.showEntangledSlots`, `window.hideSlotState`, and result-window bridges connect older map/panel code. Do not remove them without migrating all consumers.
 
 ## Component conventions
