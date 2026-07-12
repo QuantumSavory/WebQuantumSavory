@@ -49,7 +49,7 @@ async function createProjectWithNodes(page, projectName, count = 3) {
   await page.click('.hamburger-btn')
   await page.click('text=New')
   await page.fill('input[placeholder="Project name"]', projectName)
-  await page.click('button.primary')
+  await page.getByRole('button', { name: 'Create' }).click()
 
   for (let index = 0; index < count; index += 1) {
     await page.keyboard.down('Alt')
@@ -83,12 +83,14 @@ async function fillGenerator(page, {
   end = 'Node 2',
   template = 'Node 3',
   count = 3,
+  createVirtualEdge = true,
 } = {}) {
   await page.locator('#chain-start-node').selectOption({ label: start })
   await page.locator('#chain-end-node').selectOption({ label: end })
   await page.locator('#chain-template-node').selectOption({ label: template })
   await page.locator('#chain-template-edge').selectOption({ index: 1 })
   await page.locator('#chain-repeater-count').fill(String(count))
+  await page.locator('#chain-create-virtual-edge').setChecked(createVirtualEdge)
 }
 
 test.describe('Layout Tools repeater chain generator', () => {
@@ -110,6 +112,7 @@ test.describe('Layout Tools repeater chain generator', () => {
     await expect(page.getByRole('heading', { name: 'Layout controls' })).toBeVisible()
 
     await openGenerator(page)
+    await expect(page.locator('#chain-create-virtual-edge')).toBeChecked()
     await fillGenerator(page)
     await expect(page.getByRole('alert')).toContainText('must have exactly one incident edge')
     await expect(page.getByRole('button', { name: 'Generate Chain' })).toBeDisabled()
@@ -118,6 +121,10 @@ test.describe('Layout Tools repeater chain generator', () => {
     await expect(page.getByRole('dialog', { name: 'Repeater Chain Generator' })).toHaveCount(0)
     await expect(page.locator('.node-marker')).toHaveCount(3)
     await expect(page.locator('.edge-list-item')).toHaveCount(2)
+
+    await openGenerator(page)
+    await expect(page.locator('#chain-create-virtual-edge')).toBeChecked()
+    await page.getByRole('button', { name: 'Cancel' }).click()
 
     await page.evaluate(() => {
       const app = document.querySelector('#app')?.__vue_app__
@@ -168,7 +175,7 @@ test.describe('Layout Tools repeater chain generator', () => {
     await expect(page.getByRole('dialog', { name: 'Repeater Chain Generator' })).toHaveCount(0)
 
     await expect(page.locator('.node-marker')).toHaveCount(5)
-    await expect(page.locator('.edge-list-item')).toHaveCount(4)
+    await expect(page.locator('.edge-list-item')).toHaveCount(5)
 
     const generated = await page.evaluate(({ templateIds }) => {
       const app = document.querySelector('#app')?.__vue_app__
@@ -176,6 +183,12 @@ test.describe('Layout Tools repeater chain generator', () => {
       const nodes = projectData.net.nodes
       const edges = projectData.net.edges
       const repeaters = nodes.filter(node => node.name.startsWith('Node 3-'))
+      const chainEdges = edges.filter(edge => edge.data.protocols.length > 0)
+      const virtualEdge = edges.find(edge => (
+        new Set([edge.source.name, edge.target.name]).size === 2
+        && [edge.source.name, edge.target.name].includes('Node 1')
+        && [edge.source.name, edge.target.name].includes('Node 2')
+      ))
 
       return {
         nodeNames: repeaters.map(node => node.name),
@@ -184,26 +197,32 @@ test.describe('Layout Tools repeater chain generator', () => {
         endPosition: [...nodes.find(node => node.name === 'Node 2').position],
         connections: edges.map(edge => [edge.source.name, edge.target.name]),
         allVirtual: edges.every(edge => edge.isLogic === true),
+        allEdgesNormalized: edges.every(edge => (
+          nodes.indexOf(edge.source) < nodes.indexOf(edge.target)
+        )),
+        virtualEdgeIsEmpty: virtualEdge?.isLogic === true
+          && virtualEdge.data.type === 'connection'
+          && virtualEdge.data.protocols.length === 0,
         templateNodeRemoved: !nodes.some(node => node.id === templateIds.nodeId),
         templateEdgeRemoved: !edges.some(edge => edge.id === templateIds.edgeId),
         nodeIds: repeaters.map(node => node.id),
         slotIds: repeaters.map(node => node.data.slots[0].id),
         nodeProtocolIds: repeaters.map(node => node.data.protocols[0].id),
         edgeIds: edges.map(edge => edge.id),
-        edgeProtocolIds: edges.map(edge => edge.data.protocols[0].id),
+        edgeProtocolIds: chainEdges.map(edge => edge.data.protocols[0].id),
         nodeConfigurationCopied: repeaters.every(node =>
           node.data.customConfiguration.nested.value === 42
           && node.data.slots[0].backgroundNoise.parameters[0].value === 0.25
           && node.data.protocols[0].parameters[0].value === 7
         ),
-        edgeConfigurationCopied: edges.every(edge =>
+        edgeConfigurationCopied: chainEdges.every(edge =>
           edge.data.customConfiguration.fidelity === 0.91
           && edge.data.protocols[0].parameters[0].value === 5
         ),
         independentNodeData: repeaters[0].data !== repeaters[1].data
           && repeaters[0].data.customConfiguration !== repeaters[1].data.customConfiguration,
-        independentEdgeData: edges[0].data !== edges[1].data
-          && edges[0].data.customConfiguration !== edges[1].data.customConfiguration,
+        independentEdgeData: chainEdges[0].data !== chainEdges[1].data
+          && chainEdges[0].data.customConfiguration !== chainEdges[1].data.customConfiguration,
       }
     }, { templateIds })
 
@@ -221,9 +240,12 @@ test.describe('Layout Tools repeater chain generator', () => {
       ['Node 1', 'Node 3-1'],
       ['Node 3-1', 'Node 3-2'],
       ['Node 3-2', 'Node 3-3'],
-      ['Node 3-3', 'Node 2'],
+      ['Node 2', 'Node 3-3'],
+      ['Node 1', 'Node 2'],
     ])
     expect(generated.allVirtual).toBe(true)
+    expect(generated.allEdgesNormalized).toBe(true)
+    expect(generated.virtualEdgeIsEmpty).toBe(true)
     expect(generated.templateNodeRemoved).toBe(true)
     expect(generated.templateEdgeRemoved).toBe(true)
     expect(generated.nodeConfigurationCopied).toBe(true)
@@ -249,7 +271,7 @@ test.describe('Layout Tools repeater chain generator', () => {
     await page.evaluate(name => localStorage.setItem('recentProjectName', name), projectName)
     await page.reload()
     await expect(page.locator('.node-marker')).toHaveCount(5, { timeout: 15_000 })
-    await expect(page.locator('.edge-list-item')).toHaveCount(4)
+    await expect(page.locator('.edge-list-item')).toHaveCount(5)
     await expect(page.locator('.node-marker .node-name')).toHaveText([
       'Node 1',
       'Node 2',
@@ -257,5 +279,62 @@ test.describe('Layout Tools repeater chain generator', () => {
       'Node 3-2',
       'Node 3-3',
     ])
+
+    const reloadedEdges = await page.evaluate(() => {
+      const app = document.querySelector('#app')?.__vue_app__
+      const projectData = app?._instance?.setupState?.projectData
+      const nodes = projectData.net.nodes
+      return projectData.net.edges.map(edge => ({
+        sourceIndex: nodes.indexOf(edge.source),
+        targetIndex: nodes.indexOf(edge.target),
+        isLogic: edge.isLogic,
+        protocolCount: edge.data.protocols.length,
+      }))
+    })
+    expect(reloadedEdges).toHaveLength(5)
+    expect(reloadedEdges.every(edge => edge.sourceIndex < edge.targetIndex)).toBe(true)
+    expect(reloadedEdges).toContainEqual({
+      sourceIndex: 0,
+      targetIndex: 1,
+      isLogic: true,
+      protocolCount: 0,
+    })
+  })
+
+  test('can omit the end-to-end virtual edge', async ({ page }) => {
+    await createProjectWithNodes(page, 'Repeater Without Virtual Edge')
+    await connectNodes(page, 2, 0)
+
+    await openGenerator(page)
+    await fillGenerator(page, { count: 2, createVirtualEdge: false })
+    await expect(page.locator('#chain-create-virtual-edge')).not.toBeChecked()
+    await page.getByRole('button', { name: 'Generate Chain' }).click()
+
+    await expect(page.locator('.node-marker')).toHaveCount(4)
+    await expect(page.locator('.edge-list-item')).toHaveCount(3)
+
+    const generated = await page.evaluate(() => {
+      const app = document.querySelector('#app')?.__vue_app__
+      const projectData = app?._instance?.setupState?.projectData
+      const nodes = projectData.net.nodes
+      const edges = projectData.net.edges
+      return {
+        allPhysical: edges.every(edge => edge.isLogic === false),
+        allEdgesNormalized: edges.every(edge => (
+          nodes.indexOf(edge.source) < nodes.indexOf(edge.target)
+        )),
+        hasDirectEndpointEdge: edges.some(edge => (
+          new Set([edge.source.name, edge.target.name]).size === 2
+          && [edge.source.name, edge.target.name].includes('Node 1')
+          && [edge.source.name, edge.target.name].includes('Node 2')
+        )),
+      }
+    })
+
+    expect(generated).toEqual({
+      allPhysical: true,
+      allEdgesNormalized: true,
+      hasDirectEndpointEdge: false,
+    })
   })
 })

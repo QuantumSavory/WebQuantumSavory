@@ -63,6 +63,16 @@
           max="100"
           step="1"
         >
+
+        <label for="chain-create-virtual-edge">End-to-end virtual edge</label>
+        <label class="checkbox-field" for="chain-create-virtual-edge">
+          <input
+            id="chain-create-virtual-edge"
+            v-model="form.createVirtualEdge"
+            type="checkbox"
+          >
+          Connect the start and end nodes directly
+        </label>
       </div>
 
       <p class="template-note">
@@ -105,7 +115,8 @@ const form = reactive({
   endNodeId: '',
   templateNodeId: '',
   templateEdgeId: '',
-  repeaterCount: 1
+  repeaterCount: 1,
+  createVirtualEdge: true
 })
 
 const net = computed(() => ({ nodes: props.nodes, edges: props.edges }))
@@ -153,6 +164,7 @@ function resetForm() {
   form.templateNodeId = ''
   form.templateEdgeId = ''
   form.repeaterCount = 1
+  form.createVirtualEdge = true
 }
 
 function edgeLabel(edge) {
@@ -166,7 +178,8 @@ function handleConfirm() {
     endNodeId: form.endNodeId,
     templateNodeId: form.templateNodeId,
     templateEdgeId: form.templateEdgeId,
-    repeaterCount: form.repeaterCount
+    repeaterCount: form.repeaterCount,
+    createVirtualEdge: form.createVirtualEdge
   })
 }
 
@@ -237,6 +250,18 @@ h3 {
 .form-grid input {
   width: 100%;
   min-width: 0;
+}
+
+.checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400 !important;
+}
+
+.checkbox-field input {
+  width: auto;
+  margin: 0;
 }
 
 .template-note {

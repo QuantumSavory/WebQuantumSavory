@@ -758,7 +758,7 @@ function handleGenerateRepeaterChain(options) {
     closeRepeaterChainGenerator()
     addLog(
       'success',
-      `Generated a chain of ${result.generatedNodes.length} repeaters between ${startNodeName} and ${endNodeName}`,
+      `Generated a chain of ${result.generatedNodes.length} repeaters between ${startNodeName} and ${endNodeName}${result.virtualEdge ? ' with an end-to-end virtual edge' : ''}`,
       'Layout Tools'
     )
   } catch (error) {
