@@ -1,5 +1,18 @@
 /* Reset default margins and ensure full height */
 
+:root {
+  --app-shell-topbar-height: 40px;
+  --app-shell-sidebar-width: 320px;
+  --app-shell-sidebar-inline-offset: 10px;
+  --app-shell-sidebar-top: 50px;
+  --app-shell-sidebar-bottom: 20px;
+  --app-shell-sidebar-toggle-offset: 40px;
+  --app-shell-sidebar-toggle-top: 65px;
+  --app-shell-bottom-panel-left: 50px;
+  --app-shell-panel-gap: 10px;
+  --app-panel-collapsed-height: 36px;
+}
+
 
 
 #app {
@@ -11,10 +24,10 @@
 
 .app {
   display: flex;
-  height: calc(100vh - 40px);
+  height: calc(100vh - var(--app-shell-topbar-height));
   width: 100vw;
   overflow: hidden;
-  margin-top: 40px;
+  margin-top: var(--app-shell-topbar-height);
 }
 
 .topbar {
@@ -22,7 +35,7 @@
   top: 0;
   left: 0;
   width: 100vw;
-  height: 40px;
+  height: var(--app-shell-topbar-height);
   background: #fff;
   box-shadow: 0 2px 5px #8989ac52;
   display: flex;
@@ -52,8 +65,8 @@
 
 .sidebar-toggle-btn {
   position: fixed;
-  left: calc(100vw - 320px - 40px);
-  top: 65px;
+  left: calc(100vw - var(--app-shell-sidebar-width) - var(--app-shell-sidebar-toggle-offset));
+  top: var(--app-shell-sidebar-toggle-top);
   transform: translateY(-50%);
   background: #fff;
   border: 1px solid #ddd;
@@ -81,7 +94,7 @@
 }
 
 .sidebar-toggle-btn-hidden {
-  left: calc(100vw - 40px) !important;
+  left: calc(100vw - var(--app-shell-sidebar-toggle-offset)) !important;
 }
 
 .topbar-menu{
@@ -146,7 +159,7 @@
 
 .main-panel {
   flex: 1;
-  height: 100vh;
+  height: 100%;
   position: relative;
 }
 
@@ -154,15 +167,15 @@
   font-weight: 700;
 }
 .sidebar {
-  width: 320px;
+  width: var(--app-shell-sidebar-width);
   /* height: max-content; */
-  height: calc(100vh - 60px);
+  height: calc(100vh - var(--app-shell-sidebar-top) - var(--app-shell-sidebar-bottom));
   overflow-y: hidden;
   position: fixed;
   z-index: 2000;
-  top: 50px;
-  bottom: 20px;
-  max-height: calc(100vh - 60px);
+  top: var(--app-shell-sidebar-top);
+  bottom: var(--app-shell-sidebar-bottom);
+  max-height: calc(100vh - var(--app-shell-sidebar-top) - var(--app-shell-sidebar-bottom));
   /* background: #ff000020; */
   transition: transform 0.2s ease-in-out;
 }
@@ -179,10 +192,10 @@
   backdrop-filter: blur(11px); */
 
 .sidebar-left {
-  left: 10px;
+  left: var(--app-shell-sidebar-inline-offset);
 }
 .sidebar-right {
-  right: 10px;
+  right: var(--app-shell-sidebar-inline-offset);
 }
 
 .info-panel {
@@ -337,79 +350,119 @@
 .delete-button:hover {
   background: #ff1744;
 }
-.modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.18);
-  z-index: 2001;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.modal-dialog {
-  background: #fff;
-  border-radius: 8px;
-  padding: 24px 20px 18px;
+.p-dialog.app-dialog {
   min-width: 320px;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.13);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  border-radius: var(--app-radius-surface);
+  background: var(--app-color-surface);
+  box-shadow: var(--app-shadow-dialog);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
 }
-.modal-dialog h3 {
-  margin-top: 0;
-  margin-bottom: 18px;
+
+.p-dialog-mask.app-dialog-mask {
+  background: var(--app-overlay-background);
+}
+
+.app-dialog .app-dialog-header {
+  flex: 0 0 auto;
+  padding: var(--app-space-7) var(--app-space-6) 0;
+}
+
+.app-dialog .app-dialog-title {
   font-size: 1.1rem;
   font-weight: 600;
+  color: var(--app-color-text);
 }
-.modal-dialog input {
-  font-size: 1rem;
-  padding: 8px 10px;
-  margin-bottom: 18px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+
+.app-dialog .app-dialog-content {
+  min-height: 0;
+  padding: var(--app-space-5) var(--app-space-6) 0;
+  overflow-y: auto;
+  color: var(--app-color-text);
 }
-.modal-actions {
-  margin-top: 20px;
+
+.app-dialog .app-dialog-footer {
+  flex: 0 0 auto;
+  padding: var(--app-space-6) var(--app-space-6) var(--app-space-5);
+}
+
+.app-dialog .app-dialog-close-button {
+  color: var(--app-color-text-muted);
+}
+
+.app-dialog .app-dialog-close-button:hover {
+  background: var(--app-color-surface-hover);
+  color: var(--app-color-text);
+}
+
+.layout-generator-dialog .dialog-description,
+.layout-generator-dialog .template-note {
+  color: var(--app-color-text-muted);
+  line-height: 1.4;
+}
+
+.layout-generator-dialog .dialog-description {
+  margin: 0 0 var(--app-space-5);
+}
+
+.layout-generator-dialog .form-grid {
+  display: grid;
+  grid-template-columns: minmax(145px, auto) minmax(220px, 1fr);
+  gap: 11px 14px;
+  align-items: center;
+}
+
+.layout-generator-dialog .form-grid label {
+  color: var(--app-color-text);
+  font-weight: 600;
+}
+
+.layout-generator-dialog .form-grid select,
+.layout-generator-dialog .form-grid input {
+  width: 100%;
+  min-width: 0;
+}
+
+.layout-generator-dialog .template-note {
+  margin: 14px 0 0;
+  font-size: 0.86rem;
+}
+
+.layout-generator-dialog .validation-error {
+  margin-top: 7px;
+  color: var(--app-color-danger);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 560px) {
+  .layout-generator-dialog .form-grid {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .layout-generator-dialog .form-grid select,
+  .layout-generator-dialog .form-grid input {
+    margin-bottom: 7px;
+  }
+}
+
+.app-dialog-actions {
+  width: 100%;
   display: flex;
   gap: 12px;
   justify-content: flex-end;
 }
-.btn-warning {
-  background: #f16938;
-  border: none;
-  color: white;
-  transition: background 0.15s;
-}
-.btn-warning:hover {
-  background: #fb835f;
-}
-.btn-primary {
-  background: #4345ac;
-  border: none;
-  color: white;
-  transition: background 0.15s;
-}
-.btn-primary:hover {
-  background: #5f61f1;
-}
-button:disabled {
-  background: #e0e0e0 !important;
-  color: #9e9e9e !important;
-  cursor: not-allowed !important;
-  border-color: transparent !important;
+
+:where(button:disabled) {
+  background: var(--app-color-disabled-surface);
+  color: var(--app-color-disabled-text);
+  cursor: not-allowed;
+  border-color: transparent;
   opacity: 0.6;
 }
-button:disabled:hover {
-  background: #e0e0e0 !important;
-}
-.btn-warning:disabled {
-  background: #e0e0e0 !important;
-  color: #9e9e9e !important;
-}
-.btn-primary:disabled {
-  background: #e0e0e0 !important;
-  color: #9e9e9e !important;
+:where(button:disabled:hover) {
+  background: var(--app-color-disabled-surface);
 }
 .validation-error {
   color: #d32f2f;
@@ -435,6 +488,7 @@ button:disabled:hover {
   color: #2d2d2d;
   max-width: 300px;
 }
+/* ==================== VENDOR ADAPTERS ==================== */
 .json-viewer-box{
   position: absolute;
   top: 0;
@@ -475,11 +529,12 @@ button:disabled:hover {
   height: 12px !important;
 }
 
+/* ==================== APPLICATION SHELL CONTAINERS ==================== */
 /* Logs Panel Container */
 .logs-panel-container {
   position: fixed;
   bottom: 0;
-  left: 50px;
+  left: var(--app-shell-bottom-panel-left);
   width: fit-content;
   z-index: 2000;
   background: transparent;

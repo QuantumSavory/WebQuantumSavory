@@ -21,7 +21,8 @@
       :panel_id="panelId"
       title="Tools"
       :collapsable="collapsable"
-      @collapsed-changed="handleCollapsedChanged"
+      :collapsed="collapsed"
+      @update:collapsed="emit('update:collapsed', $event)"
     >
       <template #content>
         <div class="bottom-panel-body">
@@ -302,6 +303,10 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  collapsed: {
+    type: Boolean,
+    default: false
+  },
   panelId: {
     type: String,
     default: 'logs_panel'
@@ -319,7 +324,7 @@ const emit = defineEmits([
   'open-repeater-chain-generator',
   'open-star-network-generator',
   'open-graph-network-generator',
-  'collapsed-changed'
+  'update:collapsed'
 ])
 
 const activeTab = ref('logs')
@@ -330,38 +335,24 @@ const DEFAULT_PANEL_WIDTH = 800
 const DEFAULT_PANEL_HEIGHT = 180
 const MIN_PANEL_WIDTH = 480
 const MIN_PANEL_HEIGHT = 180
-const COLLAPSED_PANEL_HEIGHT = 36
-const PANEL_LEFT_OFFSET = 50
-const VIEWPORT_EDGE_GAP = 10
-const RIGHT_SIDEBAR_WIDTH = 320
-const RIGHT_SIDEBAR_OFFSET = 10
-const RIGHT_SIDEBAR_GAP = 10
-const PANEL_TOP_LIMIT = 50
+const COLLAPSED_PANEL_HEIGHT = shellCssPixels('--app-panel-collapsed-height')
 const KEYBOARD_RESIZE_STEP = 16
 
-const viewportWidth = ref(window.innerWidth)
-const viewportHeight = ref(window.innerHeight)
-const isCollapsed = ref(
-  props.collapsable && localStorage.getItem(`panelCollapsed_${props.panelId}`) === 'true'
-)
-
-const maxPanelWidth = computed(() => {
-  const viewportLimit = Math.max(
-    1,
-    viewportWidth.value - PANEL_LEFT_OFFSET - VIEWPORT_EDGE_GAP
-  )
-  if (!props.rightSidebarVisible) return viewportLimit
-
-  const sidebarLimit = viewportWidth.value
-    - PANEL_LEFT_OFFSET
-    - RIGHT_SIDEBAR_WIDTH
-    - RIGHT_SIDEBAR_OFFSET
-    - RIGHT_SIDEBAR_GAP
-  return Math.max(1, sidebarLimit)
+const isCollapsed = computed(() => props.collapsable && props.collapsed)
+const shellGeometry = ref({
+  left: 0,
+  right: window.innerWidth,
+  top: 0,
+  bottom: window.innerHeight
 })
 
-const maxPanelHeight = computed(() => (
-  Math.max(1, viewportHeight.value - PANEL_TOP_LIMIT)
+const maxPanelWidth = computed(() => Math.max(
+  1,
+  shellGeometry.value.right - shellGeometry.value.left
+))
+const maxPanelHeight = computed(() => Math.max(
+  1,
+  shellGeometry.value.bottom - shellGeometry.value.top
 ))
 const effectiveMinPanelWidth = computed(() => Math.min(MIN_PANEL_WIDTH, maxPanelWidth.value))
 const effectiveMinPanelHeight = computed(() => Math.min(MIN_PANEL_HEIGHT, maxPanelHeight.value))
@@ -480,11 +471,6 @@ function updatePanelHeight(height) {
   panelHeight.value = clamp(Math.round(height), effectiveMinPanelHeight.value, maxPanelHeight.value)
 }
 
-function handleCollapsedChanged(collapsed) {
-  isCollapsed.value = collapsed
-  emit('collapsed-changed', collapsed)
-}
-
 function handleResizeKeydown(dimension, event) {
   const isWidth = dimension === 'width'
   const currentValue = isWidth ? panelWidth.value : panelHeight.value
@@ -515,9 +501,31 @@ function handleResizeKeydown(dimension, event) {
   persistPanelSize()
 }
 
-function updateViewportSize() {
-  viewportWidth.value = window.innerWidth
-  viewportHeight.value = window.innerHeight
+function shellCssPixels(propertyName) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(propertyName)
+  return Number.parseFloat(value) || 0
+}
+
+function measureShellGeometry() {
+  const panelContainer = document.querySelector('.logs-panel-container')
+  const topbar = document.querySelector('.topbar')
+  const sidebar = document.querySelector('.sidebar-right')
+  const gap = shellCssPixels('--app-shell-panel-gap')
+  const left = panelContainer?.getBoundingClientRect().left ?? 0
+  const top = (topbar?.getBoundingClientRect().bottom ?? 0) + gap
+  let right = window.innerWidth - gap
+
+  if (props.rightSidebarVisible && sidebar) {
+    const layoutLeft = sidebar.offsetLeft || sidebar.getBoundingClientRect().left
+    right = layoutLeft - gap
+  }
+
+  shellGeometry.value = {
+    left,
+    right: Math.max(left + 1, right),
+    top,
+    bottom: window.innerHeight
+  }
 }
 
 function handleTabKeydown(event, currentIndex) {
@@ -541,13 +549,26 @@ function handleTabKeydown(event, currentIndex) {
   tabs?.[nextIndex]?.focus()
 }
 
+let shellResizeObserver = null
+
+watch(() => props.rightSidebarVisible, measureShellGeometry, { flush: 'post' })
+
 onMounted(() => {
-  window.addEventListener('resize', updateViewportSize)
+  measureShellGeometry()
+  window.addEventListener('resize', measureShellGeometry)
+  if (typeof ResizeObserver !== 'undefined') {
+    shellResizeObserver = new ResizeObserver(measureShellGeometry)
+    const topbar = document.querySelector('.topbar')
+    const sidebar = document.querySelector('.sidebar-right')
+    if (topbar) shellResizeObserver.observe(topbar)
+    if (sidebar) shellResizeObserver.observe(sidebar)
+  }
   persistPanelSize()
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', updateViewportSize)
+  window.removeEventListener('resize', measureShellGeometry)
+  shellResizeObserver?.disconnect()
 })
 </script>
 

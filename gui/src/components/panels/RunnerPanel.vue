@@ -15,6 +15,14 @@ const props = defineProps({
   simulationState: {
     type: Object,
     required: true
+  },
+  phase: {
+    type: String,
+    required: true
+  },
+  capabilities: {
+    type: Object,
+    required: true
   }
 })
 
@@ -31,22 +39,11 @@ const currentTime = computed(() => {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`
 })
 
-const graphEmpty = computed(() => {
-  return props.projectData && props.projectData.net && props.projectData.net.nodes.length === 0 && props.projectData.net.edges.length === 0
-})
-
 // Backend simulation state (single source of truth)
 const backendSim = computed(() => props.simulationStatus?.state?.simulation || {})
 
-// Derived states from backend
-const isSimulationRunning = computed(() => {
-  return backendSim.value.simulation_running === true && 
-         backendSim.value.simulation_paused !== true
-})
-
-const isSimulationPaused = computed(() => {
-  return backendSim.value.simulation_paused === true
-})
+const isSimulationRunning = computed(() => props.phase === 'running')
+const isSimulationPaused = computed(() => props.phase === 'paused')
 
 // Simplified progress calculation (using cumulative target time)
 const simulationProgress = computed(() => {
@@ -61,21 +58,10 @@ const simulationProgress = computed(() => {
   return Math.min(Math.round(progress), 100)
 })
 
-const canRunSimulation = computed(() => {
-  return !graphEmpty.value && !isSimulationRunning.value && !isSimulationPaused.value
-})
-
-const canPauseSimulation = computed(() => {
-  return isSimulationRunning.value && !isSimulationPaused.value
-})
-
-const canResumeSimulation = computed(() => {
-  return isSimulationPaused.value
-})
-
-const canStopSimulation = computed(() => {
-  return isSimulationRunning.value || isSimulationPaused.value || !graphEmpty.value
-})
+const canRunSimulation = computed(() => props.capabilities.canRun)
+const canPauseSimulation = computed(() => props.capabilities.canPause)
+const canResumeSimulation = computed(() => props.capabilities.canResume)
+const canStopSimulation = computed(() => props.capabilities.canStop)
 
 function handleRun() {
   emit('run')
@@ -189,7 +175,7 @@ function toggleAdvancedControls() {
         <!-- Stop button hidden - behavior TBD with backend developer -->
         <button 
           class="stop-btn" 
-          :disabled="!isSimulationPaused && !props.simulationState?.hasSimulationRun"
+          :disabled="!canStopSimulation"
           @click="handleStop"
           title="Stop simulation"
         >
@@ -202,21 +188,21 @@ function toggleAdvancedControls() {
     <div class="advanced-controls" :class="{ visible: showAdvancedControls }">
       <div class="advanced-buttons">
         <button 
-          :disabled="graphEmpty || isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive" 
+          :disabled="!props.capabilities.canPrepare || props.simulationState?.pollingActive"
           class="prepare-network-graph-btn" 
           @click="handlePrepareNetworkGraph"
         >
           Parse
         </button>
         <button 
-          :disabled="graphEmpty || props.simulationStatus.status != 'ready' || isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive" 
+          :disabled="props.phase !== 'parsed' || props.simulationState?.pollingActive"
           class="prepare-simulation-btn" 
           @click="handlePrepareSimulation"
         >
           Prepare
         </button>
         <button 
-          :disabled="graphEmpty || isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive" 
+          :disabled="!props.capabilities.canPrepare || props.simulationState?.pollingActive"
           class="reset-btn" 
           @click="handlePrepareNetworkGraph"
           title="Reset simulation (re-parse network graph)"

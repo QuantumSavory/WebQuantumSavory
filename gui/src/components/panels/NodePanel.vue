@@ -2,8 +2,9 @@
   <BasePanel 
     panel_id="node_panel" 
     :collapsable="true"
+    :collapsed="collapsed"
     :title="`Selected Node`" 
-    @collapsed-changed="$emit('collapsed-changed', $event)"
+    @update:collapsed="emit('update:collapsed', $event)"
   >
     <template #indicator>
       <NodeIndex :index="props.nodeIndex" />
@@ -32,7 +33,7 @@
             </span>
           </template>
           <div class="" >
-            <button class="options-btn noborder" @mouseover="showOptionsMenu" aria-label="Menu" style="font-weight: bold; color: #000;">
+            <button type="button" class="options-btn noborder" @mouseover="showOptionsMenu" aria-label="Menu" style="font-weight: bold; color: #000;">
               <EllipsisVertical :size="18" aria-hidden="true" />
             </button>
             <Menu @mouseleave="hideOptionsMenu" ref="optionsMenuElement"  :model="mainMenuItems" :popup="true" style="transform: translate(10px, -30px);">
@@ -114,7 +115,7 @@
           </div>
         </div>
         <div class="slot-controls">
-          <button class="add-slot-btn noborder" @click="addSlot">
+          <button type="button" class="add-slot-btn noborder" @click="addSlot">
             <Plus :size="14" aria-hidden="true" />
             Add Slot
           </button>
@@ -161,8 +162,8 @@
           </div>
           
           <div class="form-buttons">
-            <button class="cancel-btn" @click="cancelAddNSlots">Cancel</button>
-            <button class="" @click="executeAddNSlots">Add {{ numberOfSlotsToAdd }} Slot{{ numberOfSlotsToAdd !== 1 ? 's' : '' }}</button>
+            <button type="button" class="cancel-btn" @click="cancelAddNSlots">Cancel</button>
+            <button type="button" class="" @click="executeAddNSlots">Add {{ numberOfSlotsToAdd }} Slot{{ numberOfSlotsToAdd !== 1 ? 's' : '' }}</button>
           </div>
         </div>
         
@@ -208,8 +209,9 @@
           </div>
           
           <div class="form-buttons">
-            <button class="cancel-btn" @click="cancelBatchEdit">Cancel</button>
-            <button 
+            <button type="button" class="cancel-btn" @click="cancelBatchEdit">Cancel</button>
+            <button
+              type="button"
               class="" 
               @click="executeBatchEdit"
               :disabled="changedProperties.size === 0 || selectedSlots.size === 0"
@@ -251,6 +253,7 @@ import Menu from 'primevue/menu'
 import NodeIndex from './NodeIndex.vue'
 import { EllipsisVertical, ListChecks, ListPlus, Plus, Trash2 } from '@lucide/vue'
 import LucideMenuIcon from '../LucideMenuIcon.vue'
+import { SIMULATION_EDITING_LOCK_MESSAGE, useUiServices } from '../../composables/uiServices'
 
 // Props: node (Node instance), justCreated (bool: true if node was just created and selected)
 const props = defineProps({
@@ -274,10 +277,15 @@ const props = defineProps({
   variables: {
     type: Array,
     default: () => []
+  },
+  collapsed: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['slot-updated', 'delete', 'name-edit-complete', 'collapsed-changed'])
+const emit = defineEmits(['slot-updated', 'delete', 'name-edit-complete', 'update:collapsed'])
+const { showAlert } = useUiServices()
 
 const bgNoiseOptions = api.config.value.bgNoiseOptions;
 
@@ -319,7 +327,7 @@ function toggleSlotExpanded(slot) {
 function addSlot() {
   // Prevent adding slots if simulation has run
   if (props.simulationState?.hasSimulationRun) {
-    alert('Cannot add slots after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
 
@@ -331,7 +339,7 @@ function addSlot() {
 function deleteSlot(slot) {
   // Prevent deleting slots if simulation has run
   if (props.simulationState?.hasSimulationRun) {
-    alert('Cannot delete slots after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
 
@@ -376,9 +384,6 @@ watch(isNodeEditingLocked, (locked) => {
     nameInput.value = props.node.name
   }
 })
-const NODE_NAME_LOCK_MESSAGE = 'Cannot rename nodes after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.'
-const SLOT_TYPE_LOCK_MESSAGE = 'Cannot change slot types after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.'
-
 // Options dropdown logic
 const showOptionsDropdown = ref(false)
 
@@ -432,7 +437,7 @@ function cancelAddNSlots() {
 function executeAddNSlots() {
   // Prevent adding slots if simulation has run
   if (props.simulationState?.hasSimulationRun) {
-    alert('Cannot add slots after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
 
@@ -580,7 +585,7 @@ onUnmounted(() => {
 
 function startEditName() {
   if (isNodeEditingLocked.value) {
-    alert(NODE_NAME_LOCK_MESSAGE)
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
   nameInput.value = props.node.name
@@ -606,7 +611,7 @@ function handleNameKey(e) {
 
 function switchSlotType(slot) {
   if (isNodeEditingLocked.value) {
-    alert(SLOT_TYPE_LOCK_MESSAGE)
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
   if (slot.type == 'Qubit') {

@@ -3,7 +3,8 @@
     panel_id="node_list" 
     title="Nodes" 
     :collapsable="true"
-    @collapsed-changed="$emit('collapsed-changed', $event)"
+    :collapsed="collapsed"
+    @update:collapsed="emit('update:collapsed', $event)"
   >
     <template #content>
       <div v-if="!nodes.length" class="empty-list">No nodes</div>
@@ -73,9 +74,13 @@ const props = defineProps({
   simulationState: {
     type: Object,
     default: () => ({})
+  },
+  collapsed: {
+    type: Boolean,
+    default: false
   }
 })
-const emit = defineEmits(['select', 'addNewNode', 'move-node', 'collapsed-changed'])
+const emit = defineEmits(['select', 'addNewNode', 'move-node', 'update:collapsed'])
 
 const isReorderingLocked = computed(() => props.simulationState?.hasSimulationRun || false)
 

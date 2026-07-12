@@ -4,17 +4,16 @@ import { validatePayload } from '../utils/projectHelpers'
 /**
  * useImportExport - Composable for import/export operations
  */
-export function useImportExport(
+export function useImportExport({
   currentProjectName,
   importedProjectData,
   conflictProjectName,
   showImportConflictDialog,
-  clearLogs,
   addLog,
-  openProject,
+  importIntoSession,
   serializeProjectData,
-  minimizedProjectData
-) {
+  showAlert = (title, message) => window.alert(`${title}: ${message}`)
+}) {
   function importProject() {
     const fileInput = document.createElement('input')
     fileInput.type = 'file'
@@ -30,7 +29,7 @@ export function useImportExport(
             const jsonData = JSON.parse(e.target.result)
             validateAndProcessImport(jsonData)
           } catch (error) {
-            alert('Invalid JSON file. Please select a valid JSON file.')
+            showAlert('Import failed', 'Invalid JSON file. Please select a valid JSON file.')
           }
         }
         reader.readAsText(file)
@@ -42,71 +41,71 @@ export function useImportExport(
     fileInput.click()
   }
 
-  function validateAndProcessImport(jsonData) {
-    if (!jsonData.name || typeof jsonData.name !== 'string') {
-      alert('Invalid project structure: Missing or invalid "name" property.')
+  async function validateAndProcessImport(jsonData) {
+    if (typeof jsonData.name !== 'string' || !jsonData.name.trim()) {
+      showAlert('Import failed', 'Invalid project structure: Missing or invalid "name" property.')
       return
     }
     
     if (!jsonData.net || typeof jsonData.net !== 'object') {
-      alert('Invalid project structure: Missing or invalid "net" property.')
+      showAlert('Import failed', 'Invalid project structure: Missing or invalid "net" property.')
       return
     }
     
     const net = jsonData.net
     if (!Array.isArray(net.nodes)) {
-      alert('Invalid project structure: "net.nodes" must be an array.')
+      showAlert('Import failed', 'Invalid project structure: "net.nodes" must be an array.')
       return
     }
     
     if (!Array.isArray(net.edges)) {
-      alert('Invalid project structure: "net.edges" must be an array.')
+      showAlert('Import failed', 'Invalid project structure: "net.edges" must be an array.')
       return
     }
     
     if (!Array.isArray(net.protocols)) {
-      alert('Invalid project structure: "net.protocols" must be an array.')
+      showAlert('Import failed', 'Invalid project structure: "net.protocols" must be an array.')
       return
     }
 
     if (jsonData.variables !== undefined && !Array.isArray(jsonData.variables)) {
-      alert('Invalid project structure: "variables" must be an array when present.')
+      showAlert('Import failed', 'Invalid project structure: "variables" must be an array when present.')
       return
     }
 
     if (jsonData.description !== undefined && typeof jsonData.description !== 'string') {
-      alert('Invalid project structure: "description" must be a string when present.')
+      showAlert('Import failed', 'Invalid project structure: "description" must be a string when present.')
       return
     }
-    
+
+    const normalizedData = { ...jsonData, name: jsonData.name.trim() }
     const existingProjects = ProjectStore.listProjects()
-    if (existingProjects.includes(jsonData.name)) {
-      importedProjectData.value = jsonData
-      conflictProjectName.value = jsonData.name
+    if (existingProjects.includes(normalizedData.name)) {
+      importedProjectData.value = normalizedData
+      conflictProjectName.value = normalizedData.name
       showImportConflictDialog.value = true
     } else {
-      processImport(jsonData, jsonData.name)
+      return processImport(normalizedData, normalizedData.name)
     }
   }
 
-  function processImport(jsonData, finalName) {
+  async function processImport(jsonData, finalName) {
     try {
-      clearLogs()
-      
       const projectDataToImport = {
         ...jsonData,
-        name: finalName,
+        name: finalName.trim(),
         description: jsonData.description ?? ''
       }
       
-      ProjectStore.saveProject(finalName, projectDataToImport)
-      openProject(finalName)
-      
-      addLog('info', `Project imported: ${finalName}`, 'System')
-      alert(`Project "${finalName}" imported successfully!`)
+      const opened = await importIntoSession(projectDataToImport, projectDataToImport.name)
+      if (!opened) return false
+      addLog('info', `Project imported: ${projectDataToImport.name}`, 'System')
+      showAlert('Project imported', `Project "${projectDataToImport.name}" imported successfully!`)
+      return true
     } catch (error) {
       addLog('error', `Failed to import project: ${error.message}`, 'System')
-      alert(`Failed to import project: ${error.message}`)
+      showAlert('Import failed', `Failed to import project: ${error.message}`)
+      return false
     }
   }
 
@@ -123,15 +122,15 @@ export function useImportExport(
     return uniqueName
   }
 
-  function handleImportConflictOverwrite() {
+  async function handleImportConflictOverwrite() {
     showImportConflictDialog.value = false
-    processImport(importedProjectData.value, conflictProjectName.value)
+    return processImport(importedProjectData.value, conflictProjectName.value)
   }
 
-  function handleImportConflictNewName() {
+  async function handleImportConflictNewName() {
     showImportConflictDialog.value = false
     const uniqueName = generateUniqueName(conflictProjectName.value)
-    processImport(importedProjectData.value, uniqueName)
+    return processImport(importedProjectData.value, uniqueName)
   }
 
   function cancelImportConflict() {
@@ -142,7 +141,7 @@ export function useImportExport(
 
   function exportProject() {
     if (!currentProjectName.value) {
-      alert('No project to export. Please create or open a project first.')
+      showAlert('Export failed', 'No project to export. Please create or open a project first.')
       return
     }
     
@@ -163,7 +162,7 @@ export function useImportExport(
       URL.revokeObjectURL(url)
       
     } catch (error) {
-      alert(`Failed to export project: ${error.message}`)
+      showAlert('Export failed', `Failed to export project: ${error.message}`)
     }
   }
 

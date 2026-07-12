@@ -26,6 +26,14 @@ function apiErrorMessage(body, fallback) {
   return fallback
 }
 
+function scopedProjectName(uuid, projectName) {
+  return `${uuid}_${String(projectName ?? '').trim()}`
+}
+
+function pathSegment(value) {
+  return encodeURIComponent(String(value))
+}
+
 async function readJsonResponse(response, fallbackMessage) {
   const body = await response.json().catch(() => null)
   if (!response.ok) {
@@ -219,7 +227,7 @@ export class ApiConnector {
       const res = await fetch(`${this.baseUrl}/destroy_simulation`, {
         headers: this.requestHeaders,
         method: 'POST',
-        body: JSON.stringify( { name: `${uuid}_${projectName}` } )
+        body: JSON.stringify({ name: scopedProjectName(uuid, projectName) })
       })
       return res.json()
     } catch (e) {
@@ -228,7 +236,7 @@ export class ApiConnector {
     } finally {
       this._loading.value = false
     }
-    return { success: false, message: 'Simulation destroyed' }
+    return { success: false, message: 'Failed to destroy simulation' }
   }
 
   async parseNetworkGraph(data){
@@ -237,7 +245,7 @@ export class ApiConnector {
       const uuid = this.getUserUuid()
       const modifiedData = {
         ...data,
-        name: `${uuid}_${data.name}`
+        name: scopedProjectName(uuid, data.name)
       }
       const res = await fetch(`${this.baseUrl}/parse_network_graph`, {
         headers: this.requestHeaders,
@@ -260,7 +268,7 @@ export class ApiConnector {
       const res = await fetch(`${this.baseUrl}/prepare_simulation`, {
         headers: this.requestHeaders,
         method: 'POST',
-        body: JSON.stringify( { name: `${uuid}_${data.name}` } )
+        body: JSON.stringify({ name: scopedProjectName(uuid, data.name) })
       })
       return res.json()
     } catch (e) {
@@ -271,43 +279,27 @@ export class ApiConnector {
     }
   }
 
-  async getSimulationStatus(data){
-    console.log( 'ApiConnector::getSimulationStatus', data );
+  async getSimulationStatus(projectNameOrData, { signal } = {}){
+    const projectName = typeof projectNameOrData === 'string'
+      ? projectNameOrData
+      : projectNameOrData?.name
     try{
       this._loading.value = true
       const uuid = this.getUserUuid()
-      console.log( 'uuid', uuid );
-      const res = await fetch(`${this.baseUrl}/get_state?name=${uuid}_${data.name}`, {
+      const query = new URLSearchParams({ name: scopedProjectName(uuid, projectName) })
+      const res = await fetch(`${this.baseUrl}/get_state?${query}`, {
         headers: this.requestHeaders,
         method: 'GET',
+        signal,
       })
       const response = await res.json()
 
-      // TEMPORARY TEST CODE: Randomly simulate no entanglements ~20% of the time
-      // TODO: Remove this test code after testing the entanglement cleanup feature
-      /* try{
-        const chance = Math.random();
-        if (chance < 0.2 && response && response.state && response.state.slots) {
-          console.warn('🧪 TEST MODE (frontend): Simulating empty entanglements (Math.random() < 0.2)')
-          if (response.state.slots.entanglements) {
-            response.state.slots.entanglements = []
-          }
-          if (Array.isArray(response.state.slots.slots)) {
-            response.state.slots.slots.forEach(slotInfo => {
-              if (slotInfo && Array.isArray(slotInfo.entangled_slots)) {
-                slotInfo.entangled_slots = []
-              }
-            })
-          }
-        }
-      }catch (e){
-        console.warn('Frontend entanglement simulation failed silently:', e)
-      } */
-
       return response
     } catch (e) {
+      if (e?.name === 'AbortError') throw e
       this._error.value = e;
       console.error( 'getSimulationStatus error', e );
+      return { success: false, message: e.message }
     } finally {
       this._loading.value = false
     }
@@ -320,7 +312,7 @@ export class ApiConnector {
       const res = await fetch(`${this.baseUrl}/run_simulation`, {
         headers: this.requestHeaders,
         method: 'POST',
-        body: JSON.stringify( { name: `${uuid}_${projectName}`, time_units: time_units } )
+        body: JSON.stringify({ name: scopedProjectName(uuid, projectName), time_units })
       })
       return res.json()
     } catch (e) {
@@ -338,7 +330,7 @@ export class ApiConnector {
       const res = await fetch(`${this.baseUrl}/pause_simulation`, {
         headers: this.requestHeaders,
         method: 'POST',
-        body: JSON.stringify( { name: `${uuid}_${projectName}` } )
+        body: JSON.stringify({ name: scopedProjectName(uuid, projectName) })
       })
       return res.json()
     } catch (e) {
@@ -351,24 +343,28 @@ export class ApiConnector {
 
 
   
-  async getProtocolResults( protocolObject ){
-    const projectName = window.projectData.name;
+  async getProtocolResults( projectName, protocolObject, { signal } = {} ){
     const uuid = this.getUserUuid()
-    const res = await fetch(`${this.baseUrl}/protocols/${uuid}_${projectName}/${protocolObject.id}`, {
+    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const protocolId = pathSegment(protocolObject.id)
+    const res = await fetch(`${this.baseUrl}/protocols/${namespace}/${protocolId}`, {
       headers: this.requestHeaders,
       method: 'GET',
+      signal,
     })
     const responseBody = await res.json()
     let result = responseBody;
     return result;
   }
   
-  async getSlotResults( slotObject ){
-    const projectName = window.projectData.name;
+  async getSlotResults( projectName, slotObject, { signal } = {} ){
     const uuid = this.getUserUuid()
-    const res = await fetch(`${this.baseUrl}/slots/${uuid}_${projectName}/${slotObject.id}`, {
+    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const slotId = pathSegment(slotObject.id)
+    const res = await fetch(`${this.baseUrl}/slots/${namespace}/${slotId}`, {
       headers: this.requestHeaders,
       method: 'GET',
+      signal,
     })
     const responseBody = await res.json()
     let result = responseBody;
@@ -427,16 +423,20 @@ export class ApiConnector {
     return res.json()
   }
 
-  async getBackendLogs( projectName, purge = true ){
+  async getBackendLogs( projectName, purge = true, { signal } = {} ){
     try{
       this._loading.value = true
       const uuid = this.getUserUuid()
-      const res = await fetch(`${this.baseUrl}/logs/${uuid}_${projectName}?purge=${purge}`, {
+      const namespace = pathSegment(scopedProjectName(uuid, projectName))
+      const query = new URLSearchParams({ purge: String(purge) })
+      const res = await fetch(`${this.baseUrl}/logs/${namespace}?${query}`, {
         headers: this.requestHeaders,
         method: 'GET',
+        signal,
       })
       return res.json()
     } catch (e) {
+      if (e?.name === 'AbortError') throw e
       this._error.value = e;
       console.error( 'getBackendLogs error', e );
       return { success: false, logs: [] }

@@ -1,27 +1,34 @@
 <template>
-  <div v-if="show" class="modal-overlay">
-    <div class="modal-dialog">
-      <h3>{{ title }}</h3>
-      <input 
-        v-model="projectName" 
-        :placeholder="placeholder" 
-        @keydown.enter="handleEnterKey"
-        ref="inputRef"
+  <AppDialog :show="show" :title="title" @close="handleCancel">
+    <form id="project-name-form" @submit.prevent="handleConfirm">
+      <input
+        v-model="projectName"
+        :placeholder="placeholder"
+        autofocus
       />
       <div v-if="projectName.trim() && !isValid" class="validation-error">
         {{ errorMessage }}
       </div>
-      <div class="modal-actions">
-        <button @click="handleCancel">Cancel</button>
-        <button @click="handleConfirm" class="primary" :disabled="!isValid">{{ confirmButtonText }}</button>
-      </div>
-    </div>
-  </div>
+    </form>
+    <template #footer>
+      <AppButton @click="handleCancel">Cancel</AppButton>
+      <AppButton
+        class="primary"
+        variant="primary"
+        type="submit"
+        form="project-name-form"
+        :disabled="!isValid"
+        @click="handleConfirm"
+      >{{ confirmButtonText }}</AppButton>
+    </template>
+  </AppDialog>
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import ProjectStore from '../models/ProjectStore.js'
+import AppButton from './ui/AppButton.vue'
+import AppDialog from './ui/AppDialog.vue'
 
 const props = defineProps({
   show: {
@@ -54,7 +61,6 @@ const props = defineProps({
 const emit = defineEmits(['confirm', 'cancel'])
 
 const projectName = ref('')
-const inputRef = ref(null)
 
 // Validation logic
 const isValid = computed(() => {
@@ -89,40 +95,12 @@ const errorMessage = computed(() => {
   return ''
 })
 
-// Global keydown handler for dialog
-function handleGlobalKeydown(event) {
-  if (event.key === 'Escape' && props.show) {
-    handleCancel()
-  }
-}
-
-// Watch for show prop changes to set initial value and focus
+// Reset the draft every time the dialog opens.
 watch(() => props.show, (newShow) => {
   if (newShow) {
     projectName.value = props.initialValue
-    // Add global keydown listener when dialog opens
-    document.addEventListener('keydown', handleGlobalKeydown)
-    nextTick(() => {
-      if (inputRef.value) {
-        inputRef.value.focus()
-        // Select all text if there's an initial value
-        if (props.initialValue) {
-          inputRef.value.select()
-        }
-      }
-    })
-  } else {
-    // Remove global keydown listener when dialog closes
-    document.removeEventListener('keydown', handleGlobalKeydown)
   }
 })
-
-function handleEnterKey() {
-  if (isValid.value) {
-    handleConfirm()
-  }
-  // Do nothing if validation fails
-}
 
 function handleConfirm() {
   if (isValid.value) {
@@ -134,67 +112,21 @@ function handleCancel() {
   projectName.value = ''
   emit('cancel')
 }
-
-// Cleanup on component unmount
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleGlobalKeydown)
-})
 </script>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.18);
-  z-index: 2001;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal-dialog {
-  background: #fff;
-  border-radius: 8px;
-  padding: 24px 20px 18px;
-  min-width: 320px;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.13);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.modal-dialog h3 {
-  margin-top: 0;
-  margin-bottom: 18px;
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-
-.modal-dialog input {
+input {
+  width: 100%;
   font-size: 1rem;
   padding: 8px 10px;
-  margin-bottom: 0px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-}
-
-.modal-actions {
-  margin-top: 20px;
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
+  border: 1px solid var(--app-color-border);
+  border-radius: var(--app-radius-control);
 }
 
 .validation-error {
-  color: #d32f2f;
+  color: var(--app-color-danger);
   font-size: 0.9rem;
   margin-top: 3px;
   margin-bottom: 3px;
-}
-
-button:disabled {
-  cursor: not-allowed !important;
-  opacity: 0.6;
-  border: solid 1px transparent;
 }
 </style>

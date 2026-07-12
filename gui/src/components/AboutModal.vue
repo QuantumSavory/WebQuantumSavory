@@ -1,20 +1,14 @@
 <template>
-  <div v-if="show" class="modal-overlay" @click="handleOverlayClick">
-    <div
-      class="modal-dialog about-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="about-title"
-      @click.stop
-    >
-      <div class="modal-header">
-        <h3 id="about-title">About WebQuantumSavory Simulation Builder</h3>
-        <button class="close-btn" @click="$emit('close')" aria-label="Close">
-          <X :size="18" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div class="modal-content">
+  <AppDialog
+    :show="show"
+    title="About WebQuantumSavory Simulation Builder"
+    width="min(700px, calc(100vw - 32px))"
+    class="about-modal"
+    closable
+    dismissable-mask
+    @close="emit('close')"
+  >
+    <div class="modal-content">
         <section class="quantumsavory-feature" aria-labelledby="quantumsavory-title">
           <span class="feature-label">Powered by</span>
           <h4 id="quantumsavory-title">
@@ -113,17 +107,18 @@
             </a>
           </div>
         </section>
-      </div>
-
-      <div class="modal-actions">
-        <button class="btn-primary" @click="$emit('close')">Close</button>
-      </div>
     </div>
-  </div>
+
+    <template #footer>
+      <AppButton variant="primary" @click="emit('close')">Close</AppButton>
+    </template>
+  </AppDialog>
 </template>
 
 <script setup>
-import { ArrowRight, CodeXml, MessageCircle, X } from '@lucide/vue'
+import { ArrowRight, CodeXml, MessageCircle } from '@lucide/vue'
+import AppButton from './ui/AppButton.vue'
+import AppDialog from './ui/AppDialog.vue'
 
 defineProps({
   show: {
@@ -133,57 +128,16 @@ defineProps({
 })
 
 const emit = defineEmits(['close'])
-
-function handleOverlayClick() {
-  emit('close')
-}
 </script>
 
 <style scoped>
 .about-modal {
-  max-width: 700px;
-  width: 90vw;
   max-height: 86vh;
-  overflow: hidden;
-}
-
-.modal-header {
-  display: flex;
-  flex-shrink: 0;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid #eee;
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 1.3rem;
-  font-weight: 600;
-  color: #222;
-}
-
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 1.2rem;
-  color: #666;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-}
-
-.close-btn:hover {
-  background: #f5f5f5;
-  color: #333;
 }
 
 .modal-content {
   min-height: 0;
   padding-right: 5px;
-  overflow-y: auto;
 }
 
 .quantumsavory-feature {
@@ -312,25 +266,9 @@ function handleOverlayClick() {
   line-height: 1.4;
 }
 
-.modal-actions {
-  display: flex;
-  flex-shrink: 0;
-  justify-content: flex-end;
-  margin-top: 20px;
-  padding-top: 15px;
-  border-top: 1px solid #eee;
-}
-
 @media (max-width: 600px) {
   .about-modal {
-    width: calc(100vw - 24px);
     min-width: 0;
-    padding: 20px 16px 16px;
-  }
-
-  .modal-header {
-    align-items: flex-start;
-    gap: 12px;
   }
 
   .quantumsavory-feature {

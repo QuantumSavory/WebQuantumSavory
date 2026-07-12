@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test'
 
 const PANEL_SIZE_STORAGE_KEY = 'bottomPanel_size'
+const BOTTOM_PANEL_COLLAPSED_STORAGE_KEY = 'panelCollapsed_logs_panel'
+const SELECTED_PANEL_STORAGE_KEY = 'panelCollapsed_selected_element'
+const LEGACY_SELECTED_PANEL_STORAGE_KEY = 'panelCollapsed_node_panel'
 
 async function mockBackend(page) {
   await page.route('http://localhost:8000/**', route => {
@@ -141,6 +144,10 @@ test.describe('Resizable bottom Tools panel', () => {
     await page.keyboard.press('Enter')
     const collapsed = await bounds(resizer)
     await expect(collapseToggle).toHaveAttribute('aria-expanded', 'false')
+    await expect.poll(() => page.evaluate(
+      key => localStorage.getItem(key),
+      BOTTOM_PANEL_COLLAPSED_STORAGE_KEY
+    )).toBe('true')
     expectNear(collapsed.height, 36)
     expectNear(collapsed.x, expanded.x)
     expectNear(collapsed.y + collapsed.height, expanded.y + expanded.height)
@@ -151,10 +158,37 @@ test.describe('Resizable bottom Tools panel', () => {
     await page.keyboard.press('Space')
     const restored = await bounds(resizer)
     await expect(collapseToggle).toHaveAttribute('aria-expanded', 'true')
+    await expect.poll(() => page.evaluate(
+      key => localStorage.getItem(key),
+      BOTTOM_PANEL_COLLAPSED_STORAGE_KEY
+    )).toBe('false')
     expectNear(restored.width, expanded.width)
     expectNear(restored.height, expanded.height)
     expectNear(restored.y + restored.height, expanded.y + expanded.height)
     await expect(resizer.locator('[data-testid="resize-bounding-pane"]')).toHaveCount(2)
+  })
+
+  test('migrates legacy selected-panel collapse state into the controlled layout registry', async ({ page }) => {
+    await page.addInitScript(({ legacyKey }) => {
+      localStorage.setItem(legacyKey, 'true')
+    }, { legacyKey: LEGACY_SELECTED_PANEL_STORAGE_KEY })
+    await loadApp(page)
+
+    const selectedPanelToggle = page.locator(
+      '.custom-panels-container > .custom-panel:first-child .panel-title.collapsable'
+    )
+    await expect(selectedPanelToggle).toHaveAttribute('aria-expanded', 'false')
+    await expect.poll(() => page.evaluate(key => localStorage.getItem(key), SELECTED_PANEL_STORAGE_KEY))
+      .toBe('true')
+
+    await selectedPanelToggle.click()
+    await expect(selectedPanelToggle).toHaveAttribute('aria-expanded', 'true')
+    await expect.poll(() => page.evaluate(key => localStorage.getItem(key), SELECTED_PANEL_STORAGE_KEY))
+      .toBe('false')
+
+    await page.reload()
+    await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+    await expect(selectedPanelToggle).toHaveAttribute('aria-expanded', 'true')
   })
 
   test('clamps saved dimensions to viewport and visible sidebar space', async ({ page }) => {

@@ -1,27 +1,27 @@
 import { ref } from 'vue'
 import Node from '../models/Node'
 import { generateUUid, setEdgeCorrectNodeOrder } from '../utils/Utils'
+import { SIMULATION_EDITING_LOCK_MESSAGE } from './uiServices'
 
 /**
  * useNodeEdgeOperations - Composable for node and edge operations
  */
-export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
+export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog, {
+  hideSlotState = () => {},
+  showAlert = (_title, message) => window.alert(message)
+} = {}) {
   const mapCenter = ref([-98.5795, 39.8283])
   const mapZoom = ref(4)
   
   const selectedItem = ref(null)
   const selectedType = ref(null)
   const justCreatedNode = ref(false)
-  const isCreatingNode = ref(false)
-  const newNodeName = ref('')
-  const newNodeType = ref('city')
-  const waitingForPosition = ref(false)
 
   function handleSelectLocal(item, type) {
     selectedItem.value = item
     selectedType.value = type
     if (!item && !type) {
-      window.hideSlotState()
+      hideSlotState()
     }
     if (type === 'node' && item) {
       item.expanded = true
@@ -30,7 +30,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
 
   function addNewNode(name, type, position){
     if (hasSimulationRun.value) {
-      alert('Cannot add nodes after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+      showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
       return
     }
 
@@ -57,27 +57,6 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
     let coords = [event.lngLat.lng, event.lngLat.lat]
     if( event.originalEvent.altKey ){
       addNewNode( null, "City", coords)
-      return
-    }
-
-    if (!waitingForPosition.value) return
-
-    addNewNode(null, newNodeType.value, coords)  
-
-    isCreatingNode.value = false
-    waitingForPosition.value = false
-    newNodeName.value = ''
-    newNodeType.value = 'city'
-  }
-
-  function createNewSlotClicked(selectedItem){
-    if (hasSimulationRun.value) {
-      alert('Cannot add slots after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
-      return
-    }
-
-    if( selectedItem ){
-      selectedItem.createNewSlot()
     }
   }
 
@@ -86,7 +65,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
     if (!item) return
 
     if (hasSimulationRun.value) {
-      alert('Cannot delete network items after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+      showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
       return
     }
 
@@ -113,7 +92,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
 
   function handleEdgeCreated(edge) {
     if (hasSimulationRun.value) {
-      alert('Cannot add edges after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+      showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
       return
     }
 
@@ -152,26 +131,6 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
     mapZoom.value = mapState.zoom
   }
 
-  function startCreateNode() {
-    isCreatingNode.value = true
-  }
-
-  function cancelCreateNode() {
-    isCreatingNode.value = false
-    waitingForPosition.value = false
-    newNodeName.value = ''
-    newNodeType.value = 'city'
-  }
-
-  function proceedToPosition() {
-    if (!newNodeName.value) return
-    waitingForPosition.value = true
-  }
-
-  function addNodeClickHandler() {
-    addNewNode(null, 'city', mapCenter.value)
-  }
-
   return {
     // State
     mapCenter,
@@ -179,23 +138,14 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog) {
     selectedItem,
     selectedType,
     justCreatedNode,
-    isCreatingNode,
-    newNodeName,
-    newNodeType,
-    waitingForPosition,
     
     // Methods
     addNewNode,
     handleMapClick,
-    createNewSlotClicked,
     deleteSelected,
     handleEdgeCreated,
     moveNode,
     handleMapStateChange,
-    startCreateNode,
-    cancelCreateNode,
-    proceedToPosition,
-    addNodeClickHandler,
     handleSelect: handleSelectLocal
   }
 }

@@ -1,18 +1,14 @@
 <script setup>
-import { reactive, ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, provide } from 'vue'
 import BaseMap from './components/map/BaseMap.vue'
-import Node from './models/Node'
-import Edge from './models/Edge'
 import NodePanel from './components/panels/NodePanel.vue'
 import ProjectStore from './models/ProjectStore.js'
 import NodeListPanel from './components/panels/NodeListPanel.vue'
 import RunnerPanel from './components/panels/RunnerPanel.vue'
 import FloatingProtocolsPanel from './components/panels/FloatingProtocolsPanel.vue'
-import FloatingProtocol from './models/FloatingProtocol'
-import EdgeProtocol from './models/EdgeProtocol'
 import { api } from './utils/ApiConnector'
 import {JsonViewer} from "vue3-json-viewer"
-import { generateUUid, setEdgeCorrectNodeOrder } from './utils/Utils'
+import { generateUUid } from './utils/Utils'
 //import "vue3-json-viewer/dist/vue3-json-viewer.css";
 import TieredMenu from 'primevue/tieredmenu';
 import {
@@ -43,6 +39,7 @@ import OpenProjectDialog from './components/OpenProjectDialog.vue'
 import AboutModal from './components/AboutModal.vue'
 import UnsavedChangesDialog from './components/UnsavedChangesDialog.vue'
 import AlertModal from './components/AlertModal.vue'
+import ConfirmModal from './components/ConfirmModal.vue'
 import RepeaterChainDialog from './components/RepeaterChainDialog.vue'
 import StarNetworkDialog from './components/StarNetworkDialog.vue'
 import GraphNetworkDialog from './components/GraphNetworkDialog.vue'
@@ -53,22 +50,21 @@ import LucideMenuIcon from './components/LucideMenuIcon.vue'
 import SmallScreenWarning from './components/SmallScreenWarning.vue'
 
 // Import composables
-import { useSimulation } from './composables/useSimulation.js'
-import { usePolling } from './composables/usePolling.js'
+import { useSimulationController } from './composables/useSimulationController.js'
 import { usePanelLayout } from './composables/usePanelLayout.js'
 import { useWindowManagement } from './composables/useWindowManagement.js'
 import { useNodeEdgeOperations } from './composables/useNodeEdgeOperations.js'
-import { useProjectManagement } from './composables/useProjectManagement.js'
+import { useProjectSession } from './composables/useProjectSession.js'
 import { useImportExport } from './composables/useImportExport.js'
-import { useDialogs } from './composables/useDialogs.js'
 import { useAppState } from './composables/useAppState.js'
 import { useUnsavedChanges } from './composables/useUnsavedChanges.js'
 
 // Import utils
-import { validatePayload, generateRandomNodes, generateRandomEdges, getNodeById, getNodeBySlotId } from './utils/projectHelpers.js'
-import { showEntangledSlots as showEntangledSlotsUtil, hideSlotState } from './utils/windowHelpers.js'
-import { fetchBackendLogs, mapBackendLogLevel, compareVersionsMismatch } from './utils/backendHelpers.js'
+import { validatePayload } from './utils/projectHelpers.js'
 import { isEntangledStateStillValid } from './utils/SlotConnectionUtils.js'
+import { createEmptyProject, toScriptExportPayload, toSimulationPayload } from './utils/projectCodec.js'
+import { UI_SERVICES_KEY } from './composables/uiServices.js'
+import { registerLegacyBridge, syncLegacyProjectData } from './utils/legacyBridge.js'
 import { generateRepeaterChain } from './utils/repeaterChain.js'
 import { generateStarNetwork } from './utils/starNetwork.js'
 import { generateGraphNetwork, GRAPH_TOPOLOGIES } from './utils/graphNetwork.js'
@@ -87,20 +83,7 @@ const DEFAULT_MAP_CENTER = [-98.5795, 39.8283] // Roughly the center of continen
 const DEFAULT_MAP_ZOOM = 4 // Zoom level to show most of the US
 
 // Initialize composables
-const projectData = ref({
-  name: 'New Project',
-  description: '',
-  variables: [],
-  simulationConfig: {
-    time: 1.0,
-    timeStep: 0.1,
-  },
-  net: {
-    nodes: [],
-    edges: [],
-    protocols: []
-  }
-})
+const projectData = ref(createEmptyProject())
 
 // Required variables and functions for composables
 // Log management functions
@@ -138,129 +121,29 @@ const maxLogs = ref(1000)
 const showRepeaterChainDialog = ref(false)
 const showStarNetworkDialog = ref(false)
 const showGraphNetworkDialog = ref(false)
+const confirmationRequest = ref(null)
+
+function confirmAction({ title, message, confirmButtonText = 'Confirm', dangerous = false }) {
+  return new Promise(resolve => {
+    confirmationRequest.value?.resolve(false)
+    confirmationRequest.value = { title, message, confirmButtonText, dangerous, resolve }
+  })
+}
+
+function resolveConfirmation(result) {
+  const request = confirmationRequest.value
+  confirmationRequest.value = null
+  request?.resolve(result)
+}
 
 // Minimized project data - cleans up project data for API calls
-const minimizedProjectData = computed(() => {
-  const projectCopy = JSON.parse(JSON.stringify(projectData.value))
-  
-  // Remove simulation config from the project data
-  delete projectCopy.simulationConfig
-  // Descriptions are project documentation, not simulator input.
-  delete projectCopy.description
+const minimizedProjectData = computed(() => toSimulationPayload(projectData.value))
+const exportScriptPayload = computed(() => toScriptExportPayload(projectData.value))
 
-  // Keep global variable definitions free of editor-only validation state.
-  projectCopy.variables = (projectCopy.variables || []).map(variable => ({
-    id: variable.id,
-    name: variable.name,
-    type: variable.type,
-    value: variable.value
-  }))
-  
-  // Exclusion lists
-  const excludeCommon = ['sim', 'net']
-  const excludeNode = [...excludeCommon, 'node']
-  const excludeEdge = [...excludeCommon, 'nodeA', 'nodeB']
-
-  // Clean Up Node Nodes
-  projectCopy.net.nodes.forEach(node => {
-    // Clean Up slot bg noises and ui-state properties
-    node.data.slots.forEach(slot => {
-      // delete ui-state properties
-      delete slot.ui_expanded
-
-      // Properly format background noise to object
-      if (typeof slot.backgroundNoise === 'string') {
-        slot.backgroundNoise = {
-          type: slot.backgroundNoise,
-          parameters: []
-        }
-      } else {
-        delete slot.backgroundNoise.doc
-        slot.backgroundNoise.parameters = slot.backgroundNoise.parameters.filter(p => {
-          const valueIsNull = p.value == null || p.value == ""
-          return !valueIsNull
-        })
-        slot.backgroundNoise.parameters = slot.backgroundNoise.parameters.map(p => {
-          const cleanParam = {
-            name: p.field,
-            value: p.value
-          }
-          return cleanParam
-        })
-      }
-    })
-    // Clean Up Node Protocol parameters
-    node.data.protocols.forEach(protocol => {
-      protocol.parameters = protocol.parameters.filter(p => {
-        // set type
-        if (p.selectedType != null) {
-          p.type = p.selectedType
-          delete p.selectedType
-        }
-        const isExcluded = excludeNode.includes(p.name)
-        const valueIsNull = p.value == null || p.value == ""
-        return !isExcluded && !valueIsNull
-      })
-    })
-  })
-
-  // Clean Up Edge Protocol parameters
-  projectCopy.net.edges.forEach(edge => {
-    edge.data.protocols.forEach(protocol => {
-      protocol.parameters = protocol.parameters.filter(p => {
-        // set type
-        if (p.selectedType != null) {
-          p.type = p.selectedType
-          delete p.selectedType
-        }
-        const isExcluded = excludeEdge.includes(p.name)
-        const valueIsNull = p.value == null || p.value == ""
-        return !isExcluded && !valueIsNull
-      })
-    })
-  })
-
-  // Clean Up Floating Protocol parameters
-  projectCopy.net.protocols.forEach(protocol => {
-    protocol.parameters = protocol.parameters.filter(p => {
-      // set type
-      if (p.selectedType != null) {
-        p.type = p.selectedType
-        delete p.selectedType
-      }
-      const isExcluded = excludeEdge.includes(p.name)
-      const valueIsNull = p.value == null || p.value == ""
-      return !isExcluded && !valueIsNull
-    })
-  })
-
-  // Remove read-only properties in slots
-  projectCopy.net.nodes.forEach(node => {
-    node.data.slots.forEach(slot => {
-      delete slot.isLocked
-      delete slot.assignment
-      delete slot.lastOperationTime
-      delete slot.representationType
-    })
-  })
-
-  return projectCopy
-})
-
-const exportScriptPayload = computed(() => ({
-  ...minimizedProjectData.value,
-  simulationConfig: {
-    time: projectData.value.simulationConfig.time,
-    timeStep: projectData.value.simulationConfig.timeStep
-  }
-}))
-
-// Provide a temporary no-op for stopPolling to satisfy useSimulation signature
-const stopPollingForSim = () => {}
-
-// Initialize window management first (needed by useSimulation and usePolling)
+// Window management is the authoritative owner of result-window state.
 const {
   resultWindows,
+  showResultsView,
   closeResultWindow,
   closeAllResultWindows,
   bringWindowToFront,
@@ -271,6 +154,21 @@ const {
   refreshAllWindows,
   clearAllPlots
 } = useWindowManagement()
+
+provide(UI_SERVICES_KEY, {
+  getProjectData: () => projectData.value,
+  showAlert,
+  showResultsView,
+  showEntangledSlots,
+  hideSlotState
+})
+
+const disposeLegacyBridge = registerLegacyBridge({
+  getProjectData: () => projectData.value,
+  showResultsView,
+  showEntangledSlots,
+  hideSlotState
+})
 
 /**
  * Check if the currently displayed entangled state still exists in the new response
@@ -298,8 +196,6 @@ function checkAndHideInvalidEntangledStates(response) {
     const isStillValid = isEntangledStateStillValid(activeState, newEntanglements)
     
     if (!isStillValid) {
-      console.log('🔍 checkAndHideInvalidEntangledStates: Displayed entangled state no longer exists, hiding it')
-      
       // Hide the entanglement visualization
       if (baseMapInstance.value.hideSlotConnectionState) {
         baseMapInstance.value.hideSlotConnectionState()
@@ -312,7 +208,6 @@ function checkAndHideInvalidEntangledStates(response) {
       })
       
       windowsToClose.forEach(window => {
-        console.log(`🔍 checkAndHideInvalidEntangledStates: Closing window ${window.id} associated with state ${stateId}`)
         closeResultWindow(window.id)
       })
     }
@@ -320,34 +215,6 @@ function checkAndHideInvalidEntangledStates(response) {
     console.error('Error checking entangled states:', error)
   }
 }
-
-// Use composables - initialize with basic dependencies first
-const {
-  simulationState,
-  simulationStatus,
-  backendSimulation,
-  isSimulationRunning,
-  isSimulationPaused,
-  isSimulationComplete,
-  isSimulationIdle,
-  currentSimulationTime,
-  targetSimulationTime,
-  hasSimulationRun,
-  getSlotById,
-  calculateSimulationProgress,
-  updateSimulationStatus,
-  resetSlotStates,
-  resetSimulation,
-  // Simulation lifecycle from composable (aliased)
-  prepareNetworkGraph: prepareNetworkGraphSim,
-  prepareSimulation: prepareSimulationSim,
-  runSimulationWithSteps: runSimulationWithStepsSim,
-  pauseSimulation: pauseSimulationSim,
-  resumeSimulation: resumeSimulationSim,
-  stopSimulation: stopSimulationSim,
-  getSimulationStatus: getSimulationStatusSim,
-  processIntermediateResults: processIntermediateResultsSim
-} = useSimulation(projectData, addLog, validatePayload, minimizedProjectData, stopPollingForSim, applicationLogs, refreshAllWindows, checkAndHideInvalidEntangledStates, clearAllPlots)
 
 // Alert modal function
 function showAlert(title, message) {
@@ -360,63 +227,45 @@ function closeAlertModal() {
   showAlertModal.value = false
 }
 
-// Initialize polling composable
 const {
-  startPolling: startPollingComposable,
-  stopPolling: stopPollingComposable, 
+  phase: simulationPhase,
+  capabilities: simulationCapabilities,
+  simulationState,
+  simulationStatus,
+  hasSimulationRun,
+  resetSimulation,
+  prepareNetworkGraph,
+  prepareSimulation,
+  runSimulationWithSteps,
+  pauseSimulation,
+  resumeSimulation,
+  stopSimulation,
+  getSimulationStatus,
+  stopPolling,
   startAlivePolling,
   stopAlivePolling,
-} = usePolling(simulationState, simulationStatus, projectData, minimizedProjectData, addLog, updateSimulationStatus, prepareNetworkGraphSim, refreshAllWindows, checkAndHideInvalidEntangledStates, showAlert)
+  dispose: disposeSimulationController
+} = useSimulationController({
+  projectData,
+  getProjectName: () => projectData.value.name,
+  getSimulationPayload: () => minimizedProjectData.value,
+  validatePayload,
+  addLog,
+  applicationLogs,
+  refreshAllWindows,
+  checkAndHideInvalidEntangledStates,
+  clearAllPlots,
+  hideSlotState,
+  showAlert
+})
 
-// Create local wrappers to use composable functions
-function startPolling() {
-  startPollingComposable()
-}
-
-function stopPolling() {
-  stopPollingComposable()
-}
-
-// Simulation lifecycle wrappers bound to composable functions
-function prepareNetworkGraph() {
-  return prepareNetworkGraphSim()
-}
-
-function prepareSimulation() {
-  return prepareSimulationSim()
-}
-
-function runSimulationWithSteps() {
-  startAlivePolling();
-  return runSimulationWithStepsSim(startPolling)
-}
-
-function pauseSimulation() {
-  return pauseSimulationSim(minimizedProjectData)
-}
-
-function resumeSimulation() {
-  startAlivePolling();
-  return resumeSimulationSim(minimizedProjectData, startPolling)
-}
-
-function stopSimulation() {
-  return stopSimulationSim(minimizedProjectData, isSimulationRunning, isSimulationPaused)
-}
-
-function getSimulationStatus(addLogs = true, updatePreviousLog = false) {
-  return getSimulationStatusSim(addLogs, updatePreviousLog)
-}
-
-function processIntermediateResults(stepResults) {
-  return processIntermediateResultsSim(stepResults)
-}
+const isNetworkEditingDisabled = computed(() => (
+  simulationCapabilities.value.editingDisabled || hasSimulationRun.value
+))
 
 const {
   isRightSidebarVisible,
   panelCollapsedStates,
-  panelContainerKey,
-  handlePanelCollapse,
   panelFlexValues,
   toggleRightSidebar
 } = usePanelLayout()
@@ -428,26 +277,17 @@ const {
   selectedItem,
   selectedType,
   justCreatedNode,
-  isCreatingNode,
-  newNodeName,
-  newNodeType,
-  waitingForPosition,
   handleSelect,
   addNewNode,
   handleMapClick: handleMapClickComposable,
   handleMapStateChange: handleMapStateChangeComposable,
-  startCreateNode,
-  cancelCreateNode,
-  proceedToPosition,
-  createNewSlotClicked,
   deleteSelected,
   handleEdgeCreated,
   moveNode
-} = useNodeEdgeOperations(projectData, hasSimulationRun, addLog)
+} = useNodeEdgeOperations(projectData, isNetworkEditingDisabled, addLog, { hideSlotState, showAlert })
 
 // Initialize app state composable
 const {
-  showMenu,
   showLoadDialog,
   loadProjectList,
   currentProjectName,
@@ -461,27 +301,27 @@ const {
   projectNameDialogMode,
   projectNameDialogInitialValue,
   showAboutModal,
-  selectedNodeIndex,
-  selectedItemInfo,
-  toggleJsonViewerVisibility: toggleJsonViewerVisibilityState,
-  toggleJsonViewerMode: toggleJsonViewerModeState
-} = useAppState(projectData, selectedItem, selectedType, mapCenter, mapZoom, applicationLogs, minimizedProjectData)
+  selectedNodeIndex
+} = useAppState({ projectData, selectedItem, selectedType })
 
 // Create a ref for markAsSaved that will be set after useUnsavedChanges is initialized
 const markAsSavedRef = ref(null)
 
-// Initialize project management composable (requires dependencies from above)
+// Project session owns project identity, persistence, and transition teardown.
 const {
-  openProject,
-  loadDemoProject,
-  createNewProject,
-  createSaveAsProject,
-  saveProject,
-  handleDeleteProject: handleDeleteProjectPM,
+  transitionGeneration: projectTransitionGeneration,
+  open: openProject,
+  openDemo: loadDemoProject,
+  create: createNewProject,
+  saveAs: createSaveAsProject,
+  save: saveProject,
+  delete: handleDeleteProjectPM,
+  importProject: importProjectIntoSession,
   serializeProjectData,
   deserializeProjectData,
-  generateCopyName
-} = useProjectManagement(
+  generateCopyName,
+  dispose: disposeProjectSession
+} = useProjectSession({
   projectData,
   currentProjectName,
   isDemoProject,
@@ -492,25 +332,36 @@ const {
   clearLogs,
   addLog,
   getSimulationStatus,
-  DEFAULT_MAP_CENTER,
-  DEFAULT_MAP_ZOOM,
-  TIME_STEP,
-  () => markAsSavedRef.value?.(), // Pass a function that calls the ref
+  defaultMapCenter: DEFAULT_MAP_CENTER,
+  defaultMapZoom: DEFAULT_MAP_ZOOM,
+  minimumTimeStep: TIME_STEP,
+  markAsSaved: () => markAsSavedRef.value?.(),
   resetSimulation,
   stopPolling,
   stopAlivePolling,
-  closeAllResultWindows
-)
+  closeAllResultWindows,
+  hideSlotState,
+  syncLegacyProjectData,
+  confirmVersionMismatch: message => confirmAction({
+    title: 'Project version mismatch',
+    message,
+    confirmButtonText: 'Open project'
+  }),
+  confirmDelete: message => confirmAction({
+    title: 'Delete project',
+    message,
+    confirmButtonText: 'Delete',
+    dangerous: true
+  }),
+  showError: message => showAlert('Project Error', message)
+})
 
-// Initialize unsaved changes tracking (requires serializeProjectData from useProjectManagement)
+// Unsaved snapshots compare the canonical storage representation.
 const {
   hasUnsavedChanges,
-  markAsSaved,
-  markAsUnsaved,
-  clearSnapshot
+  markAsSaved
 } = useUnsavedChanges(serializeProjectData)
 
-// Update the ref so useProjectManagement can call markAsSaved
 markAsSavedRef.value = markAsSaved
 
 // Unsaved changes dialog state
@@ -530,30 +381,20 @@ const {
   handleImportConflictOverwrite,
   handleImportConflictNewName,
   cancelImportConflict
-} = useImportExport(
+} = useImportExport({
   currentProjectName,
   importedProjectData,
   conflictProjectName,
   showImportConflictDialog,
-  clearLogs,
   addLog,
-  openProject,
+  importIntoSession: importProjectIntoSession,
   serializeProjectData,
-  minimizedProjectData
-)
+  showAlert
+})
 
-// Project handlers are still in App.vue due to circular dependencies
-// TODO: Refactor to avoid needing handleMenu defined before composables
-
-window.showEntangledSlots = ( slotId )=>{
-  console.log('🔗 showEntangledSlots: Called for slot:', slotId)
-  console.log('🔗 showEntangledSlots: simulationStatus.value:', simulationStatus.value)
-  console.log('🔗 showEntangledSlots: simulationStatus.value.state:', simulationStatus.value?.state)
+function showEntangledSlots(slotId) {
   const allEntanglements = simulationStatus.value?.state?.slots?.entanglements;
-  console.log('🔗 showEntangledSlots: All entanglements:', allEntanglements)
   if( !allEntanglements ){
-    console.warn('⚠️ showEntangledSlots: No entanglements found')
-    //alert('No entanglements found')
     return
   }
 
@@ -586,7 +427,7 @@ window.showEntangledSlots = ( slotId )=>{
   }
 
   try {
-      const result = baseMapComponent.showSlotConnectionState(entagledState);
+      baseMapComponent.showSlotConnectionState(entagledState);
   } catch (error) {
       console.error('Error calling showSlotConnectionState:', error)
   }
@@ -594,16 +435,13 @@ window.showEntangledSlots = ( slotId )=>{
 }
 
 
-window.hideSlotState = ()=>{
+function hideSlotState() {
   try{
     baseMapInstance.value.hideSlotConnectionState();
   }catch(error){
     console.log('Error calling hideSlotConnectionState:', error)
   }
 }
-
-
-// ============= END DEBUGGING FUNCTIONS, NOT FOR PRODUCTION =============
 
 
 const mainMenuItems = computed(() => {
@@ -658,42 +496,18 @@ const mainMenuItems = computed(() => {
   
   
   return result;
-}) 
-
-// moved to useSimulation composable
+})
 
 const mainMenuElement = ref(null)
 
-function toggleMainMenu(){
+function toggleMainMenu(event){
   mainMenuElement.value.toggle(event)
 }
-
-const jsonViewerKeyClicked = (...args  )=>{
-}
-
-// Configuration for initial data
-const INITIAL_NODE_COUNT = 30;
-const INITIAL_EDGE_COUNT = 60;
-
-// US bounds roughly (longitude, latitude)
-const US_BOUNDS = {
-  west: -125.0,
-  east: -65.0,
-  south: 25.0,
-  north: 49.0
-}
-
-const floatingProtocolsPanel = ref(null)
 
 // addNodeClickHandler wrapper for the template
 function addNodeClickHandler() {
   addNewNode(null, 'city', mapCenter.value)
 }
-
-
-// Generate initial edges for demo
-projectData.value.net.edges = generateRandomEdges(projectData.value.net.nodes, INITIAL_EDGE_COUNT)
-
 
 // Demo projects list
 const demoProjects = [
@@ -701,31 +515,15 @@ const demoProjects = [
   { name: demo2.name, data: demo2 }
 ]
 
-const loadProjectName = ref('') // This one is still needed in App.vue for now
-
 // App version from package.json
 const appVersion = ref(packageJson.version)
-
-
-// Update the most recent log entry with extended info
-function updateLastLog(extendedInfo) {
-  if (applicationLogs.value.length > 0) {
-    const lastLog = applicationLogs.value[applicationLogs.value.length - 1]
-    // Check if the last log is a "Running step" message
-    if (lastLog.message.startsWith('Running step')) {
-      console.log('📝 updateLastLog: Updating last log with simulation state')
-      lastLog.extendedInfo = extendedInfo
-      lastLog.level = 'success' // Change to success since step completed
-    }
-  }
-}
 
 function clearLogs() {
   applicationLogs.value = []
 }
 
 function openRepeaterChainGenerator() {
-  if (hasSimulationRun.value) {
+  if (isNetworkEditingDisabled.value) {
     showAlert(
       'Layout tools unavailable',
       'Reset or stop the simulation before changing the network layout.'
@@ -740,7 +538,7 @@ function closeRepeaterChainGenerator() {
 }
 
 function handleGenerateRepeaterChain(options) {
-  if (hasSimulationRun.value) {
+  if (isNetworkEditingDisabled.value) {
     closeRepeaterChainGenerator()
     showAlert(
       'Layout tools unavailable',
@@ -774,7 +572,7 @@ function handleGenerateRepeaterChain(options) {
 }
 
 function openStarNetworkGenerator() {
-  if (hasSimulationRun.value) {
+  if (isNetworkEditingDisabled.value) {
     showAlert(
       'Layout tools unavailable',
       'Reset or stop the simulation before changing the network layout.'
@@ -789,7 +587,7 @@ function closeStarNetworkGenerator() {
 }
 
 function handleGenerateStarNetwork(options) {
-  if (hasSimulationRun.value) {
+  if (isNetworkEditingDisabled.value) {
     closeStarNetworkGenerator()
     showAlert(
       'Layout tools unavailable',
@@ -822,7 +620,7 @@ function handleGenerateStarNetwork(options) {
 }
 
 function openGraphNetworkGenerator() {
-  if (hasSimulationRun.value) {
+  if (isNetworkEditingDisabled.value) {
     showAlert(
       'Layout tools unavailable',
       'Reset or stop the simulation before changing the network layout.'
@@ -837,7 +635,7 @@ function closeGraphNetworkGenerator() {
 }
 
 function handleGenerateGraphNetwork(options) {
-  if (hasSimulationRun.value) {
+  if (isNetworkEditingDisabled.value) {
     closeGraphNetworkGenerator()
     showAlert(
       'Layout tools unavailable',
@@ -869,7 +667,6 @@ function handleGenerateGraphNetwork(options) {
 
 
 function handleMenu(action) {
-  showMenu.value = false
   if (action === 'new') {
     // Check for unsaved changes before creating new project
     if (hasUnsavedChanges()) {
@@ -889,8 +686,7 @@ function handleMenu(action) {
       showProjectNameDialog.value = true
       return
     }
-    ProjectStore.saveProject(currentProjectName.value, serializeProjectData())
-    markAsSaved()
+    saveProject()
     
   } else if (action === 'open') {
     // Check for unsaved changes before opening project
@@ -974,9 +770,6 @@ function handleImportProjectFromDialog() {
   handleMenu('import')
 }
 
-// compareVersionsMismatch and mapBackendLogLevel moved to utils/backendHelpers.js
-
-// Use handleDeleteProject from useProjectManagement composable  
 const handleDeleteProject = handleDeleteProjectPM
 
 function toggleJsonViewerMode(){
@@ -987,7 +780,7 @@ function toggleJsonViewerMode(){
 
 function handleSaveAs() {
   if (!currentProjectName.value) {
-    alert('No project to save. Please create or open a project first.')
+    showAlert('Save As', 'No project to save. Please create or open a project first.')
     return
   }
   
@@ -1004,8 +797,7 @@ function handleUnsavedChangesSave() {
   
   // Save the project first
   if (currentProjectName.value) {
-    ProjectStore.saveProject(currentProjectName.value, serializeProjectData())
-    markAsSaved()
+    saveProject()
   } else {
     // If no project name, show save as dialog first
     handleSaveAs()
@@ -1065,6 +857,12 @@ function executePendingAction(action) {
 }
 
 onMounted( async () => {
+  // Capture the startup restore target before any await. A user can create or
+  // open a project while platform metadata is loading; that newer session must
+  // not be replaced by a late read of `recentProjectName`.
+  const startupRecentProjectName = localStorage.getItem('recentProjectName')
+  const startupTransitionGeneration = projectTransitionGeneration.value
+
   // fetch platform info
   await api.fetchPlatformInfo()
   // One-time migration: ensure metadata index exists for existing projects
@@ -1076,19 +874,15 @@ onMounted( async () => {
     ProjectStore.rebuildMetadataIndex()
   }
   
-  // check if recentProjectName is in local storage
-  const recentProjectName = localStorage.getItem('recentProjectName')
-  if (recentProjectName) {
-    openProject(recentProjectName)
+  // Restore only if no user-initiated project transition won the startup race.
+  if (
+    startupRecentProjectName
+    && !currentProjectName.value
+    && projectTransitionGeneration.value === startupTransitionGeneration
+  ) {
+    await openProject(startupRecentProjectName)
   }
   
-  // Force update of panel flex values after DOM is ready
-  // This ensures collapsed states from localStorage are properly reflected in the layout
-  await nextTick()
-  panelContainerKey.value++
-  console.log('🔄 Mounted: Panel flex values:', panelFlexValues.value)
-  console.log('🔄 Mounted: Panel collapsed states:', panelCollapsedStates.value)
-
   startAlivePolling();
   
   // Add beforeunload handler to warn about unsaved changes
@@ -1108,7 +902,11 @@ function handleBeforeUnload(event) {
 
 // Clean up beforeunload handler on unmount
 onUnmounted(() => {
+  resolveConfirmation(false)
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  disposeProjectSession()
+  disposeSimulationController()
+  disposeLegacyBridge()
 })
 </script>
 
@@ -1122,7 +920,7 @@ onUnmounted(() => {
         <span class="version-badge">v{{ appVersion }}</span>
       </div>
       <div class="topbar-right">
-        <div class="topbar-menu" @mouseleave="showMenu = false">
+        <div class="topbar-menu">
           <div v-if="currentProjectName" class="project-name-container">
             <span class="project-name-label" :title="currentProjectName">{{ currentProjectName }}</span>
           </div>
@@ -1188,7 +986,9 @@ onUnmounted(() => {
                 id="runnerPanel" 
                 :projectData="projectData" 
                 :simulationStatus="simulationStatus" 
-                :simulationState="{ ...simulationState, hasSimulationRun }"
+                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
+                :phase="simulationPhase"
+                :capabilities="simulationCapabilities"
                 @run="runSimulationWithSteps" 
                 @pause="pauseSimulation"
                 @resume="resumeSimulation"
@@ -1197,7 +997,7 @@ onUnmounted(() => {
                 @prepareSimulation="prepareSimulation"
             />
             </div>
-          <div class="custom-panels-container" :key="panelContainerKey">
+          <div class="custom-panels-container">
             <!-- First Panel: NodePanel or EdgePanel -->
             <div 
               class="custom-panel"
@@ -1211,11 +1011,11 @@ onUnmounted(() => {
                 :node="selectedItem" 
                 :nodeIndex="selectedNodeIndex"
                 :justCreated="justCreatedNode"
-                :simulationState="{ ...simulationState, hasSimulationRun }"
+                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
                 :variables="projectData.variables"
+                v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
                 @name-edit-complete="justCreatedNode = false"
-                @collapsed-changed="(collapsed) => handlePanelCollapse('node_panel', collapsed)"
               />
               <!-- EdgePanel for selected edge -->
               <EdgePanel 
@@ -1224,14 +1024,14 @@ onUnmounted(() => {
                 :projectData="projectData"
                 :key="selectedItem && selectedItem.id"
                 :edge="selectedItem"
-                :simulationState="{ ...simulationState, hasSimulationRun }"
+                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
                 :variables="projectData.variables"
+                v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
-                @collapsed-changed="(collapsed) => handlePanelCollapse('edge_panel', collapsed)"
               />
               <VoidPanel 
                 v-else
-                @collapsed-changed="(collapsed) => handlePanelCollapse('void_panel', collapsed)"
+                v-model:collapsed="panelCollapsedStates.selectedElementPanel"
               >Nothing Selected</VoidPanel>
             </div>
             
@@ -1244,11 +1044,11 @@ onUnmounted(() => {
                 id="nodeListPanel" 
                 :nodes="projectData.net.nodes"
                 :selected-node="selectedItem && selectedType === 'node' ? selectedItem : null"
-                :simulationState="{ ...simulationState, hasSimulationRun }"
+                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
+                v-model:collapsed="panelCollapsedStates.nodeListPanel"
                 @select="node => handleSelect(node, 'node')" 
                 @addNewNode="addNodeClickHandler"
                 @move-node="moveNode"
-                @collapsed-changed="(collapsed) => handlePanelCollapse('node_list', collapsed)"
               />
             </div>
             
@@ -1262,9 +1062,9 @@ onUnmounted(() => {
                 :projectData="projectData" 
                 :edges="projectData.net.edges"
                 :selected-edge="selectedItem && selectedType === 'edge' ? selectedItem : null"
-                :simulationState="{ ...simulationState, hasSimulationRun }"
+                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
+                v-model:collapsed="panelCollapsedStates.edgeListPanel"
                 @select="edge => handleSelect(edge, 'edge')"
-                @collapsed-changed="(collapsed) => handlePanelCollapse('edge_list', collapsed)"
               />
             </div>
             
@@ -1276,11 +1076,10 @@ onUnmounted(() => {
               <FloatingProtocolsPanel 
                 id="floatingProtocolsPanel" 
                 v-if="api.config.value.protocolTypes?.floating"
-                ref="floatingProtocolsPanel"    
                 :protocols="projectData.net.protocols"
-                :simulationState="{ ...simulationState, hasSimulationRun }"
+                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
                 :variables="projectData.variables"
-                @collapsed-changed="(collapsed) => handlePanelCollapse('floating_protocols', collapsed)"
+                v-model:collapsed="panelCollapsedStates.floatingProtocolsPanel"
               />
               <div v-else></div>
             </div>
@@ -1288,18 +1087,6 @@ onUnmounted(() => {
 
           
 
-          <!-- Selected Edge Info (fallback) -->
-          <!-- <template v-if="selectedItem && selectedType === 'edge'">
-            <div class="selected-item">
-              <h3>{{ selectedItemInfo.title }}</h3>
-              <div class="item-details">
-                <div v-for="detail in selectedItemInfo.details" :key="detail.label" class="detail-row">
-                  <span class="detail-label">{{ detail.label }}:</span>
-                  <span class="detail-value">{{ detail.value }}</span>
-                </div>
-              </div>
-            </div>
-          </template> -->
         </div>
       </div>
     </div>
@@ -1308,15 +1095,16 @@ onUnmounted(() => {
     <div class="logs-panel-container">
       <BottomPanel
         :logs="applicationLogs"
-        :max-logs="50"
+        :max-logs="200"
         :show-timestamps="true"
         :allow-clear="true"
-        :helpers-disabled="hasSimulationRun"
+        :helpers-disabled="isNetworkEditingDisabled"
         :variables="projectData.variables"
         :project-data="projectData"
         :export-script-payload="exportScriptPayload"
-        :variables-disabled="hasSimulationRun"
+        :variables-disabled="isNetworkEditingDisabled"
         :right-sidebar-visible="isRightSidebarVisible"
+        v-model:collapsed="panelCollapsedStates.bottomPanel"
         @clear-logs="clearLogs"
         @update-description="projectData.description = $event"
         @open-repeater-chain-generator="openRepeaterChainGenerator"
@@ -1402,6 +1190,17 @@ onUnmounted(() => {
       @close="closeAlertModal"
     />
 
+    <ConfirmModal
+      v-if="confirmationRequest"
+      :show="true"
+      :title="confirmationRequest.title"
+      :message="confirmationRequest.message"
+      :confirm-button-text="confirmationRequest.confirmButtonText"
+      :dangerous="confirmationRequest.dangerous"
+      @confirm="resolveConfirmation(true)"
+      @cancel="resolveConfirmation(false)"
+    />
+
     <div v-if="showJsonViewer" class="json-viewer-box">
       <div class="json-viewer-header" style="display: flex; align-items: center; justify-content: space-between;">
         <h3 style="cursor: pointer; text-transform: capitalize;" @click="toggleJsonViewerMode">{{jsonViewerMode}}</h3>
@@ -1410,7 +1209,7 @@ onUnmounted(() => {
           <X :size="22" aria-hidden="true" />
         </button>
       </div>
-      <JsonViewer :value="jsonViewerMode === 'full' ? projectData : minimizedProjectData" expanded :expandDepth="10" copyable boxed sort theme="light"  @onKeyClick="jsonViewerKeyClicked">
+      <JsonViewer :value="jsonViewerMode === 'full' ? projectData : minimizedProjectData" expanded :expandDepth="10" copyable boxed sort theme="light">
         <template #copy="{ copied }">
           <span class="json-copy-control">
             <Check v-if="copied" :size="15" aria-hidden="true" />

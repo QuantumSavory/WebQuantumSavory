@@ -163,6 +163,7 @@ import {
   unknownParameterTypes
 } from '../../utils/parameterTypes'
 import TypedValueInput from './TypedValueInput.vue'
+import { useUiServices } from '../../composables/uiServices'
 
 const props = defineProps({
   protocol: {
@@ -193,6 +194,7 @@ const props = defineProps({
   }
 })
 const emit = defineEmits(['select', 'delete'])
+const { showResultsView } = useUiServices()
 
 // Check if protocol editing should be disabled
 const isEditingDisabled = computed(() => {
@@ -210,7 +212,7 @@ function showResults(){
     ...props.contextInfo,
     protocolType: getProtocolTypeSimpleName(props.protocol.type)
   }
-  window.showResultsView( 'protocol', props.protocol, context )
+  showResultsView('protocol', props.protocol, context)
 }
 
 function isGrayedParameter(param){

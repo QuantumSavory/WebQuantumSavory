@@ -3,7 +3,8 @@
     panel_id="edge_list" 
     title="Edges" 
     :collapsable="true"
-    @collapsed-changed="$emit('collapsed-changed', $event)"
+    :collapsed="collapsed"
+    @update:collapsed="emit('update:collapsed', $event)"
   >
     <template #content>
       <div v-if="!edges.length" class="empty-list">No edges</div>
@@ -33,7 +34,6 @@
 
 
 <script setup>
-import { defineProps, defineEmits } from 'vue'
 import BasePanel from './BasePanel.vue'
 
 const props = defineProps({
@@ -48,10 +48,14 @@ const props = defineProps({
   selectedEdge: {
     type: Object,
     default: null
+  },
+  collapsed: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['select', 'collapsed-changed'])
+const emit = defineEmits(['select', 'update:collapsed'])
 
 function getNodeById(id){
   const result =  props.projectData.net.nodes.find(node => node.id === id)
@@ -182,4 +186,4 @@ function handleNewEdge() {
   padding: 10px 18px;
   text-align: center;
 }
-</style> 
+</style>

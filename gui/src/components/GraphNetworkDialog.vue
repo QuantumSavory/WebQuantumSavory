@@ -1,19 +1,20 @@
 <template>
-  <div v-if="show" class="modal-overlay" @click.self="handleCancel">
-    <div
-      class="modal-dialog layout-helper-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="graph-network-title"
-    >
-      <h3 id="graph-network-title">Graph Network Generator</h3>
+  <AppDialog
+    :show="show"
+    title="Graph Network Generator"
+    width="min(560px, calc(100vw - 32px))"
+    class="layout-generator-dialog"
+    dismissable-mask
+    @close="handleCancel"
+  >
+    <form id="graph-network-form" @submit.prevent="handleConfirm">
       <p class="dialog-description">
-        Replace an isolated template edge and its endpoints with a grid or all-to-all network.
+      Replace an isolated template edge and its endpoints with a grid or all-to-all network.
       </p>
 
-      <div class="form-grid">
+    <div class="form-grid">
         <label for="graph-template-node">Node template</label>
-        <select id="graph-template-node" ref="firstInput" v-model="form.templateNodeId">
+        <select id="graph-template-node" v-model="form.templateNodeId" autofocus>
           <option value="" disabled>Select a node template</option>
           <option v-for="node in nodes" :key="node.id" :value="node.id">
             {{ node.name }}
@@ -73,38 +74,41 @@
             step="1"
           >
         </template>
-      </div>
+    </div>
 
-      <p class="template-note">
-        Both edge endpoints and the selected edge are removed. Every generated node copies the
-        selected node's configuration, while the edge endpoints define the first two positions.
-      </p>
-      <div v-if="validationMessage" class="validation-error" role="alert">
-        {{ validationMessage }}
-      </div>
+    <p class="template-note">
+      Both edge endpoints and the selected edge are removed. Every generated node copies the
+      selected node's configuration, while the edge endpoints define the first two positions.
+    </p>
+    <div v-if="validationMessage" class="validation-error" role="alert">
+      {{ validationMessage }}
+    </div>
+    </form>
 
-      <div class="modal-actions">
-        <button type="button" @click="handleCancel">Cancel</button>
-        <button
-          type="button"
-          class="primary"
+    <template #footer>
+        <AppButton @click="handleCancel">Cancel</AppButton>
+        <AppButton
+          variant="primary"
+          type="submit"
+          form="graph-network-form"
           :disabled="!validation.valid"
           @click="handleConfirm"
         >
           Generate Graph
-        </button>
-      </div>
-    </div>
-  </div>
+        </AppButton>
+    </template>
+  </AppDialog>
 </template>
 
 <script setup>
-import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import {
   GRAPH_TOPOLOGIES,
   validateGraphNetwork
 } from '../utils/graphNetwork'
 import { edgeHasNode, endpointId } from '../utils/layoutTemplates'
+import AppButton from './ui/AppButton.vue'
+import AppDialog from './ui/AppDialog.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -113,7 +117,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['confirm', 'cancel'])
-const firstInput = ref(null)
 const form = reactive({
   templateNodeId: '',
   templateEdgeId: '',
@@ -140,14 +143,9 @@ watch(() => form.templateNodeId, () => {
   }
 })
 
-watch(() => props.show, async isShown => {
+watch(() => props.show, isShown => {
   if (isShown) {
     resetForm()
-    document.addEventListener('keydown', handleGlobalKeydown)
-    await nextTick()
-    firstInput.value?.focus()
-  } else {
-    document.removeEventListener('keydown', handleGlobalKeydown)
   }
 })
 
@@ -173,93 +171,4 @@ function handleCancel() {
   emit('cancel')
 }
 
-function handleGlobalKeydown(event) {
-  if (event.key === 'Escape' && props.show) {
-    handleCancel()
-  } else if (event.key === 'Enter' && props.show && validation.value.valid) {
-    handleConfirm()
-  }
-}
-
-onUnmounted(() => document.removeEventListener('keydown', handleGlobalKeydown))
 </script>
-
-<style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.24);
-}
-
-.layout-helper-dialog {
-  width: min(560px, calc(100vw - 32px));
-  padding: 24px 22px 18px;
-}
-
-h3 {
-  margin: 0 0 8px;
-  font-size: 1.15rem;
-}
-
-.dialog-description,
-.template-note {
-  color: #555;
-  line-height: 1.4;
-}
-
-.dialog-description {
-  margin: 0 0 18px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: minmax(145px, auto) minmax(220px, 1fr);
-  gap: 11px 14px;
-  align-items: center;
-}
-
-.form-grid label {
-  color: #333;
-  font-weight: 600;
-}
-
-.form-grid select,
-.form-grid input {
-  width: 100%;
-  min-width: 0;
-}
-
-.template-note {
-  margin: 14px 0 0;
-  font-size: 0.86rem;
-}
-
-.validation-error {
-  margin-top: 7px;
-  color: #b42318;
-  font-size: 0.9rem;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-@media (max-width: 560px) {
-  .form-grid {
-    grid-template-columns: 1fr;
-    gap: 5px;
-  }
-
-  .form-grid select,
-  .form-grid input {
-    margin-bottom: 7px;
-  }
-}
-</style>

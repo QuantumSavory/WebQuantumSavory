@@ -380,13 +380,15 @@ test.describe('States Zoo variables', () => {
     const fileChooserPromise = page.waitForEvent('filechooser')
     await page.getByText('Import', { exact: true }).click()
     const fileChooser = await fileChooserPromise
-    page.once('dialog', dialog => dialog.accept())
     await fileChooser.setFiles({
       name: 'imported-states-zoo.json',
       mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(importedProject)),
     })
     await expect(page.locator('.project-name-label')).toContainText('Imported States Zoo Project')
+    const importedDialog = page.getByRole('dialog', { name: 'Project imported' })
+    await expect(importedDialog).toContainText('Project "Imported States Zoo Project" imported successfully!')
+    await importedDialog.getByRole('button', { name: 'OK' }).click()
     const importedPanel = await openStatesZoo(page)
     const importedRow = importedPanel.locator(
       '.states-zoo-row[data-variable-id="variable_imported_zoo"]',

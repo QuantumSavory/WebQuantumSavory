@@ -29,14 +29,16 @@
 
 <script setup>
 
-import { defineProps, defineEmits, computed, ref } from 'vue'
+import { computed, ref } from 'vue'
 import ProtocolEditor from './ProtocolEditor.vue'
 import Menu from 'primevue/menu';
 import { api } from '../../utils/ApiConnector'
 import { getCurrentInstance } from 'vue'
 import { generateUUid } from '../../utils/Utils'
 import { Plus } from '@lucide/vue'
+import { SIMULATION_EDITING_LOCK_MESSAGE, useUiServices } from '../../composables/uiServices'
 const { proxy } = getCurrentInstance()
+const { showAlert } = useUiServices()
 
 const props = defineProps({
   protocols: {
@@ -102,7 +104,7 @@ const items = computed(() => {
 function deleteProtocol( protocol ){
   // Prevent deleting protocols if simulation has run
   if (props.simulationState?.hasSimulationRun) {
-    alert('Cannot delete protocols after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
 
@@ -134,7 +136,7 @@ function getProtocolTypeSimpleName( protocolType ){
 function toggleAddProtocolMenu(event) {
   // Prevent adding protocols if simulation has run
   if (props.simulationState?.hasSimulationRun) {
-    alert('Cannot add protocols after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
   addProtocolMenu.value.toggle(event)
@@ -151,12 +153,12 @@ function handleSelect(protocol) {
 function handleAddProtocol( protocolTypeId) {
   // Prevent adding protocols if simulation has run
   if (props.simulationState?.hasSimulationRun) {
-    alert('Cannot add protocols after simulation has started.\n\nPlease click the Reset button (or Stop button) to clear the simulation state and enable editing again.')
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
 
   if( !protocolTypeId ){
-    alert('No protocol type selected')
+    showAlert('Protocol required', 'Select a protocol type before adding it.')
     return;
   }
   const protocolId = generateUUid('protocol')
