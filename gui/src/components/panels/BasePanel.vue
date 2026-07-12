@@ -13,8 +13,8 @@
           <slot name="title-badges"></slot>
         </div>
         <div class="panel-title-icon" >
-          <i class="pi pi-chevron-down" v-if="collapsed"></i>
-          <i class="pi pi-chevron-up" v-else></i>
+          <ChevronDown v-if="collapsed" :size="15" aria-hidden="true" />
+          <ChevronUp v-else :size="15" aria-hidden="true" />
         </div>
     </div>
     <div class="panel-title" v-else>
@@ -39,6 +39,7 @@
 
 <script setup>
 import { ref } from 'vue'
+import { ChevronDown, ChevronUp } from '@lucide/vue'
 
 const props = defineProps({
   panel_id:     { type: String,   required: true  }, 

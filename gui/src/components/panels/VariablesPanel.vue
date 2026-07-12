@@ -10,7 +10,8 @@
         :disabled="disabled"
         @click="addVariable"
       >
-        + Add Variable
+        <Plus :size="15" aria-hidden="true" />
+        Add Variable
       </button>
     </div>
 
@@ -84,7 +85,7 @@
           :aria-label="`Delete variable ${variable.name || variable.id}`"
           @click="deleteVariable(variable)"
         >
-          <i class="pi pi-trash" aria-hidden="true"></i>
+          <Trash2 :size="15" aria-hidden="true" />
         </button>
       </div>
     </div>
@@ -93,6 +94,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { Plus, Trash2 } from '@lucide/vue'
 import Variable, { isStatesZooVariable, isVariableReferenced } from '../../models/Variable'
 import {
   VARIABLE_PARAMETER_TYPES,
@@ -178,6 +180,12 @@ function variableNameError(variable) {
   margin-bottom: 8px;
 }
 
+.add-variable-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .variables-description {
   margin: 0;
   color: #666;
@@ -251,10 +259,8 @@ function variableNameError(variable) {
 }
 
 .delete-variable-button {
-  width: 28px;
-  height: 28px;
+  width: 25px;
   margin-top: 17px;
-  padding: 0;
   color: #666;
 }
 

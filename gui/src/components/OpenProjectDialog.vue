@@ -29,12 +29,18 @@
           @sort="onSort"
         >
           <Column field="name" header="Project Name" :sortable="true" class="name-column">
+            <template #sorticon="slotProps">
+              <LucideSortIcon v-bind="slotProps" :icon-class="slotProps.class" />
+            </template>
             <template #body="slotProps">
               <div class="project-name">{{ slotProps.data.name }}</div>
             </template>
           </Column>
           
           <Column field="metadata.nodeCount" header="Nodes" :sortable="true" class="count-column">
+            <template #sorticon="slotProps">
+              <LucideSortIcon v-bind="slotProps" :icon-class="slotProps.class" />
+            </template>
             <template #body="slotProps">
               <span :class="['count-badge', getCountBadgeClass(slotProps.data.metadata.nodeCount || 0)]">
                 {{ slotProps.data.metadata.nodeCount || 0 }}
@@ -43,6 +49,9 @@
           </Column>
           
           <Column field="metadata.edgeCount" header="Edges" :sortable="true" class="count-column">
+            <template #sorticon="slotProps">
+              <LucideSortIcon v-bind="slotProps" :icon-class="slotProps.class" />
+            </template>
             <template #body="slotProps">
               <span :class="['count-badge', getCountBadgeClass(slotProps.data.metadata.edgeCount || 0)]">
                 {{ slotProps.data.metadata.edgeCount || 0 }}
@@ -51,6 +60,9 @@
           </Column>
           
           <Column field="metadata.slotCount" header="Slots" :sortable="true" class="count-column">
+            <template #sorticon="slotProps">
+              <LucideSortIcon v-bind="slotProps" :icon-class="slotProps.class" />
+            </template>
             <template #body="slotProps">
               <span :class="['count-badge', getCountBadgeClass(slotProps.data.metadata.slotCount || 0)]">
                 {{ slotProps.data.metadata.slotCount || 0 }}
@@ -59,6 +71,9 @@
           </Column>
           
           <Column field="metadata.protocolCount" header="Protocols" :sortable="true" class="count-column">
+            <template #sorticon="slotProps">
+              <LucideSortIcon v-bind="slotProps" :icon-class="slotProps.class" />
+            </template>
             <template #body="slotProps">
               <span :class="['count-badge', getCountBadgeClass(slotProps.data.metadata.protocolCount || 0)]">
                 {{ slotProps.data.metadata.protocolCount || 0 }}
@@ -67,6 +82,9 @@
           </Column>
           
           <Column field="metadata.openedAt" header="Last Opened" :sortable="true" class="date-column">
+            <template #sorticon="slotProps">
+              <LucideSortIcon v-bind="slotProps" :icon-class="slotProps.class" />
+            </template>
             <template #body="slotProps">
               <span 
                 class="date-text" 
@@ -78,6 +96,9 @@
           </Column>
           
           <Column field="metadata.updatedAt" header="Last Modified" :sortable="true" class="date-column">
+            <template #sorticon="slotProps">
+              <LucideSortIcon v-bind="slotProps" :icon-class="slotProps.class" />
+            </template>
             <template #body="slotProps">
               <span 
                 class="date-text"
@@ -96,7 +117,7 @@
                 v-tooltip.top="'Delete project'"
                 aria-label="Delete project"
               >
-                <i class="pi pi-trash"></i>
+                <Trash2 :size="15" aria-hidden="true" />
               </button>
             </template>
           </Column>
@@ -105,11 +126,11 @@
       <div class="modal-actions">
         <div class="left-actions">
           <button @click="handleNewProject" class="btn-primary">
-            <i class="pi pi-plus"></i>
+            <FilePlus2 :size="16" aria-hidden="true" />
             Create New
           </button>
           <button @click="handleImportProject" class="btn-secondary">
-            <i class="pi pi-upload"></i>
+            <FileUp :size="16" aria-hidden="true" />
             Import from File
           </button>
         </div>
@@ -125,6 +146,8 @@
 import { watch, onUnmounted, ref, onMounted, computed, nextTick } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
+import { FilePlus2, FileUp, Trash2 } from '@lucide/vue'
+import LucideSortIcon from './LucideSortIcon.vue'
 
 const props = defineProps({
   show: {
@@ -570,7 +593,4 @@ onUnmounted(() => {
   transform: scale(1.1);
 }
 
-.delete-project-btn i {
-  font-size: 0.9rem;
-}
 </style>

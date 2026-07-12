@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { onMounted } from 'vue'
+import { Pause, Play, Settings2, Square } from '@lucide/vue'
 
 const props = defineProps({
   projectData: {
@@ -153,7 +154,7 @@ function toggleAdvancedControls() {
           title="Toggle advanced controls"
           :disabled="isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive"
         >
-          <i class="pi pi-cog"></i>
+          <Settings2 :size="16" aria-hidden="true" />
         </button>
         
         <!-- Run/Pause/Resume/Stop buttons -->
@@ -163,7 +164,7 @@ function toggleAdvancedControls() {
           @click="handleRun"
           title="Run simulation"
         >
-          <i class="pi pi-play"></i>
+          <Play :size="16" aria-hidden="true" />
         </button>
         
         <button 
@@ -172,7 +173,7 @@ function toggleAdvancedControls() {
           @click="handlePause"
           title="Pause simulation"
         >
-          <i class="pi pi-pause"></i>
+          <Pause :size="16" aria-hidden="true" />
         </button>
         
         <button 
@@ -181,7 +182,7 @@ function toggleAdvancedControls() {
           @click="handleResume"
           title="Resume simulation"
         >
-          <i class="pi pi-play"></i>
+          <Play :size="16" aria-hidden="true" />
         </button>
         
         <!-- Stop button hidden - behavior TBD with backend developer -->
@@ -191,7 +192,7 @@ function toggleAdvancedControls() {
           @click="handleStop"
           title="Stop simulation"
         >
-          <i class="pi pi-stop"></i>
+          <Square :size="15" aria-hidden="true" />
         </button>
       </div>
     </div>

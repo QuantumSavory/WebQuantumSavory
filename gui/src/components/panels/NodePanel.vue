@@ -33,9 +33,13 @@
           </template>
           <div class="" >
             <button class="options-btn noborder" @mouseover="showOptionsMenu" aria-label="Menu" style="font-weight: bold; color: #000;">
-              ⋮
+              <EllipsisVertical :size="18" aria-hidden="true" />
             </button>
-            <Menu @mouseleave="hideOptionsMenu" ref="optionsMenuElement"  :model="mainMenuItems" :popup="true" style="transform: translate(10px, -30px);"/>
+            <Menu @mouseleave="hideOptionsMenu" ref="optionsMenuElement"  :model="mainMenuItems" :popup="true" style="transform: translate(10px, -30px);">
+              <template #itemicon="{ item }">
+                <LucideMenuIcon :item="item" />
+              </template>
+            </Menu>
           </div>
         </div>
       </section>
@@ -110,7 +114,10 @@
           </div>
         </div>
         <div class="slot-controls">
-          <button class="add-slot-btn noborder" @click="addSlot">+ Add Slot</button>
+          <button class="add-slot-btn noborder" @click="addSlot">
+            <Plus :size="14" aria-hidden="true" />
+            Add Slot
+          </button>
         </div>
         
         <!-- Add N Slots Mini Form -->
@@ -242,6 +249,8 @@ import SlotIcon from '../map/SlotIcon.vue'
 import SlotEditor from './SlotEditor.vue'
 import Menu from 'primevue/menu'
 import NodeIndex from './NodeIndex.vue'
+import { EllipsisVertical, ListChecks, ListPlus, Plus, Trash2 } from '@lucide/vue'
+import LucideMenuIcon from '../LucideMenuIcon.vue'
 
 // Props: node (Node instance), justCreated (bool: true if node was just created and selected)
 const props = defineProps({
@@ -333,9 +342,9 @@ function deleteSlot(slot) {
 const optionsMenuElement = ref(null)
 const mainMenuItems = computed(() => {
   let result = [
-    { label: 'Delete', icon: 'pi pi-trash', command: () => handleOptionsMenu('delete') },
-    { label: 'Add N Slots', icon: 'pi pi-plus', command: () => addNSlots() },
-    { label: 'Batch Edit', icon: 'pi pi-pencil', command: () => toggleBatchEdit() },
+    { label: 'Delete', lucideIcon: Trash2, command: () => handleOptionsMenu('delete') },
+    { label: 'Add N Slots', lucideIcon: ListPlus, command: () => addNSlots() },
+    { label: 'Batch Edit', lucideIcon: ListChecks, command: () => toggleBatchEdit() },
   ];
   return result;
 }) 
@@ -635,6 +644,12 @@ if (props.justCreated) {
 
 
 <style scoped>
+.add-slot-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 
 .node-name {
   font-size: 1.15rem;

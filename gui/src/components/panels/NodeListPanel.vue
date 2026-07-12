@@ -31,7 +31,7 @@
                 :disabled="index === 0 || isReorderingLocked"
                 v-tooltip.top="reorderTooltip(index === 0)"
                 @click="moveNode(index, index - 1)"
-              ><i class="pi pi-chevron-up" aria-hidden="true"></i></button>
+              ><ArrowUp :size="14" aria-hidden="true" /></button>
               <button
                 class="node-order-button noborder"
                 type="button"
@@ -39,13 +39,16 @@
                 :disabled="index === nodes.length - 1 || isReorderingLocked"
                 v-tooltip.top="reorderTooltip(index === nodes.length - 1)"
                 @click="moveNode(index, index + 1)"
-              ><i class="pi pi-chevron-down" aria-hidden="true"></i></button>
+              ><ArrowDown :size="14" aria-hidden="true" /></button>
             </span>
           </span>
         </div>
       </div>
       <div class="action-buttons">
-        <button @click="handleNewNode" class="noborder"> + Add Node</button>
+        <button @click="handleNewNode" class="noborder add-node-button">
+          <Plus :size="14" aria-hidden="true" />
+          Add Node
+        </button>
       </div>
     </template>
   </BasePanel>
@@ -54,6 +57,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { ArrowDown, ArrowUp, Plus } from '@lucide/vue'
 import BasePanel from './BasePanel.vue'
 import NodeIndex from './NodeIndex.vue'
 
@@ -96,6 +100,12 @@ function reorderTooltip(atBoundary) {
 
 
 <style scoped>
+.add-node-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .node-list-item {
   display: flex;
   justify-content: space-between;

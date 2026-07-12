@@ -10,7 +10,7 @@
       <div class="modal-header">
         <h3 id="about-title">About WebQuantumSavory Simulation Builder</h3>
         <button class="close-btn" @click="$emit('close')" aria-label="Close">
-          <i class="pi pi-times"></i>
+          <X :size="18" aria-hidden="true" />
         </button>
       </div>
 
@@ -33,7 +33,7 @@
             target="_blank"
             rel="noopener noreferrer"
           >
-            Explore QuantumSavory <span aria-hidden="true">&rarr;</span>
+            Explore QuantumSavory <ArrowRight :size="15" aria-hidden="true" />
           </a>
         </section>
 
@@ -93,7 +93,7 @@
               target="_blank"
               rel="noopener noreferrer"
             >
-              <i class="pi pi-comments" aria-hidden="true"></i>
+              <MessageCircle :size="18" aria-hidden="true" />
               <span>
                 <strong>Office hours</strong>
                 <small>Ask questions and find current scheduling and joining details.</small>
@@ -105,7 +105,7 @@
               target="_blank"
               rel="noopener noreferrer"
             >
-              <i class="pi pi-code" aria-hidden="true"></i>
+              <CodeXml :size="18" aria-hidden="true" />
               <span>
                 <strong>Bounty program</strong>
                 <small>Contribute fixes and enhancements across the open-source ecosystem.</small>
@@ -123,6 +123,8 @@
 </template>
 
 <script setup>
+import { ArrowRight, CodeXml, MessageCircle, X } from '@lucide/vue'
+
 defineProps({
   show: {
     type: Boolean,
@@ -226,6 +228,9 @@ function handleOverlayClick() {
 }
 
 .feature-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: #35379b;
   font-weight: 600;
   text-decoration: none;
@@ -291,9 +296,8 @@ function handleOverlayClick() {
   background: #f7f7ff;
 }
 
-.community-link i {
+.community-link .lucide {
   margin-top: 2px;
-  font-size: 1.15rem;
 }
 
 .community-link span {
