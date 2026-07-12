@@ -148,6 +148,14 @@ test.describe('star and graph layout helpers', () => {
     await connectNodes(page, 0, 1)
     const templates = await configureTemplates(page, 'Node 2')
 
+    await page.getByRole('tab', { name: 'Layout Tools' }).click()
+    await expect(page.getByRole('button', { name: 'Repeater Chain Generator' }).locator('.lucide-waypoints'))
+      .toBeVisible()
+    await expect(page.getByRole('button', { name: 'Star Network Generator' }).locator('.lucide-star'))
+      .toBeVisible()
+    await expect(page.getByRole('button', { name: 'Graph Network Generator' }).locator('.lucide-network'))
+      .toBeVisible()
+
     await openLayoutHelper(page, 'Star Network Generator')
     const dialog = page.getByRole('dialog', { name: 'Star Network Generator' })
     await dialog.locator('#star-center-node').selectOption({ label: 'Node 1' })
