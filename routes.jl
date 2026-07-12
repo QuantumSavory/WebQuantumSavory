@@ -205,6 +205,162 @@ end
 ########################################################
 
 @swagger """
+/states_zoo_types:
+  get:
+    summary: List allowlisted States Zoo types
+    description: Return stable type IDs and ordered parameter metadata from QuantumSavory.StatesZoo.
+    responses:
+      '200':
+        description: Available States Zoo types
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - states_zoo_types
+              properties:
+                states_zoo_types:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - id
+                      - display_name
+                      - parameters
+                    properties:
+                      id:
+                        type: string
+                        description: Stable allowlisted API type ID
+                        example: DepolarizedBellPair
+                      display_name:
+                        type: string
+                        example: Depolarized Bell Pair
+                      parameters:
+                        type: array
+                        description: Parameters in constructor order
+                        items:
+                          type: object
+                          required:
+                            - name
+                            - min
+                            - max
+                            - good
+                          properties:
+                            name:
+                              type: string
+                              example: p
+                            min:
+                              type: number
+                            max:
+                              type: number
+                            good:
+                              type: number
+"""
+route("/states_zoo_types", method="GET") do
+  json(Dict(:states_zoo_types => get_states_zoo_types()))
+end
+
+########################################################
+
+@swagger """
+/states_zoo_preview:
+  post:
+    summary: Render an allowlisted States Zoo state preview
+    description: Safely constructs a whitelisted state from validated numeric parameters and returns a PNG. No Julia source is evaluated.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - state_type
+              - parameters
+            properties:
+              state_type:
+                type: string
+                description: Stable ID returned by GET /states_zoo_types
+                example: DepolarizedBellPair
+              parameters:
+                type: object
+                description: Exact parameter-name/value object for the selected type
+                additionalProperties:
+                  type: number
+                example:
+                  p: 0.8
+    responses:
+      '200':
+        description: Preview rendered successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - success
+                - png_base64
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                png_base64:
+                  type: string
+                  format: byte
+                  description: Base64-encoded PNG bytes
+      '400':
+        description: Unknown type or invalid parameter object
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - success
+                - error
+                - status_code
+                - error_code
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                status_code:
+                  type: integer
+                  example: 400
+                error_code:
+                  type: string
+                  example: VALIDATION_ERROR
+                details:
+                  type: object
+      '500':
+        description: Preview rendering failed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+                status_code:
+                  type: integer
+                  example: 500
+                error_code:
+                  type: string
+                  example: SERVER_ERROR
+"""
+route("/states_zoo_preview", method="POST") do
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  state_type, state = parse_states_zoo_preview_payload(payload)
+  png_base64 = render_states_zoo_preview(state_type, state)
+  json(Dict(:success => true, :png_base64 => png_base64))
+end
+
+########################################################
+
+@swagger """
 /parse_network_graph:
   post:
     description: Parse a network graph JSON payload and return the parsed object
@@ -242,7 +398,28 @@ end
                       description: Concrete parameter type used to convert the value
                     value:
                       nullable: true
-                      description: JSON-compatible variable value; null is valid for default, Nothing, and wildcard variables
+                      description: JSON-compatible variable value; Symbolic variables may use the structured States Zoo recipe object shown below
+                      oneOf:
+                        - type: string
+                        - type: number
+                        - type: boolean
+                        - type: object
+                          additionalProperties: false
+                          required:
+                            - kind
+                            - state_type
+                            - parameters
+                          properties:
+                            kind:
+                              type: string
+                              enum: [states_zoo]
+                            state_type:
+                              type: string
+                              description: Stable ID returned by GET /states_zoo_types
+                            parameters:
+                              type: object
+                              additionalProperties:
+                                type: number
               net:
                 type: object
                 required:

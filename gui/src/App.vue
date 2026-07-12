@@ -1247,7 +1247,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Tabbed logs, variables, and layout tools panel at bottom -->
+    <!-- Tabbed tools panel at bottom -->
     <div class="logs-panel-container">
       <BottomPanel
         :logs="applicationLogs"

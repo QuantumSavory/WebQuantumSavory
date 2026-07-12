@@ -1,6 +1,7 @@
 import { generateUUid } from '../utils/Utils'
 
 export const VARIABLE_REFERENCE_KIND = 'variable'
+export const STATES_ZOO_VALUE_KIND = 'states_zoo'
 
 export default class Variable {
   constructor({ id = generateUUid('variable'), name = '', type = 'Float64', value = null } = {}) {
@@ -39,6 +40,20 @@ export function isVariableReference(value) {
     && typeof value === 'object'
     && value.kind === VARIABLE_REFERENCE_KIND
     && typeof value.id === 'string'
+}
+
+export function isStatesZooValue(value) {
+  return value !== null
+    && typeof value === 'object'
+    && value.kind === STATES_ZOO_VALUE_KIND
+    && typeof value.state_type === 'string'
+    && value.parameters !== null
+    && typeof value.parameters === 'object'
+    && !Array.isArray(value.parameters)
+}
+
+export function isStatesZooVariable(variable) {
+  return isStatesZooValue(variable?.value)
 }
 
 export function isVariableReferenced(projectData, variableId) {

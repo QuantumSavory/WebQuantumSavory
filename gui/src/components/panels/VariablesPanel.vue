@@ -14,13 +14,13 @@
       </button>
     </div>
 
-    <div v-if="variables.length === 0" class="empty-variables">
+    <div v-if="ordinaryVariables.length === 0" class="empty-variables">
       No variables
     </div>
 
     <div v-else class="variables-list">
       <div
-        v-for="variable in variables"
+        v-for="variable in ordinaryVariables"
         :key="variable.id"
         class="variable-row"
         :data-variable-id="variable.id"
@@ -92,7 +92,8 @@
 </template>
 
 <script setup>
-import Variable, { isVariableReferenced } from '../../models/Variable'
+import { computed } from 'vue'
+import Variable, { isStatesZooVariable, isVariableReferenced } from '../../models/Variable'
 import {
   VARIABLE_PARAMETER_TYPES,
   getTypeOptionLabel,
@@ -116,6 +117,7 @@ const props = defineProps({
 })
 
 const variableTypes = VARIABLE_PARAMETER_TYPES
+const ordinaryVariables = computed(() => props.variables.filter(variable => !isStatesZooVariable(variable)))
 
 function nextVariableName() {
   const existingNames = new Set(props.variables.map(variable => variable.name))

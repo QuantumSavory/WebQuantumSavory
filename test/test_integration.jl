@@ -168,6 +168,72 @@
       @test all(pt["virtual"] === false for pt in physical_protocols)
   end
 
+  @testset "States Zoo Endpoints" begin
+      types_response = make_request("GET", "/states_zoo_types")
+      @test types_response.status == 200
+      types_data = parse_response(types_response)
+      @test haskey(types_data, "states_zoo_types")
+      @test [entry["id"] for entry in types_data["states_zoo_types"]] == [
+        "BarrettKokBellPair",
+        "BarrettKokBellPairW",
+        "DepolarizedBellPair",
+        "GenqoMultiplexedCascadedBellPairW",
+        "GenqoUnheraldedSPDCBellPairW",
+      ]
+      @test all(haskey(entry, "display_name") for entry in types_data["states_zoo_types"])
+      @test all(haskey(entry, "parameters") for entry in types_data["states_zoo_types"])
+
+      depolarized = only(filter(
+        entry -> entry["id"] == "DepolarizedBellPair",
+        types_data["states_zoo_types"],
+      ))
+      @test depolarized["parameters"] == [Dict(
+        "name" => "p",
+        "min" => 0,
+        "max" => 1,
+        "good" => 1,
+      )]
+
+      preview_response = make_request(
+        "POST",
+        "/states_zoo_preview";
+        body=Dict(
+          "state_type" => "DepolarizedBellPair",
+          "parameters" => Dict("p" => 0.8),
+        ),
+      )
+      @test preview_response.status == 200
+      preview_data = parse_response(preview_response)
+      @test preview_data["success"] == true
+      @test haskey(preview_data, "png_base64")
+      png = WebQuantumSavory.base64decode(preview_data["png_base64"])
+      @test length(png) > 8
+      @test png[1:8] == UInt8[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+
+      unknown_response = make_request(
+        "POST",
+        "/states_zoo_preview";
+        body=Dict("state_type" => "NotAState", "parameters" => Dict()),
+      )
+      @test unknown_response.status == 400
+      unknown_data = parse_response(unknown_response)
+      @test unknown_data["success"] == false
+      @test unknown_data["error_code"] == "VALIDATION_ERROR"
+
+      invalid_response = make_request(
+        "POST",
+        "/states_zoo_preview";
+        body=Dict(
+          "state_type" => "DepolarizedBellPair",
+          "parameters" => Dict("p" => 2),
+        ),
+      )
+      @test invalid_response.status == 400
+      invalid_data = parse_response(invalid_response)
+      @test invalid_data["success"] == false
+      @test invalid_data["error_code"] == "VALIDATION_ERROR"
+  end
+
   @testset "Parse Network Graph - Success" begin
       # Use the test payload from the mock file
       payload = deepcopy(test_payload)
@@ -193,6 +259,42 @@
       @test data["edge_count"] == 1
       @test data["protocols_launched"] === nothing
       @test data["message"] == WebQuantumSavory.STATUS_MESSAGE_CREATED
+  end
+
+  @testset "States Zoo Variable Protocol Resolution" begin
+      simulation_name = "states_zoo_variable_integration"
+      payload = deepcopy(test_payload)
+      payload["name"] = simulation_name
+      payload["variables"] = [Dict(
+        "id" => "zoo_pair_state",
+        "name" => "zoo pair state",
+        "type" => "Symbolic",
+        "value" => Dict(
+          "kind" => "states_zoo",
+          "state_type" => "DepolarizedBellPair",
+          "parameters" => Dict("p" => 0.9),
+        ),
+      )]
+
+      entangler = payload["net"]["edges"][1]["data"]["protocols"][1]
+      pairstate = only(filter(parameter -> parameter["name"] == "pairstate", entangler["parameters"]))
+      pairstate["value"] = Dict("kind" => "variable", "id" => "zoo_pair_state")
+
+      try
+        create_response = make_request("POST", "/parse_network_graph"; body=payload)
+        @test create_response.status == 200
+
+        prepare_response = make_request(
+          "POST",
+          "/prepare_simulation";
+          body=Dict("name" => simulation_name),
+        )
+        @test prepare_response.status == 200
+        prepare_data = parse_response(prepare_response)
+        @test prepare_data["status"] == WebQuantumSavory.STATUS_PREPARED
+      finally
+        make_request("POST", "/destroy_simulation"; body=Dict("name" => simulation_name))
+      end
   end
 
   @testset "Parse Network Graph - Validation Errors" begin

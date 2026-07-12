@@ -19,6 +19,21 @@ function getDefaultBaseUrl() {
   return 'http://localhost:8000'
 }
 
+function apiErrorMessage(body, fallback) {
+  if (typeof body?.error === 'string' && body.error) return body.error
+  if (typeof body?.error?.message === 'string' && body.error.message) return body.error.message
+  if (typeof body?.message === 'string' && body.message) return body.message
+  return fallback
+}
+
+async function readJsonResponse(response, fallbackMessage) {
+  const body = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(apiErrorMessage(body, `${fallbackMessage}: ${response.status}`))
+  }
+  return body
+}
+
 export class ApiConnector {
   
   constructor(baseUrl = getDefaultBaseUrl()) {
@@ -44,6 +59,40 @@ export class ApiConnector {
     })
     const responseObject = await res.json()
     this.known_functions.value = responseObject.known_functions
+  }
+
+  async fetchStatesZooTypes({ signal, force = false } = {}) {
+    const cachedTypes = this._config.value.statesZooTypes
+    if (!force && Array.isArray(cachedTypes)) return cachedTypes
+
+    const res = await fetch(`${this.baseUrl}/states_zoo_types`, {
+      headers: this.requestHeaders,
+      signal,
+    })
+    const responseObject = await readJsonResponse(res, 'States Zoo types fetch failed')
+    const types = responseObject?.states_zoo_types
+    if (!Array.isArray(types)) {
+      throw new Error('States Zoo types response is invalid')
+    }
+
+    this._config.value = {
+      ...this._config.value,
+      statesZooTypes: types,
+    }
+    return types
+  }
+
+  async fetchStatesZooPreview(stateType, parameters, { signal } = {}) {
+    const res = await fetch(`${this.baseUrl}/states_zoo_preview`, {
+      headers: this.requestHeaders,
+      method: 'POST',
+      body: JSON.stringify({
+        state_type: stateType,
+        parameters,
+      }),
+      signal,
+    })
+    return readJsonResponse(res, 'States Zoo preview failed')
   }
 
   getKnownFunctions(){

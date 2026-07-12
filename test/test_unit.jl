@@ -149,6 +149,111 @@
       @test pairstate.type == "Symbolic"
   end
 
+  @testset "States Zoo Registry and Recipes" begin
+      expected = [
+        "BarrettKokBellPair" => QuantumSavory.StatesZoo.BarrettKokBellPair,
+        "BarrettKokBellPairW" => QuantumSavory.StatesZoo.BarrettKokBellPairW,
+        "DepolarizedBellPair" => QuantumSavory.StatesZoo.DepolarizedBellPair,
+        "GenqoMultiplexedCascadedBellPairW" => QuantumSavory.StatesZoo.Genqo.GenqoMultiplexedCascadedBellPairW,
+        "GenqoUnheraldedSPDCBellPairW" => QuantumSavory.StatesZoo.Genqo.GenqoUnheraldedSPDCBellPairW,
+      ]
+
+      @test length(WebQuantumSavory.STATES_ZOO_TYPE_REGISTRY) == 5
+      @test Set(keys(WebQuantumSavory.STATES_ZOO_TYPE_REGISTRY)) == Set(first.(expected))
+
+      catalog = WebQuantumSavory.get_states_zoo_types()
+      @test [entry["id"] for entry in catalog] == first.(expected)
+
+      for (catalog_entry, (id, T)) in zip(catalog, expected)
+        parameters = QuantumSavory.StatesZoo.stateparameters(T)
+        ranges = QuantumSavory.StatesZoo.stateparametersrange(T)
+        expected_metadata = [
+          Dict{String,Any}(
+            "name" => string(parameter),
+            "min" => ranges[parameter].min,
+            "max" => ranges[parameter].max,
+            "good" => ranges[parameter].good,
+          ) for parameter in parameters
+        ]
+        @test catalog_entry["parameters"] == expected_metadata
+
+        good_parameters = Dict(
+          string(parameter) => ranges[parameter].good for parameter in parameters
+        )
+        @test WebQuantumSavory.construct_states_zoo_state(id, good_parameters) isa T
+
+        recipe = Dict(
+          "kind" => "states_zoo",
+          "state_type" => id,
+          "parameters" => good_parameters,
+        )
+        @test WebQuantumSavory.construct_states_zoo_recipe(recipe) isa T
+      end
+
+      function states_zoo_error(state_type, parameters)
+        try
+          WebQuantumSavory.construct_states_zoo_state(state_type, parameters)
+          return nothing
+        catch error
+          return error
+        end
+      end
+
+      unknown = states_zoo_error("NotAState", Dict())
+      @test unknown isa WebQuantumSavory.APIError
+      @test unknown.status_code == 400
+      @test unknown.error_code == "VALIDATION_ERROR"
+
+      missing = states_zoo_error("DepolarizedBellPair", Dict())
+      @test missing isa WebQuantumSavory.APIError
+      @test missing.details["missing"] == ["p"]
+
+      extra = states_zoo_error("DepolarizedBellPair", Dict("p" => 0.5, "other" => 1))
+      @test extra isa WebQuantumSavory.APIError
+      @test extra.details["extra"] == ["other"]
+
+      for invalid_value in ("0.5", true, NaN, Inf, -Inf)
+        invalid = states_zoo_error("DepolarizedBellPair", Dict("p" => invalid_value))
+        @test invalid isa WebQuantumSavory.APIError
+        @test occursin("finite number", invalid.message)
+      end
+
+      for invalid_value in (-0.01, 1.01)
+        invalid = states_zoo_error("DepolarizedBellPair", Dict("p" => invalid_value))
+        @test invalid isa WebQuantumSavory.APIError
+        @test occursin("outside its declared range", invalid.message)
+      end
+
+      tagged_recipe = Dict(
+        "kind" => "states_zoo",
+        "state_type" => "DepolarizedBellPair",
+        "parameters" => Dict("p" => 0.75),
+      )
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+        kwargs = Dict{Symbol,Any}()
+        @test WebQuantumSavory._handle_symbolic_parameter!(kwargs, :pairstate, tagged_recipe)
+        @test kwargs[:pairstate] isa QuantumSavory.StatesZoo.DepolarizedBellPair
+      end
+
+      # Existing symbolic strings keep their evaluation-backed behavior.
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+        kwargs = Dict{Symbol,Any}()
+        @test WebQuantumSavory._handle_symbolic_parameter!(kwargs, :pairstate, "Z₁")
+        @test haskey(kwargs, :pairstate)
+      end
+  end
+
+  @testset "States Zoo Preview Rendering" begin
+      state = WebQuantumSavory.construct_states_zoo_state(
+        "DepolarizedBellPair",
+        Dict("p" => 0.8),
+      )
+      encoded = WebQuantumSavory.render_states_zoo_preview("DepolarizedBellPair", state)
+      png = WebQuantumSavory.base64decode(encoded)
+      @test length(png) > 8
+      @test png[1:8] == UInt8[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  end
+
   @testset "Payload Extraction" begin
       # Now that extract_payload accepts missing/relaxed headers, direct call should parse
       json_str = JSON.json(test_payload)
@@ -378,6 +483,36 @@
           :nodeA => 1,
           :nodeB => 2,
         )
+
+        states_zoo_protocol_definition = Dict(
+          "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),
+          "parameters" => [Dict(
+            "name" => "pairstate",
+            "type" => "Symbolic",
+            "value" => Dict("kind" => "variable", "id" => "zoo_pair_state"),
+          )],
+        )
+        states_zoo_variables = Dict(
+          "zoo_pair_state" => WebQuantumSavory.Variable(
+            "zoo_pair_state",
+            "zoo pair state",
+            "Symbolic",
+            Dict(
+              "kind" => "states_zoo",
+              "state_type" => "DepolarizedBellPair",
+              "parameters" => Dict("p" => 0.9),
+            ),
+          ),
+        )
+        withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+          states_zoo_protocol = WebQuantumSavory._instantiate_protocol(
+            states_zoo_protocol_definition,
+            ctx;
+            variables=states_zoo_variables,
+          )
+          @test states_zoo_protocol.pairstate isa QuantumSavory.StatesZoo.DepolarizedBellPair
+        end
+
         conversion_error = try
           WebQuantumSavory._instantiate_protocol(
             invalid_protocol_definition,
