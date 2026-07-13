@@ -641,7 +641,7 @@ function generate_julia_script(payload)
     push!(lines, "Graphs.add_edge!(graph, $source, $target)")
   end
   append!(lines, [
-    "network = QuantumSavory.RegisterNet(graph, registers)",
+    "network = QuantumSavory.RegisterNet(graph, registers; names = $(_script_literal(_register_names(nodes), "register names")))",
     "sim = QuantumSavory.get_time_tracker(network)",
     "",
     "# -----------------------------------------------------------------------------",

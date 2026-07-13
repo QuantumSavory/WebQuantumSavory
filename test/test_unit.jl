@@ -87,6 +87,10 @@
     @test occursin("QuantumSavory.T2Dephasing(; t2 = 5.0)", script)
     @test occursin("# Registers", script)
     @test occursin("# Register network and simulation clock", script)
+    @test occursin(
+      "QuantumSavory.RegisterNet(graph, registers; names = [\"Amherst\", \"Cambridge\"])",
+      script,
+    )
     @test occursin("# Protocol construction and initialization", script)
     @test occursin("nodeA = 1, nodeB = 2", script)
     @test occursin("ConcurrentSim.run(sim, simulation_duration)", script)
@@ -98,6 +102,9 @@
     Base.include_string(generated_module, script, "generated-export.jl")
     generated_sim = getfield(generated_module, :sim)
     @test ConcurrentSim.now(generated_sim) == 0.02
+    generated_network = getfield(generated_module, :network)
+    @test generated_network.names == ["Amherst", "Cambridge"]
+    @test QuantumSavory.name.(generated_network.registers) == ["Amherst", "Cambridge"]
     generated_weighted_state = getfield(generated_module, :variable_weighted_pair)
     @test abs(LinearAlgebra.tr(QuantumSavory.express(generated_weighted_state))) ≈ 1
     generated_weighted_trace = getfield(generated_module, :variable_weighted_pair_tr)
@@ -963,13 +970,31 @@
       @test_nowarn uptotime!(default_noise_registers[2][1], 1.0)
   end
 
+  @testset "Register Names" begin
+      named_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+      simulation_name = "named_registers"
+      named_payload["name"] = simulation_name
+
+      try
+        state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(named_payload))
+        @test state.network.names == ["Amherst", "Cambridge"]
+        @test QuantumSavory.name.(state.network.registers) == ["Amherst", "Cambridge"]
+        @test occursin("Amherst(#1)", sprint(show, state.network.registers[1]))
+        @test sprint(show, state.network.registers[1][1]; context=:compact => true) ==
+          "Amherst(#1).1"
+      finally
+        haskey(WebQuantumSavory.STATE, simulation_name) &&
+          WebQuantumSavory.destroy_simulation(simulation_name)
+      end
+  end
+
   @testset "RegisterNet Creation" begin
       validation_result = WebQuantumSavory.validate_payload(test_payload)
       g = WebQuantumSavory.build_graph(validation_result)
       registers, slot_mapping, slot_reverse_mapping = WebQuantumSavory.create_registers_from_nodes(validation_result)
       
       # Test that RegisterNet creation fails with empty slot registers (current behavior)
-      @test_throws BoundsError WebQuantumSavory.create_register_net(g, registers)
+      @test_throws BoundsError RegisterNet(g, registers)
   end
 
   @testset "Type Resolution" begin
@@ -1027,7 +1052,7 @@
       @test length(prot_def["parameters"]) == 3
 
       # Test that RegisterNet creation fails due to empty slots (expected behavior)
-      @test_throws BoundsError WebQuantumSavory.create_register_net(g, registers)
+      @test_throws BoundsError RegisterNet(g, registers)
   end
 
   @testset "State Serialization" begin
@@ -1193,7 +1218,7 @@
     validation_result = WebQuantumSavory.validate_payload(cleanup_payload)
     g = WebQuantumSavory.build_graph(validation_result)
     registers, slot_mapping, slot_reverse_mapping = WebQuantumSavory.create_registers_from_nodes(validation_result)
-    network = WebQuantumSavory.create_register_net(g, registers)
+    network = RegisterNet(g, registers)
     assigned_slots = (registers[1][1], registers[2][1])
     initialize!(assigned_slots, StabilizerState("ZZ XX"); time=0.0)
     @test all(QuantumSavory.isassigned, assigned_slots)
@@ -1264,7 +1289,7 @@
     registers, slot_mapping = WebQuantumSavory.create_registers_from_nodes(validation_result)
     
     # Test that RegisterNet creation fails due to empty slots (expected behavior)
-    @test_throws BoundsError WebQuantumSavory.create_register_net(g, registers)
+    @test_throws BoundsError RegisterNet(g, registers)
   end
 
   @testset "Type Resolution Functions" begin
@@ -1495,7 +1520,7 @@
     registers, slot_mapping = WebQuantumSavory.create_registers_from_nodes(validation_result)
     
     # Test that RegisterNet creation fails due to empty slots (expected behavior)
-    @test_throws BoundsError WebQuantumSavory.create_register_net(g, registers)
+    @test_throws BoundsError RegisterNet(g, registers)
     
     # Test protocol launch structure without creating network
     protocol_mapping = Dict{String, Any}()

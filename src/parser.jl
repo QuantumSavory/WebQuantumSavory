@@ -569,6 +569,9 @@ function build_graph(data)
   g
 end
 
+"""Return register names in the same order as the validated nodes."""
+_register_names(nodes) = [string(node["name"]) for node in nodes]
+
 function create_registers_from_nodes(data)
   # Extract nodes from the validation result
   nodes = data["graph_info"]["nodes"]
@@ -618,11 +621,6 @@ function create_registers_from_nodes(data)
   end
 
   (registers, slot_mapping, slot_reverse)
-end
-
-function create_register_net(graph, registers)
-  # Create a network from the graph and the registers
-  RegisterNet(graph, registers)
 end
 
 function get_network_time_tracker(network)
@@ -1111,7 +1109,7 @@ function parse_network_graph(data)
   registers, slot_mapping, slot_reverse_mapping = create_registers_from_nodes(data)
 
   # Create the RegisterNet from the graph and registers
-  net = create_register_net(g, registers)
+  net = RegisterNet(g, registers; names=_register_names(data["graph_info"]["nodes"]))
 
   simulation_name = data["data"]["name"]
   action_is_valid(simulation_name)
