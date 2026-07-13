@@ -120,6 +120,27 @@ async function createProjectWithSymbolicProtocol(page) {
   return editor
 }
 
+async function expectEditorLayersAligned(valueEditor) {
+  const origins = await valueEditor.locator('.code_area').evaluate(codeArea => {
+    const contentOrigin = element => {
+      const rect = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return {
+        x: rect.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft),
+        y: rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop),
+      }
+    }
+
+    return {
+      caret: contentOrigin(codeArea.querySelector('textarea')),
+      highlightedText: contentOrigin(codeArea.querySelector('pre code.hljs')),
+    }
+  })
+
+  expect(Math.abs(origins.caret.x - origins.highlightedText.x)).toBeLessThan(0.5)
+  expect(Math.abs(origins.caret.y - origins.highlightedText.y)).toBeLessThan(0.5)
+}
+
 test.describe('Symbolic editor lifecycle', () => {
   test.beforeEach(async ({ page }) => {
     await mockConfiguration(page)
@@ -140,6 +161,7 @@ test.describe('Symbolic editor lifecycle', () => {
     const input = valueEditor.locator('textarea')
     await expect(input).toBeVisible()
     await input.fill('invalid(')
+    await expectEditorLayersAligned(valueEditor)
     await valueEditor.locator('.validate-button').click()
 
     await expect(valueEditor.locator('.function-error-badge')).toContainText('Error!')
