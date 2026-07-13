@@ -1,6 +1,7 @@
 # Changelog
 
-## Unreleased
+
+## 1.6.0
 
 - Added schema-v1 project normalization with consistently trimmed project names, editing locks after Parse and through Prepare, shared dialog and button primitives, and a brand-aligned light PrimeVue palette.
 - Made the bottom Tools panel resizable upward and to the right with cursor-only border affordances, persistent dimensions, viewport-aware bounds, and compact collapse behavior.
@@ -21,9 +22,6 @@
 - Added safe structured States Zoo recipes that persist with projects and remain available to compatible protocol parameters without enabling unsafe symbolic evaluation.
 - Added States Zoo catalog and PNG preview API endpoints with strict type, parameter, numeric, and range validation plus serialized CairoMakie rendering.
 - Exposed every upstream States Zoo type through the explicit whitelist, marked weighted states consistently, normalized their symbolic values and previews, and added synchronized trace variables with heralding-probability guidance while keeping generated Zoo variables out of the ordinary Variables tab and recomputing exported traces alongside their normalized states.
-
-## 1.6.0
-
 - Added a tabbed bottom panel with Logs and Layout Tools views.
 - Added a repeater chain generator that clones configured repeater nodes and edges into an evenly spaced chain.
 
