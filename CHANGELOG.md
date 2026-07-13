@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Named simulator and exported-script registers after their configured nodes so log messages identify nodes clearly.
 - Added clipboard image pasting to the project Description editor, inserting safe bitmap images as Markdown data URLs at the current selection.
 - Warmed the simulator, protocol and generated-state renderers, and the default States Zoo preview during server startup so first GUI interactions avoid Julia compilation latency; temporary assigned states are now fully traced out during cleanup.
 
