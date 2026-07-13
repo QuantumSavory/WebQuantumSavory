@@ -901,6 +901,29 @@
       @test isa(registers[1], Register)
       @test isa(slot_mapping, Dict)
       @test !isempty(slot_mapping)  # Should have some slots from node1
+
+      # No-noise slots still need a positional `nothing` entry so background
+      # operations can index the register by slot. Exercise object, string, and
+      # missing representations while keeping one real background in place.
+      default_noise_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+      default_noise_payload["net"]["nodes"][1]["data"]["slots"][2]["backgroundNoise"] = Dict(
+        "type" => "T1Decay",
+        "parameters" => [Dict("name" => "t1", "value" => 5.0)],
+      )
+      delete!(default_noise_payload["net"]["nodes"][2]["data"]["slots"][1], "backgroundNoise")
+      default_noise_payload["net"]["nodes"][2]["data"]["slots"][2]["backgroundNoise"] = "default"
+
+      default_noise_validation = WebQuantumSavory.validate_payload(default_noise_payload)
+      default_noise_registers, _, _ = WebQuantumSavory.create_registers_from_nodes(default_noise_validation)
+      @test length.(getfield.(default_noise_registers, :backgrounds)) == length.(default_noise_registers)
+      @test isnothing(default_noise_registers[1].backgrounds[1])
+      @test default_noise_registers[1].backgrounds[2] isa QuantumSavory.T1Decay
+      @test all(isnothing, default_noise_registers[2].backgrounds)
+
+      # This is the operation that exposed the malformed background vector in
+      # SwapperProt after it selected an assigned slot.
+      initialize!(default_noise_registers[2][1], X₁; time=0.0)
+      @test_nowarn uptotime!(default_noise_registers[2][1], 1.0)
   end
 
   @testset "RegisterNet Creation" begin

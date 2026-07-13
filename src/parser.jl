@@ -586,7 +586,8 @@ function create_registers_from_nodes(data)
 
     # Parse traits (Qubit/Qumode) and background noise for each slot
     traits = []
-    background_noise = QuantumSavory.AbstractBackground[]
+    # Backgrounds are positional, so no-noise slots need explicit `nothing` entries.
+    background_noise = Union{Nothing,QuantumSavory.AbstractBackground}[]
 
     for slot_data in slots
       # Parse slot type dynamically
@@ -599,18 +600,8 @@ function create_registers_from_nodes(data)
 
       # Instantiate background noise (supports string or object with parameters)
       noise_def = get(slot_data, "backgroundNoise", nothing)
-      if noise_def !== nothing
-        # Only treat explicit string "default" as no-noise; avoid String(x) on non-strings
-        if isa(noise_def, AbstractString)
-          if String(noise_def) != "default"
-            nb = _instantiate_noise(noise_def)
-            nb === nothing || push!(background_noise, nb)
-          end
-        else
-          nb = _instantiate_noise(noise_def)
-          nb === nothing || push!(background_noise, nb)
-        end
-      end
+      background = noise_def === nothing ? nothing : _instantiate_noise(noise_def)
+      push!(background_noise, background)
     end
 
     reprs = [QuantumOpticsRepr() for _ in 1:length(traits)]
