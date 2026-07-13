@@ -557,6 +557,43 @@
       @test abs(LinearAlgebra.tr(density_operator)) ≈ 1
   end
 
+  @testset "Server Startup Warmup" begin
+      @test WebQuantumSavory.start_startup_warmup!() === nothing
+      @test !WebQuantumSavory.STARTUP_WARMUP_COMPLETE[]
+      @test basename(WebQuantumSavory._latest_startup_warmup_demo()) ==
+        "2.Entangler.Example.with.consumer.json"
+      mktempdir() do demos_dir
+        touch(joinpath(demos_dir, "2.second.json"))
+        touch(joinpath(demos_dir, "10.tenth.json"))
+        @test basename(WebQuantumSavory._latest_startup_warmup_demo(demos_dir)) ==
+          "10.tenth.json"
+      end
+
+      state_names_before = Set(keys(WebQuantumSavory.STATE))
+      report = WebQuantumSavory._run_startup_warmup!()
+      @test report.demo == "2.Entangler.Example.with.consumer.json"
+      @test report.protocol_count == 2
+      @test report.generated_state_count > 0
+      @test report.states_zoo_type == "BarrettKokBellPair"
+      @test Set(keys(WebQuantumSavory.STATE)) == state_names_before
+
+      # Failure after parsing and preparing must still remove the private state.
+      @test_throws WebQuantumSavory.APIError WebQuantumSavory._run_startup_warmup!(
+        simulation_target=0.0,
+      )
+      @test Set(keys(WebQuantumSavory.STATE)) == state_names_before
+
+      sentinel = WebQuantumSavory.State(name=WebQuantumSavory.STARTUP_WARMUP_STATE_NAME)
+      WebQuantumSavory.STATE[WebQuantumSavory.STARTUP_WARMUP_STATE_NAME] = sentinel
+      try
+        @test_throws ErrorException WebQuantumSavory._run_startup_warmup!()
+        @test WebQuantumSavory.STATE[WebQuantumSavory.STARTUP_WARMUP_STATE_NAME] === sentinel
+      finally
+        delete!(WebQuantumSavory.STATE, WebQuantumSavory.STARTUP_WARMUP_STATE_NAME)
+      end
+      @test Set(keys(WebQuantumSavory.STATE)) == state_names_before
+  end
+
   @testset "Payload Extraction" begin
       # Now that extract_payload accepts missing/relaxed headers, direct call should parse
       json_str = JSON.json(test_payload)
@@ -1151,18 +1188,23 @@
   end
 
   @testset "State Cleanup" begin
-    # Create a test state with various components (without network due to empty slots)
-    validation_result = WebQuantumSavory.validate_payload(test_payload)
+    # Exercise cleanup with a live assigned state so register back-references are removed.
+    cleanup_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    validation_result = WebQuantumSavory.validate_payload(cleanup_payload)
     g = WebQuantumSavory.build_graph(validation_result)
     registers, slot_mapping, slot_reverse_mapping = WebQuantumSavory.create_registers_from_nodes(validation_result)
-    
-    # Don't create network since it fails with empty slots - test cleanup without it
+    network = WebQuantumSavory.create_register_net(g, registers)
+    assigned_slots = (registers[1][1], registers[2][1])
+    initialize!(assigned_slots, StabilizerState("ZZ XX"); time=0.0)
+    @test all(QuantumSavory.isassigned, assigned_slots)
+
     state = WebQuantumSavory.State(
       name="test_cleanup",
       payload=validation_result,
       graph=g,
-      network=nothing,  # No network due to empty slots
+      network=network,
       slot_mapping=slot_mapping,
+      slot_reverse_mapping=slot_reverse_mapping,
       protocol_mapping=Dict("test" => "protocol")
     )
 
@@ -1176,6 +1218,7 @@
     @test state.protocol_mapping === nothing
     @test state.graph === nothing
     @test state.payload === nothing
+    @test all(slot -> !QuantumSavory.isassigned(slot), assigned_slots)
   end
 
   @testset "Slot Serialization" begin

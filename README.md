@@ -28,6 +28,14 @@ The server will start on `http://localhost:8000` by default.
 The launcher runs `npm ci` and rebuilds the GUI before starting Genie, so the generated
 files under `public/` do not need to be checked into Git.
 
+Before a non-test server begins accepting requests, it synchronously warms the parser,
+simulator, protocol and generated-state renderers using the latest bundled demo, then
+renders the same default States Zoo state created by the GUI. The private warmup
+simulation is removed immediately afterward. This makes initial startup take longer so
+the first interactive simulation and visualization requests do not pay Julia compilation
+latency. Test-mode startup skips the automatic workload; the backend unit suite exercises
+it directly.
+
 ## UI Access
 
 The user interface is available at `http://localhost:8000`.

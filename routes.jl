@@ -2116,6 +2116,10 @@ end
 
 ########################################################
 
+WebQuantumSavory.start_startup_warmup!()
+
+########################################################
+
 try 
   @async WebQuantumSavory.cleanup_stale_simulations() |> errormonitor
 catch e

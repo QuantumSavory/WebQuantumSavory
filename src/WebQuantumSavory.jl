@@ -388,8 +388,8 @@ function cleanup_state!(state::State)
           slot = reg[slot_idx]
           try
             if QuantumSavory.isassigned(slot)
-              # Clear the quantum state
-              QuantumSavory.clear!(slot)
+              # Trace out the subsystem and remove its register back-reference.
+              QuantumSavory.traceout!(slot)
             end
           catch e
             @warn "Failed to cleanup slot" reg_idx=reg_idx slot_idx=slot_idx error=e
@@ -809,5 +809,6 @@ end
 
 include("mocks.jl")
 include("services.jl")
+include("startup_warmup.jl")
 
 end
