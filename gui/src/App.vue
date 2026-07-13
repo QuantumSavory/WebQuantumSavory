@@ -333,7 +333,7 @@ const {
   create: createNewProject,
   saveAs: createSaveAsProject,
   save: saveProject,
-  delete: handleDeleteProject,
+  delete: deleteProject,
   importProject: importProjectIntoSession,
   serializeProjectData,
   deserializeProjectData,
@@ -713,9 +713,7 @@ function handleMenu(action) {
       showUnsavedChangesDialog.value = true
       return
     }
-    // Get all projects sorted by most recently opened
-    const recentProjects = ProjectStore.getRecentProjects(50) // Higher limit for full list
-    loadProjectList.value = recentProjects;
+    refreshProjectList()
     showLoadDialog.value = true
   } else if (action === 'import') {
     // Check for unsaved changes before importing
@@ -776,6 +774,14 @@ function handleOpenProjectSelect(projectName) {
 
 function handleOpenProjectClose() {
   showLoadDialog.value = false
+}
+
+function refreshProjectList() {
+  loadProjectList.value = ProjectStore.getRecentProjects(50)
+}
+
+async function handleDeleteProjectFromDialog(projectName) {
+  if (await deleteProject(projectName)) refreshProjectList()
 }
 
 function handleNewProjectFromDialog() {
@@ -858,8 +864,7 @@ function executePendingAction(action) {
         openProject(action.projectName)
       } else {
         // Opening project list dialog
-        const recentProjects = ProjectStore.getRecentProjects(50)
-        loadProjectList.value = recentProjects
+        refreshProjectList()
         showLoadDialog.value = true
       }
       break
@@ -1160,7 +1165,7 @@ onUnmounted(() => {
       :projects="loadProjectList"
       @select-project="handleOpenProjectSelect"
       @close="handleOpenProjectClose"
-      @delete-project="handleDeleteProject"
+      @delete-project="handleDeleteProjectFromDialog"
       @new-project="handleNewProjectFromDialog"
       @import-project="handleImportProjectFromDialog"
     />

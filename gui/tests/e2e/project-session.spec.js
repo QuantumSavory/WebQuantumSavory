@@ -26,6 +26,49 @@ async function mockBackend(page, parseRequests, { platformHandler } = {}) {
   })
 }
 
+async function seedProjects(page, names) {
+  await page.addInitScript(projectNames => {
+    for (const name of projectNames) {
+      localStorage.setItem(`cqn_project_${name}`, JSON.stringify({
+        schemaVersion: 1,
+        name,
+        description: '',
+        variables: [],
+        simulationConfig: { time: 1, timeStep: 0.1 },
+        net: { nodes: [], edges: [], protocols: [] },
+        uiGlobal: { map: { position: [-98.5795, 39.8283], zoom: 4 } }
+      }))
+    }
+  }, names)
+}
+
+test('confirmed deletion immediately refreshes the open-project list', async ({ page }) => {
+  await mockBackend(page, [])
+  await seedProjects(page, ['Keep Me', 'Delete Me'])
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+
+  await page.getByRole('button', { name: 'Menu' }).click()
+  await page.getByRole('menuitem', { name: 'Open' }).click()
+  const openDialog = page.getByRole('dialog', { name: 'Open Project' })
+  const deleteRow = openDialog.getByRole('row').filter({ hasText: 'Delete Me' })
+  await expect(deleteRow).toBeVisible()
+
+  await deleteRow.getByRole('button', { name: 'Delete project' }).click()
+  let confirmDialog = page.getByRole('dialog', { name: 'Delete project' })
+  await confirmDialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(deleteRow).toBeVisible()
+
+  await deleteRow.getByRole('button', { name: 'Delete project' }).click()
+  confirmDialog = page.getByRole('dialog', { name: 'Delete project' })
+  await confirmDialog.getByRole('button', { name: 'Delete', exact: true }).click()
+
+  await expect(openDialog).toBeVisible()
+  await expect(openDialog.getByText('Delete Me', { exact: true })).toHaveCount(0)
+  await expect(openDialog.getByText('Keep Me', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('cqn_project_Delete Me'))).toBeNull()
+})
+
 test('Save As keeps storage, document, reload, and simulation namespaces aligned', async ({ page }) => {
   const parseRequests = []
   await mockBackend(page, parseRequests)
