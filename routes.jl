@@ -226,6 +226,7 @@ end
                     required:
                       - id
                       - display_name
+                      - weighted
                       - parameters
                     properties:
                       id:
@@ -235,6 +236,9 @@ end
                       display_name:
                         type: string
                         example: Depolarized Bell Pair
+                      weighted:
+                        type: boolean
+                        description: Whether the state constructor returns an unnormalized weighted density matrix
                       parameters:
                         type: array
                         description: Parameters in constructor order
@@ -299,6 +303,7 @@ end
               required:
                 - success
                 - png_base64
+                - trace
               properties:
                 success:
                   type: boolean
@@ -307,6 +312,9 @@ end
                   type: string
                   format: byte
                   description: Base64-encoded PNG bytes
+                trace:
+                  type: number
+                  description: Absolute trace of the original density matrix before preview normalization
       '400':
         description: Unknown type or invalid parameter object
         content:
@@ -354,8 +362,12 @@ end
 route("/states_zoo_preview", method="POST") do
   payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
   state_type, state = parse_states_zoo_preview_payload(payload)
-  png_base64 = render_states_zoo_preview(state_type, state)
-  json(Dict(:success => true, :png_base64 => png_base64))
+  preview = render_states_zoo_preview(state_type, state)
+  json(Dict(
+    :success => true,
+    :png_base64 => preview.png_base64,
+    :trace => preview.trace,
+  ))
 end
 
 ########################################################

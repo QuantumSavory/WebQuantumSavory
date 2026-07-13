@@ -160,7 +160,12 @@ function _script_states_zoo_expression(recipe, context::String)
     for name in parameter_names
   ]
   constructor = string(entry.type)
-  return "$constructor(" * join(arguments, ", ") * ")"
+  expression = "$constructor(" * join(arguments, ", ") * ")"
+  entry.weighted || return expression
+  return "(let\n" *
+    "    state = $expression\n" *
+    "    state / abs(QuantumSavory.express(LinearAlgebra.tr(state)))\n" *
+    "end)"
 end
 
 function _script_symbolic_expression(value, context::String)
@@ -458,6 +463,7 @@ function generate_julia_script(payload)
     "using ConcurrentSim",
     "using ResumableFunctions",
     "using CairoMakie",
+    "using LinearAlgebra",
     "import InteractiveUtils, REPL",
     "",
     "CairoMakie.activate!()",

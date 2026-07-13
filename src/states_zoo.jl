@@ -1,29 +1,36 @@
+import LinearAlgebra
+
 """Allowlisted QuantumSavory StatesZoo type exposed by the web API."""
 const STATES_ZOO_TYPE_REGISTRY = Dict{String,NamedTuple}(
   "BarrettKokBellPair" => (
     order = 1,
     display_name = "Barrett-Kok Bell Pair",
     type = QuantumSavory.StatesZoo.BarrettKokBellPair,
+    weighted = false,
   ),
   "BarrettKokBellPairW" => (
     order = 2,
-    display_name = "Weighted Barrett-Kok Bell Pair",
+    display_name = "Barrett-Kok Bell Pair (weighted)",
     type = QuantumSavory.StatesZoo.BarrettKokBellPairW,
+    weighted = true,
   ),
   "DepolarizedBellPair" => (
     order = 3,
     display_name = "Depolarized Bell Pair",
     type = QuantumSavory.StatesZoo.DepolarizedBellPair,
+    weighted = false,
   ),
   "GenqoMultiplexedCascadedBellPairW" => (
     order = 4,
-    display_name = "Genqo Multiplexed Cascaded Bell Pair",
+    display_name = "Genqo Multiplexed Cascaded Bell Pair (weighted)",
     type = QuantumSavory.StatesZoo.Genqo.GenqoMultiplexedCascadedBellPairW,
+    weighted = true,
   ),
   "GenqoUnheraldedSPDCBellPairW" => (
     order = 5,
-    display_name = "Genqo Unheralded SPDC Bell Pair",
+    display_name = "Genqo Unheralded SPDC Bell Pair (weighted)",
     type = QuantumSavory.StatesZoo.Genqo.GenqoUnheraldedSPDCBellPairW,
+    weighted = true,
   ),
 )
 
@@ -79,6 +86,7 @@ function get_states_zoo_types()
       Dict{String,Any}(
         "id" => id,
         "display_name" => entry.display_name,
+        "weighted" => entry.weighted,
         "parameters" => [
           begin
             bounds = parameter_ranges[parameter_name]
@@ -93,6 +101,46 @@ function get_states_zoo_types()
       )
     end for (id, entry) in entries
   ]
+end
+
+"""Return the finite, positive absolute trace of a constructed StatesZoo state."""
+function _states_zoo_absolute_trace(state_type::AbstractString, state)
+  trace_value = try
+    # Prefer the symbolic trace. Barrett-Kok's zero operator cannot be expressed
+    # directly, while its symbolic trace can still be evaluated safely as zero.
+    abs(QuantumSavory.express(LinearAlgebra.tr(state)))
+  catch error
+    isa(error, APIError) && rethrow(error)
+    throw(validation_error(
+      "Failed to compute the density-matrix trace for States Zoo type '$state_type'",
+      Dict{String,Any}(
+        "state_type" => String(state_type),
+        "trace_error" => sprint(showerror, error),
+      ),
+    ))
+  end
+
+  if !(trace_value isa Real) || !isfinite(trace_value) || trace_value <= 0
+    throw(validation_error(
+      "States Zoo type '$state_type' must have a finite, positive density-matrix trace",
+      Dict{String,Any}(
+        "state_type" => String(state_type),
+        "trace" => trace_value,
+      ),
+    ))
+  end
+  return Float64(trace_value)
+end
+
+"""Return the density operator used for previews and its original absolute trace."""
+function _states_zoo_preview_density_operator(state_type::AbstractString, state)
+  _, entry = _states_zoo_entry(state_type)
+  absolute_trace = _states_zoo_absolute_trace(state_type, state)
+  density_operator = QuantumSavory.express(state)
+  if entry.weighted
+    density_operator /= absolute_trace
+  end
+  return density_operator, absolute_trace
 end
 
 """
@@ -181,7 +229,13 @@ function construct_states_zoo_recipe(recipe)
   get(recipe, "kind", nothing) == "states_zoo" || throw(validation_error(
     "States Zoo recipe field 'kind' must equal 'states_zoo'",
   ))
-  return construct_states_zoo_state(recipe["state_type"], recipe["parameters"])
+  state_type = recipe["state_type"]
+  state = construct_states_zoo_state(state_type, recipe["parameters"])
+  state_type, entry = _states_zoo_entry(state_type)
+  entry.weighted || return state
+
+  absolute_trace = _states_zoo_absolute_trace(state_type, state)
+  return state / absolute_trace
 end
 
 """Validate the POST preview body and return its constructed state and stable ID."""
@@ -201,20 +255,24 @@ function parse_states_zoo_preview_payload(payload)
   return strip(String(state_type)), state
 end
 
-"""Render a parameter-specific StatesZoo instance as a base64-encoded PNG."""
+"""Render a state preview and return its PNG plus the original absolute trace."""
 function render_states_zoo_preview(state_type::AbstractString, state)
   try
     return lock(STATES_ZOO_PREVIEW_LOCK) do
       # `stateexplorer` accepts concrete density operators for fixed-state
       # previews. StatesZoo instances are symbolic, so express the validated
       # instance first instead of evaluating or parsing Julia source.
-      density_operator = QuantumSavory.express(state)
+      density_operator, absolute_trace =
+        _states_zoo_preview_density_operator(state_type, state)
       figure = CairoMakie.Figure(size=(600, 260))
       QuantumSavory.StatesZoo.stateexplorer!(figure, density_operator)
 
       buffer = IOBuffer()
       show(buffer, MIME"image/png"(), figure)
-      base64encode(take!(buffer))
+      (
+        png_base64 = base64encode(take!(buffer)),
+        trace = absolute_trace,
+      )
     end
   catch error
     isa(error, APIError) && rethrow(error)

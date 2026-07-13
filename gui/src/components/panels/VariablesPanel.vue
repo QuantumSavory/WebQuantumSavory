@@ -29,14 +29,16 @@
         <label class="variable-field variable-name-field">
           <span>Name</span>
           <input
-            v-model.trim="variable.name"
+            :value="variable.name"
             type="text"
             class="variable-name-input"
             :class="{ 'invalid-variable-name': !!variableNameError(variable) }"
             :aria-invalid="!!variableNameError(variable)"
             :aria-describedby="variableNameError(variable) ? `variable-name-error-${variable.id}` : undefined"
             :aria-label="`Variable name for ${variable.id}`"
-            :disabled="disabled"
+            :disabled="disabled || isStatesZooTraceVariable(variable)"
+            :title="generatedTraceTitle(variable)"
+            @input="changeVariableName(variable, $event.target.value)"
           />
           <small
             v-if="variableNameError(variable)"
@@ -51,11 +53,12 @@
         <label class="variable-field variable-type-field">
           <span>Type</span>
           <select
-            v-model="variable.type"
+            :value="variable.type"
             class="variable-type-select"
             :aria-label="`Type for ${variable.name || variable.id}`"
-            :disabled="disabled"
-            @change="onTypeChanged(variable)"
+            :disabled="disabled || isStatesZooTraceVariable(variable)"
+            :title="generatedTraceTitle(variable)"
+            @change="changeVariableType(variable, $event.target.value)"
           >
             <option v-for="type in variableTypes" :key="type" :value="type">
               {{ getTypeOptionLabel(type) }}
@@ -65,11 +68,11 @@
 
         <div class="variable-field variable-value-field">
           <span>Value</span>
-          <div class="variable-value-input">
+          <div class="variable-value-input" :title="generatedTraceTitle(variable)">
             <TypedValueInput
               :parameter="variable"
               :type="variable.type"
-              :disabled="disabled"
+              :disabled="disabled || isStatesZooTraceVariable(variable)"
               category="node"
               placeholder="value"
               symbolic-initially-open
@@ -80,8 +83,8 @@
         <button
           type="button"
           class="delete-variable-button noborder"
-          :disabled="disabled || isReferenced(variable.id)"
-          :title="deleteTitle(variable.id)"
+          :disabled="disabled || isStatesZooTraceVariable(variable) || isReferenced(variable.id)"
+          :title="deleteTitle(variable)"
           :aria-label="`Delete variable ${variable.name || variable.id}`"
           @click="deleteVariable(variable)"
         >
@@ -95,7 +98,11 @@
 <script setup>
 import { computed } from 'vue'
 import { Plus, Trash2 } from '@lucide/vue'
-import Variable, { isStatesZooVariable, isVariableReferenced } from '../../models/Variable'
+import Variable, {
+  isStatesZooTraceVariable,
+  isStatesZooVariable,
+  isVariableReferenced
+} from '../../models/Variable'
 import {
   VARIABLE_PARAMETER_TYPES,
   getTypeOptionLabel,
@@ -138,13 +145,19 @@ function addVariable() {
 }
 
 function deleteVariable(variable) {
-  if (props.disabled || isReferenced(variable.id)) return
+  if (props.disabled || isStatesZooTraceVariable(variable) || isReferenced(variable.id)) return
   const index = props.variables.findIndex(candidate => candidate.id === variable.id)
   if (index !== -1) props.variables.splice(index, 1)
 }
 
-function onTypeChanged(variable) {
-  if (props.disabled) return
+function changeVariableName(variable, rawName) {
+  if (props.disabled || isStatesZooTraceVariable(variable)) return
+  variable.name = rawName.trim()
+}
+
+function changeVariableType(variable, type) {
+  if (props.disabled || isStatesZooTraceVariable(variable)) return
+  variable.type = type
   resetValueForType(variable, variable.type)
 }
 
@@ -152,9 +165,17 @@ function isReferenced(variableId) {
   return isVariableReferenced(props.projectData, variableId)
 }
 
-function deleteTitle(variableId) {
+function generatedTraceTitle(variable) {
+  if (!isStatesZooTraceVariable(variable)) return undefined
+  return 'Generated trace variables are managed by their States Zoo state'
+}
+
+function deleteTitle(variable) {
   if (props.disabled) return 'Reset the simulation to edit variables'
-  if (isReferenced(variableId)) return 'Unlink this variable from protocol parameters before deleting it'
+  if (isStatesZooTraceVariable(variable)) {
+    return 'Generated trace variables are managed by their States Zoo state'
+  }
+  if (isReferenced(variable.id)) return 'Unlink this variable from protocol parameters before deleting it'
   return 'Delete variable'
 }
 

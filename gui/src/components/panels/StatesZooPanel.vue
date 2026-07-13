@@ -38,7 +38,7 @@
           <label class="states-zoo-field states-zoo-name-field">
             <span>Name</span>
             <input
-              v-model.trim="variable.name"
+              :value="variable.name"
               type="text"
               class="states-zoo-name-input"
               :class="{ 'invalid-states-zoo-name': !!variableNameError(variable) }"
@@ -46,6 +46,7 @@
               :aria-describedby="variableNameError(variable) ? `states-zoo-name-error-${variable.id}` : undefined"
               :aria-label="`State variable name for ${variable.id}`"
               :disabled="disabled"
+              @input="changeStateName(variable, $event.target.value)"
             />
             <small
               v-if="variableNameError(variable)"
@@ -60,8 +61,8 @@
           <button
             type="button"
             class="delete-states-zoo-button noborder"
-            :disabled="disabled || isReferenced(variable.id)"
-            :title="deleteTitle(variable.id)"
+            :disabled="disabled || stateDeleteBlocked(variable)"
+            :title="deleteTitle(variable)"
             :aria-label="`Delete state variable ${variable.name || variable.id}`"
             @click="deleteStateVariable(variable)"
           >
@@ -87,7 +88,13 @@
                 >
                   Unavailable type ({{ variable.value.state_type }})
                 </option>
-                <option v-for="type in statesZooTypes" :key="type.id" :value="type.id">
+                <option
+                  v-for="type in statesZooTypes"
+                  :key="type.id"
+                  :value="type.id"
+                  :disabled="unweightedTransitionBlocked(variable, type)"
+                  :title="unweightedTransitionTitle(variable, type)"
+                >
                   {{ type.displayName }}
                 </option>
               </select>
@@ -178,6 +185,17 @@
                 Retry preview
               </button>
             </div>
+            <p
+              v-if="isWeighted(variable) && traceVariable(variable)"
+              class="states-zoo-trace-note"
+              role="note"
+            >
+              Generated Float64 variable
+              <code>{{ traceVariable(variable).name }}</code>
+              with value <strong>{{ traceVariable(variable).value }}</strong>.
+              This trace usually corresponds to the probability of successfully heralding the
+              state, for example in heralded entanglement generation.
+            </p>
           </div>
         </div>
       </article>
@@ -190,6 +208,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { LoaderCircle, Plus, Trash2 } from '@lucide/vue'
 import Variable, {
   STATES_ZOO_VALUE_KIND,
+  isStatesZooTraceVariable,
   isStatesZooVariable,
   isVariableReferenced
 } from '../../models/Variable'
@@ -237,6 +256,7 @@ function normalizeStateType(type) {
   return {
     id: String(type.id),
     displayName: type.display_name || type.id,
+    weighted: type.weighted === true,
     parameters: Array.isArray(type.parameters)
       ? type.parameters.map(normalizeParameter)
       : []
@@ -253,6 +273,111 @@ function parametersFor(variable) {
 
 function defaultParameters(type) {
   return Object.fromEntries(type.parameters.map(parameter => [parameter.name, parameter.good]))
+}
+
+function traceVariableId(variable) {
+  return `${variable.id}_tr`
+}
+
+function traceVariableSlot(variable) {
+  const id = traceVariableId(variable)
+  return props.variables.find(candidate => candidate.id === id)
+}
+
+function traceVariable(variable) {
+  const candidate = traceVariableSlot(variable)
+  return isStatesZooTraceVariable(candidate)
+    && candidate.statesZooTraceSourceId === variable.id
+    ? candidate
+    : undefined
+}
+
+function isWeighted(variable) {
+  return stateType(variable.value.state_type)?.weighted === true
+}
+
+function traceName(variable) {
+  return `${variable.name}_tr`
+}
+
+function traceIdCollisionError(variable) {
+  const candidate = traceVariableSlot(variable)
+  if (!candidate || candidate === traceVariable(variable)) return ''
+  return `Cannot generate trace variable because ID '${traceVariableId(variable)}' is already in use`
+}
+
+function traceNameCollisionError(variable) {
+  const expectedName = traceName(variable)
+  const companion = traceVariable(variable)
+  const collision = props.variables.find(candidate => (
+    candidate !== variable
+    && candidate !== companion
+    && candidate.name?.trim() === expectedName
+  ))
+  return collision
+    ? `Cannot generate trace variable because name '${expectedName}' is already in use`
+    : ''
+}
+
+function traceLifecycleError(variable) {
+  return traceIdCollisionError(variable) || traceNameCollisionError(variable)
+}
+
+function setTraceLifecycleError(variable, message) {
+  previewState(variable.id).error = message
+}
+
+function clearTraceLifecycleError(variable) {
+  const state = previewState(variable.id)
+  if (state.error.startsWith('Cannot generate trace variable')) state.error = ''
+}
+
+function syncTraceVariableName(variable) {
+  const lifecycleError = traceLifecycleError(variable)
+  if (lifecycleError) throw new Error(lifecycleError)
+  const companion = traceVariable(variable)
+  if (!companion) return false
+  companion.name = traceName(variable)
+  return true
+}
+
+function updateTraceVariable(variable, rawTrace) {
+  const trace = Math.abs(Number(rawTrace))
+  if (!Number.isFinite(trace)) {
+    throw new Error('The server returned an invalid state trace')
+  }
+
+  const lifecycleError = traceLifecycleError(variable)
+  if (lifecycleError) throw new Error(lifecycleError)
+
+  const existing = traceVariable(variable)
+  if (existing) {
+    existing.name = traceName(variable)
+    existing.type = 'Float64'
+    existing.value = trace
+    return
+  }
+
+  props.variables.push(new Variable({
+    id: traceVariableId(variable),
+    name: traceName(variable),
+    type: 'Float64',
+    value: trace,
+    statesZooTraceSourceId: variable.id
+  }))
+}
+
+function traceIsReferenced(variable) {
+  const companion = traceVariable(variable)
+  return !!companion && isReferenced(companion.id)
+}
+
+function removeTraceVariable(variable) {
+  const companion = traceVariable(variable)
+  if (!companion || isReferenced(companion.id)) return false
+  const index = props.variables.indexOf(companion)
+  if (index !== -1) props.variables.splice(index, 1)
+  return true
 }
 
 function previewState(variableId) {
@@ -291,17 +416,41 @@ function addStateVariable() {
   }))
 }
 
+function changeStateName(variable, rawName) {
+  if (props.disabled) return
+  variable.name = rawName.trim()
+  if (!isWeighted(variable)) return
+  try {
+    const synchronized = syncTraceVariableName(variable)
+    clearTraceLifecycleError(variable)
+    if (!synchronized) schedulePreview(variable)
+  } catch (error) {
+    setTraceLifecycleError(variable, error.message)
+  }
+}
+
 function deleteStateVariable(variable) {
-  if (props.disabled || isReferenced(variable.id)) return
+  if (props.disabled || stateDeleteBlocked(variable)) return
   cleanupPreview(variable.id)
-  const index = props.variables.findIndex(candidate => candidate.id === variable.id)
-  if (index !== -1) props.variables.splice(index, 1)
+  const companion = traceVariable(variable)
+  const removed = new Set([variable, companion].filter(Boolean))
+  for (let index = props.variables.length - 1; index >= 0; index -= 1) {
+    if (removed.has(props.variables[index])) props.variables.splice(index, 1)
+  }
 }
 
 function changeStateType(variable, typeId) {
   if (props.disabled) return
   const type = stateType(typeId)
   if (!type) return
+  if (!type.weighted && traceIsReferenced(variable)) {
+    setTraceLifecycleError(
+      variable,
+      'Unlink the generated trace variable from protocol parameters before choosing an unweighted state',
+    )
+    return
+  }
+  if (!type.weighted) removeTraceVariable(variable)
   variable.value.state_type = type.id
   variable.value.parameters = defaultParameters(type)
   schedulePreview(variable)
@@ -317,10 +466,27 @@ function isReferenced(variableId) {
   return isVariableReferenced(props.projectData, variableId)
 }
 
-function deleteTitle(variableId) {
+function stateDeleteBlocked(variable) {
+  return isReferenced(variable.id) || traceIsReferenced(variable)
+}
+
+function deleteTitle(variable) {
   if (props.disabled) return 'Reset the simulation to edit state variables'
-  if (isReferenced(variableId)) return 'Unlink this variable from protocol parameters before deleting it'
+  if (isReferenced(variable.id)) return 'Unlink this variable from protocol parameters before deleting it'
+  if (traceIsReferenced(variable)) {
+    return 'Unlink the generated trace variable from protocol parameters before deleting this state'
+  }
   return 'Delete state variable'
+}
+
+function unweightedTransitionBlocked(variable, type) {
+  return !type.weighted && isWeighted(variable) && traceIsReferenced(variable)
+}
+
+function unweightedTransitionTitle(variable, type) {
+  return unweightedTransitionBlocked(variable, type)
+    ? 'Unlink the generated trace variable before choosing an unweighted state'
+    : undefined
 }
 
 function variableNameError(variable) {
@@ -328,7 +494,8 @@ function variableNameError(variable) {
   const duplicateCount = props.variables.filter(candidate => (
     candidate.name?.trim() === variable.name.trim()
   )).length
-  return duplicateCount > 1 ? 'Name must be unique' : ''
+  if (duplicateCount > 1) return 'Name must be unique'
+  return isWeighted(variable) ? traceNameCollisionError(variable) : ''
 }
 
 function cancelPreviewWork(variableId) {
@@ -396,7 +563,9 @@ async function renderPreview(variable, generation) {
       throw new Error(response.error || response.message || 'State preview failed')
     }
     if (previewGenerations.get(variableId) !== generation || isUnmounted) return
-    state.imageUrl = previewImageUrl(response)
+    const imageUrl = previewImageUrl(response)
+    if (isWeighted(variable)) updateTraceVariable(variable, response.trace)
+    state.imageUrl = imageUrl
   } catch (error) {
     if (error?.name === 'AbortError') return
     if (previewGenerations.get(variableId) !== generation || isUnmounted) return
@@ -693,6 +862,21 @@ onUnmounted(() => {
   height: 23px;
   padding: 2px 8px;
   font-size: 0.75rem;
+}
+
+.states-zoo-trace-note {
+  margin-top: var(--app-space-2);
+  padding: var(--app-space-3);
+  border: 1px solid var(--app-color-border);
+  border-radius: var(--app-radius-control);
+  color: var(--app-color-text-muted);
+  background: var(--app-color-surface-subtle);
+  font-size: 0.78rem;
+}
+
+.states-zoo-trace-note code,
+.states-zoo-trace-note strong {
+  color: var(--app-color-text);
 }
 
 .visually-hidden {

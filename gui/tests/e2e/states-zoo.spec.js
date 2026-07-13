@@ -8,6 +8,7 @@ const STATES_ZOO_TYPES = [
   {
     id: 'BarrettKokBellPair',
     display_name: 'Barrett-Kok Bell Pair',
+    weighted: false,
     parameters: [
       { name: 'ηᴬ', min: 0, max: 1, good: 1 },
       { name: 'ηᴮ', min: 0, max: 1, good: 1 },
@@ -18,7 +19,8 @@ const STATES_ZOO_TYPES = [
   },
   {
     id: 'BarrettKokBellPairW',
-    display_name: 'Weighted Barrett-Kok Bell Pair',
+    display_name: 'Barrett-Kok Bell Pair (weighted)',
+    weighted: true,
     parameters: [
       { name: 'ηᴬ', min: 0, max: 1, good: 1 },
       { name: 'ηᴮ', min: 0, max: 1, good: 1 },
@@ -30,11 +32,13 @@ const STATES_ZOO_TYPES = [
   {
     id: 'DepolarizedBellPair',
     display_name: 'Depolarized Bell Pair',
+    weighted: false,
     parameters: [{ name: 'p', min: 0, max: 1, good: 1 }],
   },
   {
     id: 'GenqoMultiplexedCascadedBellPairW',
-    display_name: 'Genqo Multiplexed Cascaded Bell Pair',
+    display_name: 'Genqo Multiplexed Cascaded Bell Pair (weighted)',
+    weighted: true,
     parameters: [
       { name: 'ηᵇ', min: 0, max: 1, good: 1 },
       { name: 'ηᵈ', min: 0, max: 1, good: 1 },
@@ -45,7 +49,8 @@ const STATES_ZOO_TYPES = [
   },
   {
     id: 'GenqoUnheraldedSPDCBellPairW',
-    display_name: 'Genqo Unheralded SPDC Bell Pair',
+    display_name: 'Genqo Unheralded SPDC Bell Pair (weighted)',
+    weighted: true,
     parameters: [
       { name: 'ηᵈ', min: 0, max: 1, good: 1 },
       { name: 'ηᵗ', min: 0, max: 1, good: 1 },
@@ -96,7 +101,7 @@ async function mockConfiguration(page, { previewHandler } = {}) {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      json: { success: true, png_base64: TRANSPARENT_PNG },
+      json: { success: true, png_base64: TRANSPARENT_PNG, trace: 1 },
     })
   })
   await page.route('**/platform_info', route => route.fulfill({
@@ -313,6 +318,282 @@ test.describe('States Zoo variables', () => {
     await expect(deleteButton).toBeEnabled()
     await deleteButton.click()
     await expect(panel.locator('.states-zoo-row')).toHaveCount(0)
+  })
+
+  test('creates, synchronizes, explains, updates, and persists weighted trace variables', async ({ page }) => {
+    await mockConfiguration(page, {
+      previewHandler: (route, payload) => {
+        const trace = payload.state_type === 'BarrettKokBellPairW'
+          ? -Number(payload.parameters.ηᴬ) / 4
+          : 1
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          json: { success: true, png_base64: TRANSPARENT_PNG, trace },
+        })
+      },
+    })
+    await loadApp(page)
+    await createProject(page, 'Weighted States Zoo Project')
+
+    const panel = await openStatesZoo(page)
+    const row = await addState(page, panel)
+    const stateId = await row.getAttribute('data-variable-id')
+    const traceId = `${stateId}_tr`
+    await expect(row.locator('.states-zoo-trace-note')).toHaveCount(0)
+
+    const weightedPreview = page.waitForResponse(response => (
+      response.url().endsWith('/states_zoo_preview') && response.ok()
+    ))
+    await row.locator('.states-zoo-type-select').selectOption('BarrettKokBellPairW')
+    await weightedPreview
+
+    const note = row.locator('.states-zoo-trace-note')
+    await expect(note).toContainText('state_1_tr')
+    await expect(note).toContainText('0.25')
+    await expect(note).toContainText('probability of successfully heralding the state')
+    await expect(note).toContainText('heralded entanglement generation')
+
+    expect(await page.evaluate(id => {
+      const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      const variables = setupState?.projectData?.variables
+      const state = variables?.find(variable => variable.id === id)
+      const trace = variables?.find(variable => variable.id === `${id}_tr`)
+      return {
+        stateName: state?.name,
+        trace: trace && {
+          id: trace.id,
+          name: trace.name,
+          type: trace.type,
+          value: trace.value,
+          statesZooTraceSourceId: trace.statesZooTraceSourceId,
+        },
+      }
+    }, stateId)).toEqual({
+      stateName: 'state_1',
+      trace: {
+        id: traceId,
+        name: 'state_1_tr',
+        type: 'Float64',
+        value: 0.25,
+        statesZooTraceSourceId: stateId,
+      },
+    })
+
+    await row.locator('.states-zoo-name-input').fill('heralded_pair')
+    await expect(note).toContainText('heralded_pair_tr')
+    expect(await page.evaluate(id => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      return variables?.find(variable => variable.id === id)?.name
+    }, traceId)).toBe('heralded_pair_tr')
+
+    const updatedPreview = page.waitForResponse(response => (
+      response.url().endsWith('/states_zoo_preview') && response.ok()
+    ))
+    await row.locator(
+      '.states-zoo-parameter-control[data-parameter-name="ηᴬ"] .states-zoo-parameter-input',
+    ).fill('0.5')
+    await updatedPreview
+    await expect(note).toContainText('0.125')
+
+    await page.getByRole('tab', { name: 'Variables', exact: true }).click()
+    const companionRow = page.locator(`.variable-row[data-variable-id="${traceId}"]`)
+    await expect(companionRow).toBeVisible()
+    await expect(companionRow.locator('.variable-name-input')).toHaveValue('heralded_pair_tr')
+    await expect(companionRow.locator('.variable-name-input')).toBeDisabled()
+    await expect(companionRow.locator('.variable-type-select')).toHaveValue('Float64')
+    await expect(companionRow.locator('.variable-type-select')).toBeDisabled()
+    await expect(companionRow.locator('.variable-value-input input')).toBeDisabled()
+    const companionDelete = companionRow.locator('.delete-variable-button')
+    await expect(companionDelete).toBeDisabled()
+    await expect(companionDelete).toHaveAttribute(
+      'title',
+      'Generated trace variables are managed by their States Zoo state',
+    )
+
+    await page.locator('.hamburger-btn').click()
+    await page.getByText('Save', { exact: true }).click()
+    expect(await page.evaluate(({ projectName, id }) => {
+      const project = JSON.parse(localStorage.getItem(`cqn_project_${projectName}`))
+      localStorage.setItem('recentProjectName', projectName)
+      return project.variables.find(variable => variable.id === id)
+    }, { projectName: 'Weighted States Zoo Project', id: traceId })).toEqual({
+      id: traceId,
+      name: 'heralded_pair_tr',
+      type: 'Float64',
+      value: 0.125,
+      statesZooTraceSourceId: stateId,
+    })
+
+    await page.reload()
+    await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+    const reloadedPanel = await openStatesZoo(page)
+    const reloadedRow = reloadedPanel.locator(`.states-zoo-row[data-variable-id="${stateId}"]`)
+    await expect(reloadedRow.locator('.states-zoo-trace-note')).toContainText('heralded_pair_tr')
+    expect(await page.evaluate(id => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      return variables?.filter(variable => variable.id === id).length
+    }, traceId)).toBe(1)
+
+    await page.evaluate(id => {
+      const projectData = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData
+      projectData.net.protocols.push({
+        id: 'trace_consumer',
+        parameters: [{ value: { kind: 'variable', id } }],
+      })
+    }, traceId)
+    const unweightedOption = reloadedRow.locator(
+      '.states-zoo-type-select option[value="DepolarizedBellPair"]',
+    )
+    await expect(unweightedOption).toHaveAttribute('disabled', '')
+    const reloadedDelete = reloadedRow.locator('.delete-states-zoo-button')
+    await expect(reloadedDelete).toBeDisabled()
+    await expect(reloadedDelete).toHaveAttribute(
+      'title',
+      'Unlink the generated trace variable from protocol parameters before deleting this state',
+    )
+    await page.evaluate(() => {
+      const protocols = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.net?.protocols
+      protocols.splice(protocols.findIndex(protocol => protocol.id === 'trace_consumer'), 1)
+    })
+    await expect(unweightedOption).not.toHaveAttribute('disabled')
+    await expect(reloadedDelete).toBeEnabled()
+
+    const unweightedPreview = page.waitForResponse(response => (
+      response.url().endsWith('/states_zoo_preview') && response.ok()
+    ))
+    await reloadedRow.locator('.states-zoo-type-select').selectOption('DepolarizedBellPair')
+    await unweightedPreview
+    expect(await page.evaluate(id => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      return variables?.some(variable => variable.id === id)
+    }, traceId)).toBe(false)
+
+    const reweightedPreview = page.waitForResponse(response => (
+      response.url().endsWith('/states_zoo_preview') && response.ok()
+    ))
+    await reloadedRow.locator('.states-zoo-type-select').selectOption('BarrettKokBellPairW')
+    await reweightedPreview
+    expect(await page.evaluate(id => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      return variables?.some(variable => variable.id === id)
+    }, traceId)).toBe(true)
+
+    await reloadedRow.locator('.delete-states-zoo-button').click()
+    await expect(reloadedPanel.locator('.states-zoo-row')).toHaveCount(0)
+    expect(await page.evaluate(({ stateId: sourceId, traceId: companionId }) => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      return variables?.some(variable => variable.id === sourceId || variable.id === companionId)
+    }, { stateId, traceId })).toBe(false)
+  })
+
+  test('does not overwrite trace ID or name collisions', async ({ page }) => {
+    await mockConfiguration(page)
+    await loadApp(page)
+    const panel = await openStatesZoo(page)
+    const row = await addState(page, panel)
+    const stateId = await row.getAttribute('data-variable-id')
+    const traceId = `${stateId}_tr`
+
+    await page.evaluate(id => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      variables.push({ id: `${id}_tr`, name: 'unrelated', type: 'String', value: 'keep me' })
+    }, stateId)
+
+    const idCollisionPreview = page.waitForResponse(response => (
+      response.url().endsWith('/states_zoo_preview') && response.ok()
+    ))
+    await row.locator('.states-zoo-type-select').selectOption('BarrettKokBellPairW')
+    await idCollisionPreview
+    await expect(row.locator('.states-zoo-preview-error')).toContainText(
+      `ID '${traceId}' is already in use`,
+    )
+    expect(await page.evaluate(id => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      const collision = variables?.find(variable => variable.id === id)
+      return collision && {
+        name: collision.name,
+        type: collision.type,
+        value: collision.value,
+        statesZooTraceSourceId: collision.statesZooTraceSourceId,
+      }
+    }, traceId)).toEqual({
+      name: 'unrelated',
+      type: 'String',
+      value: 'keep me',
+      statesZooTraceSourceId: undefined,
+    })
+
+    await row.locator('.states-zoo-name-input').fill('id_collision_rename')
+    await expect(row.locator('.states-zoo-preview-error')).toContainText(
+      `ID '${traceId}' is already in use`,
+    )
+
+    await page.evaluate(({ stateId: sourceId, traceId: occupiedId }) => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      const collisionIndex = variables.findIndex(variable => variable.id === occupiedId)
+      variables.splice(collisionIndex, 1)
+      variables.push({
+        id: 'unrelated_name',
+        name: 'id_collision_rename_tr',
+        type: 'String',
+        value: 'keep me too',
+      })
+      const state = variables.find(variable => variable.id === sourceId)
+      state.name = 'id_collision_rename'
+    }, { stateId, traceId })
+
+    const nameCollisionPreview = page.waitForResponse(response => (
+      response.url().endsWith('/states_zoo_preview') && response.ok()
+    ))
+    await row.getByRole('button', { name: 'Retry preview' }).click()
+    await nameCollisionPreview
+    await expect(row.locator('.states-zoo-name-error')).toContainText(
+      "name 'id_collision_rename_tr' is already in use",
+    )
+    await expect(row.locator('.states-zoo-preview-error')).toContainText(
+      "name 'id_collision_rename_tr' is already in use",
+    )
+    expect(await page.evaluate(() => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      return variables?.filter(variable => variable.name === 'id_collision_rename_tr').length
+    })).toBe(1)
+
+    await page.evaluate(() => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      variables.splice(variables.findIndex(variable => variable.id === 'unrelated_name'), 1)
+    })
+    const recoveredPreview = page.waitForResponse(response => (
+      response.url().endsWith('/states_zoo_preview') && response.ok()
+    ))
+    await row.locator('.states-zoo-name-input').fill('recovered_state')
+    await recoveredPreview
+    await expect(row.locator('.states-zoo-preview-error')).toHaveCount(0)
+    await expect(row.locator('.states-zoo-trace-note')).toContainText('recovered_state_tr')
+    expect(await page.evaluate(id => {
+      const variables = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+        ?.projectData?.variables
+      const companion = variables?.find(variable => variable.id === id)
+      return companion && {
+        name: companion.name,
+        statesZooTraceSourceId: companion.statesZooTraceSourceId,
+      }
+    }, traceId)).toEqual({
+      name: 'recovered_state_tr',
+      statesZooTraceSourceId: stateId,
+    })
   })
 
   test('preserves tagged recipes through save, reload, and import', async ({ page }) => {
