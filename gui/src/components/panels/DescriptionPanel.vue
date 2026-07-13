@@ -10,14 +10,28 @@
         v-model="draft"
         class="description-textarea"
         aria-describedby="description-editor-help"
+        :aria-busy="isEmbeddingImage"
         placeholder="Describe this simulation with Markdown and LaTeX math…"
+        :readonly="isEmbeddingImage"
+        @paste="handlePaste"
       />
+      <p v-if="isEmbeddingImage" class="description-paste-status" role="status">
+        Embedding pasted image…
+      </p>
+      <p v-if="pasteError" class="description-paste-error" role="alert">
+        {{ pasteError }}
+      </p>
       <div class="description-editor-footer">
         <p id="description-editor-help" class="description-help">
-          Markdown, $inline math$, $$display math$$, and data-image URLs are supported.
+          Markdown, $inline math$, $$display math$$, and PNG/JPEG/GIF/WebP image pasting as data URLs are supported.
         </p>
         <div class="description-actions">
-          <button type="submit" class="description-action primary-action" aria-label="Save project description">
+          <button
+            type="submit"
+            class="description-action primary-action"
+            aria-label="Save project description"
+            :disabled="isEmbeddingImage"
+          >
             <Save :size="15" aria-hidden="true" />
             Save
           </button>
@@ -53,6 +67,7 @@ import { PencilLine, Save, X } from '@lucide/vue'
 import MarkdownIt from 'markdown-it'
 import markdownItKatexModule from '@vscode/markdown-it-katex'
 import { SAFE_KATEX_OPTIONS } from '../../utils/katexOptions'
+import { getClipboardImageFiles, imageFilesToMarkdown } from '../../utils/markdownImagePaste'
 
 const props = defineProps({
   modelValue: {
@@ -72,21 +87,70 @@ const markdown = new MarkdownIt({
 const isEditing = ref(false)
 const draft = ref(props.modelValue)
 const editor = ref(null)
+const pasteError = ref('')
+const isEmbeddingImage = ref(false)
 const renderedDescription = computed(() => markdown.render(props.modelValue))
+let pasteOperation = 0
+
+function resetPasteState() {
+  pasteOperation += 1
+  isEmbeddingImage.value = false
+  pasteError.value = ''
+}
 
 watch(() => props.modelValue, value => {
   draft.value = value
   isEditing.value = false
+  resetPasteState()
 })
 
 async function startEditing() {
   draft.value = props.modelValue
   isEditing.value = true
+  resetPasteState()
   await nextTick()
   editor.value?.focus()
 }
 
+async function handlePaste(event) {
+  const imageFiles = getClipboardImageFiles(event.clipboardData)
+  if (imageFiles.length === 0) return
+
+  event.preventDefault()
+  if (isEmbeddingImage.value) return
+
+  const operation = ++pasteOperation
+  isEmbeddingImage.value = true
+  pasteError.value = ''
+
+  const textarea = event.currentTarget
+  const selectionStart = textarea.selectionStart
+  const selectionEnd = textarea.selectionEnd
+
+  try {
+    const pastedMarkdown = await imageFilesToMarkdown(imageFiles)
+    if (operation !== pasteOperation || !isEditing.value || editor.value !== textarea) return
+
+    draft.value = `${draft.value.slice(0, selectionStart)}${pastedMarkdown}${draft.value.slice(selectionEnd)}`
+    isEmbeddingImage.value = false
+    await nextTick()
+
+    if (operation !== pasteOperation || !isEditing.value || editor.value !== textarea) return
+    const caretPosition = selectionStart + pastedMarkdown.length
+    textarea.setSelectionRange(caretPosition, caretPosition)
+  } catch {
+    if (operation === pasteOperation && isEditing.value && editor.value === textarea) {
+      pasteError.value = 'The pasted image could not be read. Please try again.'
+    }
+  } finally {
+    if (operation === pasteOperation) {
+      isEmbeddingImage.value = false
+    }
+  }
+}
+
 function saveDescription() {
+  if (isEmbeddingImage.value) return
   emit('update:modelValue', draft.value)
   isEditing.value = false
 }
@@ -94,6 +158,7 @@ function saveDescription() {
 function cancelEditing() {
   draft.value = props.modelValue
   isEditing.value = false
+  resetPasteState()
 }
 </script>
 
@@ -168,6 +233,20 @@ function cancelEditing() {
   margin: 0;
   color: #666;
   font-size: 0.78rem;
+}
+
+.description-paste-status,
+.description-paste-error {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.description-paste-status {
+  color: #666;
+}
+
+.description-paste-error {
+  color: var(--app-color-danger);
 }
 
 .description-actions {

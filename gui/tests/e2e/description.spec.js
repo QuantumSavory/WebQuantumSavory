@@ -120,6 +120,44 @@ test.describe('Project description', () => {
     await expect.poll(() => page.evaluate(() => window.__descriptionXss)).toBeUndefined()
   })
 
+  test('pastes a clipboard image at the selection and renders the generated Markdown', async ({ page }) => {
+    await page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      setup.createNewProject('Description Image Paste Test')
+    })
+
+    await page.getByRole('tab', { name: 'Description' }).click()
+    const panel = page.getByTestId('description-panel')
+    await panel.getByRole('button', { name: 'Edit project description' }).click()
+
+    const editor = panel.getByRole('textbox', { name: 'Project description in Markdown' })
+    await editor.fill('Before selected after')
+    await editor.evaluate(textarea => textarea.setSelectionRange(7, 15))
+
+    const pasteWasPrevented = await editor.evaluate((textarea, dataUrl) => {
+      const [, base64] = dataUrl.split(',')
+      const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0))
+      const clipboard = new DataTransfer()
+      clipboard.items.add(new File([bytes], 'pixel.png', { type: 'image/png' }))
+      const event = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: clipboard,
+      })
+      textarea.dispatchEvent(event)
+      return event.defaultPrevented
+    }, EMBEDDED_PNG)
+
+    expect(pasteWasPrevented).toBe(true)
+    const expectedMarkdown = `Before ![Pasted image](${EMBEDDED_PNG}) after`
+    await expect(editor).toHaveValue(expectedMarkdown)
+    await panel.getByRole('button', { name: 'Save project description' }).click()
+
+    const pastedImage = panel.getByRole('img', { name: 'Pasted image' })
+    await expect(pastedImage).toHaveAttribute('src', EMBEDDED_PNG)
+    await expect.poll(() => pastedImage.evaluate(image => image.complete && image.naturalWidth === 1)).toBe(true)
+  })
+
   test('persists only in full saved and exported JSON, while legacy and import paths are normalized', async ({ page }) => {
     const defaults = await page.evaluate(() => {
       const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
