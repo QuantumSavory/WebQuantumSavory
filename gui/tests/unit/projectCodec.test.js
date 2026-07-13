@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import Edge from '../../src/models/Edge'
 import FloatingProtocol from '../../src/models/FloatingProtocol'
 import Node from '../../src/models/Node'
-import Variable from '../../src/models/Variable'
+import Variable, { isStatesZooTraceVariable } from '../../src/models/Variable'
 import {
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
@@ -23,6 +23,31 @@ const DEFAULT_NOISE = {
   doc: 'No background noise',
   parameters: [],
 }
+
+describe('States Zoo trace variable ownership', () => {
+  it('persists explicit ownership and recognizes only deterministic companions', () => {
+    const companion = new Variable({
+      id: 'state_id_tr',
+      name: 'state_tr',
+      type: 'Float64',
+      value: 0.25,
+      statesZooTraceSourceId: 'state_id',
+    })
+
+    expect(isStatesZooTraceVariable(companion)).toBe(true)
+    expect(JSON.parse(JSON.stringify(companion))).toEqual({
+      id: 'state_id_tr',
+      name: 'state_tr',
+      type: 'Float64',
+      value: 0.25,
+      statesZooTraceSourceId: 'state_id',
+    })
+    expect(isStatesZooTraceVariable({
+      ...companion,
+      id: 'unrelated_id',
+    })).toBe(false)
+  })
+})
 
 function legacyProject() {
   return {
@@ -312,6 +337,30 @@ describe('encodeStoredProject', () => {
 })
 
 describe('backend payload codecs', () => {
+  it('preserves generated trace ownership for script-export tuple bindings', () => {
+    const project = createEmptyProject('Weighted State')
+    project.variables.push(new Variable({
+      id: 'state_id_tr',
+      name: 'state_tr',
+      type: 'Float64',
+      value: 0.123,
+      statesZooTraceSourceId: 'state_id',
+    }))
+
+    const simulationPayload = toSimulationPayload(project)
+    expect(simulationPayload.variables[0]).toEqual({
+      id: 'state_id_tr',
+      name: 'state_tr',
+      type: 'Float64',
+      value: 0.123,
+      statesZooTraceSourceId: 'state_id',
+    })
+    expect(toScriptExportPayloadFromSimulationPayload(
+      simulationPayload,
+      project.simulationConfig,
+    ).variables[0].statesZooTraceSourceId).toBe('state_id')
+  })
+
   it('removes UI/storage state and normalizes slots and placed protocols without mutation', () => {
     const { project } = decodeStoredProject(legacyProject(), {
       storageName: 'Payload Project',

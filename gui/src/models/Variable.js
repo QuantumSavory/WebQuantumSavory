@@ -4,20 +4,33 @@ export const VARIABLE_REFERENCE_KIND = 'variable'
 export const STATES_ZOO_VALUE_KIND = 'states_zoo'
 
 export default class Variable {
-  constructor({ id = generateUUid('variable'), name = '', type = 'Float64', value = null } = {}) {
+  constructor({
+    id = generateUUid('variable'),
+    name = '',
+    type = 'Float64',
+    value = null,
+    statesZooTraceSourceId = null
+  } = {}) {
     this.id = id
     this.name = name
     this.type = type
     this.value = value
+    if (typeof statesZooTraceSourceId === 'string' && statesZooTraceSourceId) {
+      this.statesZooTraceSourceId = statesZooTraceSourceId
+    }
   }
 
   toJSON() {
-    return {
+    const serialized = {
       id: this.id,
       name: this.name,
       type: this.type,
       value: this.value
     }
+    if (typeof this.statesZooTraceSourceId === 'string' && this.statesZooTraceSourceId) {
+      serialized.statesZooTraceSourceId = this.statesZooTraceSourceId
+    }
+    return serialized
   }
 }
 
@@ -54,6 +67,13 @@ export function isStatesZooValue(value) {
 
 export function isStatesZooVariable(variable) {
   return isStatesZooValue(variable?.value)
+}
+
+export function isStatesZooTraceVariable(variable) {
+  const sourceId = variable?.statesZooTraceSourceId
+  return typeof sourceId === 'string'
+    && sourceId.length > 0
+    && variable?.id === `${sourceId}_tr`
 }
 
 export function isVariableReferenced(projectData, variableId) {

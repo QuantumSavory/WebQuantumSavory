@@ -243,6 +243,15 @@
         "GenqoUnheraldedSPDCBellPairW",
       ]
       @test all(haskey(entry, "display_name") for entry in types_data["states_zoo_types"])
+      @test [entry["display_name"] for entry in types_data["states_zoo_types"]] == [
+        "Barrett-Kok Bell Pair",
+        "Barrett-Kok Bell Pair (weighted)",
+        "Depolarized Bell Pair",
+        "Genqo Multiplexed Cascaded Bell Pair (weighted)",
+        "Genqo Unheralded SPDC Bell Pair (weighted)",
+      ]
+      @test [entry["weighted"] for entry in types_data["states_zoo_types"]] ==
+        [false, true, false, true, true]
       @test all(haskey(entry, "parameters") for entry in types_data["states_zoo_types"])
 
       depolarized = only(filter(
@@ -268,9 +277,35 @@
       preview_data = parse_response(preview_response)
       @test preview_data["success"] == true
       @test haskey(preview_data, "png_base64")
+      @test preview_data["trace"] ≈ 1
       png = WebQuantumSavory.base64decode(preview_data["png_base64"])
       @test length(png) > 8
       @test png[1:8] == UInt8[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+
+      weighted_preview_response = make_request(
+        "POST",
+        "/states_zoo_preview";
+        body=Dict(
+          "state_type" => "BarrettKokBellPairW",
+          "parameters" => Dict("ηᴬ" => 1, "ηᴮ" => 1, "Pᵈ" => 0, "ηᵈ" => 1, "𝒱" => 1),
+        ),
+      )
+      @test weighted_preview_response.status == 200
+      weighted_preview_data = parse_response(weighted_preview_response)
+      @test weighted_preview_data["trace"] ≈ 0.5
+
+      zero_trace_response = make_request(
+        "POST",
+        "/states_zoo_preview";
+        body=Dict(
+          "state_type" => "BarrettKokBellPairW",
+          "parameters" => Dict("ηᴬ" => 0, "ηᴮ" => 0, "Pᵈ" => 0, "ηᵈ" => 1, "𝒱" => 1),
+        ),
+      )
+      @test zero_trace_response.status == 400
+      zero_trace_data = parse_response(zero_trace_response)
+      @test zero_trace_data["error_code"] == "VALIDATION_ERROR"
+      @test occursin("finite, positive", zero_trace_data["error"])
 
       unknown_response = make_request(
         "POST",
@@ -333,8 +368,8 @@
         "type" => "Symbolic",
         "value" => Dict(
           "kind" => "states_zoo",
-          "state_type" => "DepolarizedBellPair",
-          "parameters" => Dict("p" => 0.9),
+          "state_type" => "BarrettKokBellPairW",
+          "parameters" => Dict("ηᴬ" => 1, "ηᴮ" => 1, "Pᵈ" => 0, "ηᵈ" => 1, "𝒱" => 1),
         ),
       )]
 

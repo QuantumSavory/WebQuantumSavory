@@ -20,6 +20,7 @@
 - Added a States Zoo tools tab for defining symbolic state variables from the five allowlisted QuantumSavory state types, with metadata-driven parameter controls and debounced rendered previews.
 - Added safe structured States Zoo recipes that persist with projects and remain available to compatible protocol parameters without enabling unsafe symbolic evaluation.
 - Added States Zoo catalog and PNG preview API endpoints with strict type, parameter, numeric, and range validation plus serialized CairoMakie rendering.
+- Exposed every upstream States Zoo type through the explicit whitelist, marked weighted states consistently, normalized their symbolic values and previews, and added synchronized trace variables with heralding-probability guidance while keeping generated Zoo variables out of the ordinary Variables tab and recomputing exported traces alongside their normalized states.
 
 ## 1.6.0
 

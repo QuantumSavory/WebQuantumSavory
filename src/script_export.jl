@@ -148,7 +148,7 @@ function _script_function_expression(value, special_type::String, node_index, co
   return _script_raw_expression(source, context)
 end
 
-function _script_states_zoo_expression(recipe, context::String)
+function _script_states_zoo_expression(recipe, context::String; return_trace::Bool=false)
   # Constructing the allowlisted symbolic value validates exact keys, ranges,
   # and the constructor without evaluating user-provided Julia source.
   construct_states_zoo_recipe(recipe)
@@ -160,7 +160,14 @@ function _script_states_zoo_expression(recipe, context::String)
     for name in parameter_names
   ]
   constructor = string(entry.type)
-  return "$constructor(" * join(arguments, ", ") * ")"
+  expression = "$constructor(" * join(arguments, ", ") * ")"
+  entry.weighted || return expression
+  result = return_trace ? "(state / trace, trace)" : "state / trace"
+  return "(let\n" *
+    "    state = $expression\n" *
+    "    trace = abs(QuantumSavory.express(LinearAlgebra.tr(state)))\n" *
+    "    $result\n" *
+    "end)"
 end
 
 function _script_symbolic_expression(value, context::String)
@@ -203,6 +210,55 @@ function _script_value_expression(raw_type, value, context::String; node_index=n
     return _script_symbolic_expression(value, context)
   end
   return _script_regular_expression(raw_type, value, context)
+end
+
+function _script_weighted_states_zoo_recipe(variable::Variable)
+  _script_special_type(variable.type) == "Symbolic" || return nothing
+  recipe = variable.value
+  _states_zoo_object_like(recipe) || return nothing
+  get(recipe, "kind", nothing) == "states_zoo" || return nothing
+  state_type = get(recipe, "state_type", nothing)
+  state_type isa AbstractString || return nothing
+  _, entry = _states_zoo_entry(state_type)
+  return entry.weighted ? recipe : nothing
+end
+
+function _script_states_zoo_trace_owner(
+  companion::Variable,
+  raw_companion,
+  variables::Dict{String,Variable},
+)
+  haskey(raw_companion, "statesZooTraceSourceId") || return nothing
+  context = "Generated trace variable '$(_script_comment(companion.name))'"
+  raw_owner = raw_companion["statesZooTraceSourceId"]
+  raw_owner isa AbstractString || throw(validation_error(
+    "$context field 'statesZooTraceSourceId' must be a string",
+  ))
+  owner_id = strip(String(raw_owner))
+  isempty(owner_id) && throw(validation_error(
+    "$context field 'statesZooTraceSourceId' must not be blank",
+  ))
+  source = get(variables, owner_id, nothing)
+  source === nothing && throw(validation_error(
+    "$context references an unknown States Zoo variable '$owner_id'",
+  ))
+  _script_weighted_states_zoo_recipe(source) !== nothing || throw(validation_error(
+    "$context owner '$owner_id' must be a weighted States Zoo variable",
+  ))
+
+  expected_id = "$(source.id)_tr"
+  expected_name = "$(source.name)_tr"
+  if companion.id != expected_id || companion.name != expected_name || companion.type != "Float64"
+    throw(validation_error(
+      "$context does not match its weighted States Zoo owner",
+      Dict{String,Any}(
+        "expected_id" => expected_id,
+        "expected_name" => expected_name,
+        "expected_type" => "Float64",
+      ),
+    ))
+  end
+  return source
 end
 
 function _script_identifier(raw_value, used::Set{String}, fallback::String)
@@ -300,44 +356,94 @@ function _script_variable_bindings(payload, lines::Vector{String}, used::Set{Str
     return bindings
   end
 
-  for (index, raw_variable) in enumerate(raw_variables)
-    variable = variables[String(raw_variable["id"])]
-    binding = _script_identifier("variable_$(variable.name)", used, "variable_$index")
+  ordered_variables = [
+    (
+      index=index,
+      raw=raw_variable,
+      variable=variables[String(raw_variable["id"])],
+    ) for (index, raw_variable) in enumerate(raw_variables)
+  ]
+  # Allocate every binding before emitting assignments. A generated trace
+  # companion can precede its weighted state in imported payloads, but both
+  # names must still participate in deterministic collision resolution.
+  for item in ordered_variables
+    variable = item.variable
+    binding = _script_identifier(
+      "variable_$(variable.name)",
+      used,
+      "variable_$(item.index)",
+    )
     uses_default = lowercase(variable.type) == "default" || (
       variable.type == "Function" &&
       variable.value isa AbstractString &&
       lowercase(strip(String(variable.value))) == "default"
     )
-    uses_default && begin
-      push!(lines, "$binding = nothing  # GUI variable \"$(_script_comment(variable.name))\": constructor default")
-      bindings[variable.id] = (
-        name=binding,
-        variable=variable,
-        self_dependent=false,
-        fresh_wildcard=false,
-        uses_default=true,
+    self_dependent = variable.type == "Function" && any(
+      first(pair) == strip(string(variable.value)) for pair in SELF_COMPARISON_OPERATORS
+    )
+    fresh_wildcard = variable.type in ("Wildcard", "QuantumSavory.Wildcard")
+    bindings[variable.id] = (
+      name=binding,
+      variable=variable,
+      self_dependent=self_dependent,
+      fresh_wildcard=fresh_wildcard,
+      uses_default=uses_default,
+    )
+  end
+
+  trace_companions = Dict{String,String}()
+  for item in ordered_variables
+    source = _script_states_zoo_trace_owner(
+      item.variable,
+      item.raw,
+      variables,
+    )
+    source === nothing || (trace_companions[source.id] = item.variable.id)
+  end
+  paired_trace_ids = Set(values(trace_companions))
+
+  for item in ordered_variables
+    variable = item.variable
+    variable.id in paired_trace_ids && continue
+    binding = bindings[variable.id]
+
+    if haskey(trace_companions, variable.id)
+      companion_id = trace_companions[variable.id]
+      companion_binding = bindings[companion_id]
+      expression = _script_states_zoo_expression(
+        variable.value,
+        "Variable '$(_script_comment(variable.name))'";
+        return_trace=true,
+      )
+      push!(
+        lines,
+        "$(binding.name), $(companion_binding.name) = $expression" *
+        "  # GUI variable IDs: $(_script_comment(variable.id)), $(_script_comment(companion_id))",
       )
       continue
     end
 
-    self_dependent = variable.type == "Function" && any(first(pair) == strip(string(variable.value)) for pair in SELF_COMPARISON_OPERATORS)
-    fresh_wildcard = variable.type in ("Wildcard", "QuantumSavory.Wildcard")
-    expression = if fresh_wildcard
+    if binding.uses_default
+      push!(
+        lines,
+        "$(binding.name) = nothing" *
+        "  # GUI variable \"$(_script_comment(variable.name))\": constructor default",
+      )
+      continue
+    end
+
+    expression = if binding.fresh_wildcard
       "(() -> QuantumSavory.Wildcard())"
-    elseif self_dependent
+    elseif binding.self_dependent
       reference = strip(String(variable.value))
       "(self -> " * reference * ")"
     else
       _script_value_expression(variable.type, variable.value, "Variable '$(_script_comment(variable.name))'")
     end
     expression === nothing && throw(validation_error("Variable '$(_script_comment(variable.name))' cannot use a constructor default here"))
-    push!(lines, "$binding = $expression  # GUI variable ID: $(_script_comment(variable.id))")
-    bindings[variable.id] = (
-      name=binding,
-      variable=variable,
-      self_dependent=self_dependent,
-      fresh_wildcard=fresh_wildcard,
-      uses_default=false,
+    push!(
+      lines,
+      "$(binding.name) = $expression  # GUI variable ID: $(_script_comment(variable.id))",
     )
   end
   return bindings
@@ -458,6 +564,7 @@ function generate_julia_script(payload)
     "using ConcurrentSim",
     "using ResumableFunctions",
     "using CairoMakie",
+    "using LinearAlgebra",
     "import InteractiveUtils, REPL",
     "",
     "CairoMakie.activate!()",

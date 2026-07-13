@@ -4,6 +4,7 @@
   using .WebQuantumSavory
   using Graphs
   using QuantumSavory
+  import LinearAlgebra
   using ConcurrentSim
   using Dates
 
@@ -32,6 +33,23 @@
         "value" => 0.8,
       ),
       Dict(
+        "id" => "weighted-state-variable_tr",
+        "name" => "weighted pair_tr",
+        "type" => "Float64",
+        "value" => 0.123,
+        "statesZooTraceSourceId" => "weighted-state-variable",
+      ),
+      Dict(
+        "id" => "weighted-state-variable",
+        "name" => "weighted pair",
+        "type" => "Symbolic",
+        "value" => Dict(
+          "kind" => "states_zoo",
+          "state_type" => "BarrettKokBellPairW",
+          "parameters" => Dict("ηᴬ" => 1, "ηᴮ" => 1, "Pᵈ" => 0, "ηᵈ" => 1, "𝒱" => 1),
+        ),
+      ),
+      Dict(
         "id" => "default-function-variable",
         "name" => "default chooser",
         "type" => "Function",
@@ -46,7 +64,8 @@
     parameters = payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
     parameter_by_name = Dict(parameter["name"] => parameter for parameter in parameters)
     parameter_by_name["pairstate"]["value"] = Dict("kind" => "variable", "id" => "state-variable")
-    parameter_by_name["success_prob"]["value"] = Dict("kind" => "variable", "id" => "probability-variable")
+    parameter_by_name["success_prob"]["value"] =
+      Dict("kind" => "variable", "id" => "weighted-state-variable_tr")
     parameter_by_name["chooseA"]["value"] = Dict("kind" => "variable", "id" => "default-function-variable")
 
     state_names_before = Set(keys(WebQuantumSavory.STATE))
@@ -58,6 +77,12 @@
     @test occursin("# Variables", script)
     @test occursin("variable_pair_fidelity = QuantumSavory.StatesZoo.DepolarizedBellPair(0.9)", script)
     @test occursin("variable_pair_fidelity_2 = 0.8", script)
+    @test occursin("variable_weighted_pair, variable_weighted_pair_tr = (let", script)
+    @test occursin("state = QuantumSavory.StatesZoo.BarrettKokBellPairW(1, 1, 0, 1, 1)", script)
+    @test occursin("trace = abs(QuantumSavory.express(LinearAlgebra.tr(state)))", script)
+    @test occursin("(state / trace, trace)", script)
+    @test !occursin("variable_weighted_pair_tr = 0.123", script)
+    @test occursin("success_prob = variable_weighted_pair_tr", script)
     @test occursin("variable_default_chooser = nothing", script)
     @test occursin("QuantumSavory.T2Dephasing(; t2 = 5.0)", script)
     @test occursin("# Registers", script)
@@ -73,8 +98,58 @@
     Base.include_string(generated_module, script, "generated-export.jl")
     generated_sim = getfield(generated_module, :sim)
     @test ConcurrentSim.now(generated_sim) == 0.02
+    generated_weighted_state = getfield(generated_module, :variable_weighted_pair)
+    @test abs(LinearAlgebra.tr(QuantumSavory.express(generated_weighted_state))) ≈ 1
+    generated_weighted_trace = getfield(generated_module, :variable_weighted_pair_tr)
+    @test generated_weighted_trace ≈ 0.5
     generated_protocols = getfield(generated_module, :protocols)
     @test length(generated_protocols) == 1
+    @test generated_protocols[1].second.success_prob ≈ generated_weighted_trace
+
+    weighted_variable = only(filter(
+      variable -> variable["id"] == "weighted-state-variable",
+      payload["variables"],
+    ))
+    direct_weighted_expression = WebQuantumSavory._script_states_zoo_expression(
+      weighted_variable["value"],
+      "Direct weighted state",
+    )
+    @test !occursin("(state / trace, trace)", direct_weighted_expression)
+    direct_weighted_state = Core.eval(generated_module, Meta.parse(direct_weighted_expression))
+    @test abs(LinearAlgebra.tr(QuantumSavory.express(direct_weighted_state))) ≈ 1
+
+    function trace_ownership_error(mutate_companion!)
+      invalid_payload = deepcopy(payload)
+      companion = only(filter(
+        variable -> variable["id"] == "weighted-state-variable_tr",
+        invalid_payload["variables"],
+      ))
+      mutate_companion!(companion)
+      try
+        WebQuantumSavory.generate_julia_script(invalid_payload)
+        return nothing
+      catch error
+        return error
+      end
+    end
+
+    unknown_owner = trace_ownership_error(
+      companion -> (companion["statesZooTraceSourceId"] = "missing-state"),
+    )
+    @test unknown_owner isa WebQuantumSavory.APIError
+    @test occursin("unknown States Zoo variable", unknown_owner.message)
+
+    unweighted_owner = trace_ownership_error(
+      companion -> (companion["statesZooTraceSourceId"] = "state-variable"),
+    )
+    @test unweighted_owner isa WebQuantumSavory.APIError
+    @test occursin("must be a weighted States Zoo variable", unweighted_owner.message)
+
+    mismatched_companion = trace_ownership_error(
+      companion -> (companion["name"] = "stale trace name"),
+    )
+    @test mismatched_companion isa WebQuantumSavory.APIError
+    @test occursin("does not match its weighted States Zoo owner", mismatched_companion.message)
 
     invalid_config = deepcopy(payload)
     invalid_config["simulationConfig"]["time"] = 0
@@ -329,6 +404,14 @@
 
       catalog = WebQuantumSavory.get_states_zoo_types()
       @test [entry["id"] for entry in catalog] == first.(expected)
+      @test [entry["display_name"] for entry in catalog] == [
+        "Barrett-Kok Bell Pair",
+        "Barrett-Kok Bell Pair (weighted)",
+        "Depolarized Bell Pair",
+        "Genqo Multiplexed Cascaded Bell Pair (weighted)",
+        "Genqo Unheralded SPDC Bell Pair (weighted)",
+      ]
+      @test [entry["weighted"] for entry in catalog] == [false, true, false, true, true]
 
       for (catalog_entry, (id, T)) in zip(catalog, expected)
         parameters = QuantumSavory.StatesZoo.stateparameters(T)
@@ -353,8 +436,43 @@
           "state_type" => id,
           "parameters" => good_parameters,
         )
-        @test WebQuantumSavory.construct_states_zoo_recipe(recipe) isa T
+        recipe_state = WebQuantumSavory.construct_states_zoo_recipe(recipe)
+        if catalog_entry["weighted"]
+          @test recipe_state isa QuantumSavory.SymQObj
+          @test abs(LinearAlgebra.tr(QuantumSavory.express(recipe_state))) ≈ 1
+          raw_state = WebQuantumSavory.construct_states_zoo_state(id, good_parameters)
+          @test WebQuantumSavory._states_zoo_absolute_trace(id, raw_state) > 0
+        else
+          @test recipe_state isa T
+        end
       end
+
+      barrett_weighted_parameters =
+        Dict("ηᴬ" => 1, "ηᴮ" => 1, "Pᵈ" => 0, "ηᵈ" => 1, "𝒱" => 1)
+      barrett_weighted = WebQuantumSavory.construct_states_zoo_state(
+        "BarrettKokBellPairW",
+        barrett_weighted_parameters,
+      )
+      @test WebQuantumSavory._states_zoo_absolute_trace(
+        "BarrettKokBellPairW",
+        barrett_weighted,
+      ) ≈ 0.5
+
+      zero_trace_recipe = Dict(
+        "kind" => "states_zoo",
+        "state_type" => "BarrettKokBellPairW",
+        "parameters" => Dict("ηᴬ" => 0, "ηᴮ" => 0, "Pᵈ" => 0, "ηᵈ" => 1, "𝒱" => 1),
+      )
+      zero_trace_error = try
+        WebQuantumSavory.construct_states_zoo_recipe(zero_trace_recipe)
+        nothing
+      catch error
+        error
+      end
+      @test zero_trace_error isa WebQuantumSavory.APIError
+      @test zero_trace_error.status_code == 400
+      @test occursin("finite, positive", zero_trace_error.message)
+      @test zero_trace_error.details["trace"] == 0
 
       function states_zoo_error(state_type, parameters)
         try
@@ -399,6 +517,15 @@
         kwargs = Dict{Symbol,Any}()
         @test WebQuantumSavory._handle_symbolic_parameter!(kwargs, :pairstate, tagged_recipe)
         @test kwargs[:pairstate] isa QuantumSavory.StatesZoo.DepolarizedBellPair
+
+        weighted_recipe = Dict(
+          "kind" => "states_zoo",
+          "state_type" => "BarrettKokBellPairW",
+          "parameters" => barrett_weighted_parameters,
+        )
+        @test WebQuantumSavory._handle_symbolic_parameter!(kwargs, :weighted, weighted_recipe)
+        @test kwargs[:weighted] isa QuantumSavory.SymQObj
+        @test abs(LinearAlgebra.tr(QuantumSavory.express(kwargs[:weighted]))) ≈ 1
       end
 
       # Existing symbolic strings keep their evaluation-backed behavior.
@@ -414,10 +541,20 @@
         "DepolarizedBellPair",
         Dict("p" => 0.8),
       )
-      encoded = WebQuantumSavory.render_states_zoo_preview("DepolarizedBellPair", state)
-      png = WebQuantumSavory.base64decode(encoded)
+      preview = WebQuantumSavory.render_states_zoo_preview("DepolarizedBellPair", state)
+      png = WebQuantumSavory.base64decode(preview.png_base64)
       @test length(png) > 8
       @test png[1:8] == UInt8[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+      @test preview.trace ≈ 1
+
+      weighted = WebQuantumSavory.construct_states_zoo_state(
+        "BarrettKokBellPairW",
+        Dict("ηᴬ" => 1, "ηᴮ" => 1, "Pᵈ" => 0, "ηᵈ" => 1, "𝒱" => 1),
+      )
+      density_operator, original_trace =
+        WebQuantumSavory._states_zoo_preview_density_operator("BarrettKokBellPairW", weighted)
+      @test original_trace ≈ 0.5
+      @test abs(LinearAlgebra.tr(density_operator)) ≈ 1
   end
 
   @testset "Payload Extraction" begin

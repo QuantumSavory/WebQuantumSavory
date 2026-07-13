@@ -95,7 +95,11 @@
 <script setup>
 import { computed } from 'vue'
 import { Plus, Trash2 } from '@lucide/vue'
-import Variable, { isStatesZooVariable, isVariableReferenced } from '../../models/Variable'
+import Variable, {
+  isStatesZooTraceVariable,
+  isStatesZooVariable,
+  isVariableReferenced
+} from '../../models/Variable'
 import {
   VARIABLE_PARAMETER_TYPES,
   getTypeOptionLabel,
@@ -119,7 +123,9 @@ const props = defineProps({
 })
 
 const variableTypes = VARIABLE_PARAMETER_TYPES
-const ordinaryVariables = computed(() => props.variables.filter(variable => !isStatesZooVariable(variable)))
+const ordinaryVariables = computed(() => props.variables.filter(variable => (
+  !isStatesZooVariable(variable) && !isStatesZooTraceVariable(variable)
+)))
 
 function nextVariableName() {
   const existingNames = new Set(props.variables.map(variable => variable.name))
