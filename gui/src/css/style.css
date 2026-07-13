@@ -274,6 +274,10 @@ h1 {
   padding: 10px !important;
   word-wrap: break-word !important;
 }
+/* HighCode overlays its textarea on highlighted code; both layers need the same inset. */
+.code-editor-with-symbols .code_area pre code.hljs{
+  padding: 0;
+}
 
 .p-tooltip-text > pre{
   color: #f00;
