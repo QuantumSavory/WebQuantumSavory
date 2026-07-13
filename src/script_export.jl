@@ -18,6 +18,8 @@ const _SCRIPT_RESERVED_IDENTIFIERS = Set([
   "network",
   "network_axis",
   "network_observable",
+  "node_indices",
+  "nodeid",
   "protocol_output_directory",
   "protocols",
   "registers",
@@ -120,6 +122,22 @@ function _script_self_function(value, node_index, context::String)
   return nothing
 end
 
+function _script_custom_function_expression(source::AbstractString, node_index, context::String)
+  _script_raw_expression(source, context)
+
+  named_function = match(r"function\s+([A-Za-z_][A-Za-z0-9_!]*)\s*\(", source)
+  result = if named_function === nothing
+    "(" * source * ")"
+  else
+    function_name = only(named_function.captures)
+    source * "\n" * function_name
+  end
+
+  indented = replace(result, "\n" => "\n    ")
+  self_binding = node_index === nothing ? "" : "    self = $node_index\n"
+  return "(let\n" * self_binding * "    $indented\nend)"
+end
+
 function _script_function_expression(value, special_type::String, node_index, context::String)
   value isa AbstractString || throw(validation_error(
     "$context must be a function name or Julia function expression",
@@ -137,15 +155,7 @@ function _script_function_expression(value, special_type::String, node_index, co
     "$context is not an allowlisted function reference",
     Dict{String,Any}("value" => source),
   ))
-
-  named_function = match(r"function\s+([A-Za-z_][A-Za-z0-9_!]*)\s*\(", source)
-  if named_function !== nothing
-    _script_raw_expression(source, context)
-    function_name = only(named_function.captures)
-    indented = replace(source, "\n" => "\n    ")
-    return "(let\n    $indented\n    $function_name\nend)"
-  end
-  return _script_raw_expression(source, context)
+  return _script_custom_function_expression(source, node_index, context)
 end
 
 function _script_states_zoo_expression(recipe, context::String; return_trace::Bool=false)
@@ -368,6 +378,7 @@ function _script_variable_bindings(payload, lines::Vector{String}, used::Set{Str
   # names must still participate in deterministic collision resolution.
   for item in ordered_variables
     variable = item.variable
+    special_type = _script_special_type(variable.type)
     binding = _script_identifier(
       "variable_$(variable.name)",
       used,
@@ -378,14 +389,15 @@ function _script_variable_bindings(payload, lines::Vector{String}, used::Set{Str
       variable.value isa AbstractString &&
       lowercase(strip(String(variable.value))) == "default"
     )
-    self_dependent = variable.type == "Function" && any(
+    self_dependent = special_type in ("Function", "Lambda") && any(
       first(pair) == strip(string(variable.value)) for pair in SELF_COMPARISON_OPERATORS
     )
+    per_assignment = special_type == "Lambda" || self_dependent
     fresh_wildcard = variable.type in ("Wildcard", "QuantumSavory.Wildcard")
     bindings[variable.id] = (
       name=binding,
       variable=variable,
-      self_dependent=self_dependent,
+      per_assignment=per_assignment,
       fresh_wildcard=fresh_wildcard,
       uses_default=uses_default,
     )
@@ -432,11 +444,33 @@ function _script_variable_bindings(payload, lines::Vector{String}, used::Set{Str
       continue
     end
 
+    if binding.per_assignment
+      if _script_special_type(variable.type) == "Lambda"
+        variable.value isa AbstractString || _script_function_expression(
+          variable.value,
+          "Lambda",
+          nothing,
+          "Variable '$(_script_comment(variable.name))'",
+        )
+        source = strip(String(variable.value))
+        if resolve_function_reference(source) === nothing &&
+           !any(first(pair) == source for pair in SELF_COMPARISON_OPERATORS)
+          _script_raw_expression(
+            variable.value,
+            "Variable '$(_script_comment(variable.name))'",
+          )
+        end
+      end
+      push!(
+        lines,
+        "# GUI variable \"$(_script_comment(variable.name))\" is instantiated at each protocol assignment" *
+        "  # GUI variable ID: $(_script_comment(variable.id))",
+      )
+      continue
+    end
+
     expression = if binding.fresh_wildcard
       "(() -> QuantumSavory.Wildcard())"
-    elseif binding.self_dependent
-      reference = strip(String(variable.value))
-      "(self -> " * reference * ")"
     else
       _script_value_expression(variable.type, variable.value, "Variable '$(_script_comment(variable.name))'")
     end
@@ -461,11 +495,17 @@ function _script_protocol_parameter_expression(parameter, variable_bindings, con
     binding === nothing && throw(validation_error("$context parameter '$name' references an unknown variable"))
     binding.uses_default && return name, nothing
     binding.fresh_wildcard && return name, "$(binding.name)()"
-    if binding.self_dependent
-      node_index === nothing && throw(validation_error(
-        "$context parameter '$name' uses a self-dependent variable outside a node protocol",
+    if binding.per_assignment
+      expression = _script_value_expression(
+        binding.variable.type,
+        binding.variable.value,
+        "Variable '$(_script_comment(binding.variable.name))' assigned to $context parameter '$name'";
+        node_index=node_index,
+      )
+      expression === nothing && throw(validation_error(
+        "Variable '$(_script_comment(binding.variable.name))' cannot use a constructor default here",
       ))
-      return name, "$(binding.name)($node_index)"
+      return name, expression
     end
     return name, binding.name
   end
@@ -626,6 +666,23 @@ function generate_julia_script(payload)
     push!(lines, "backgrounds = $backgrounds")
     push!(lines, "push!(registers, QuantumSavory.Register(traits, representations, backgrounds))")
   end
+
+  append!(lines, [
+    "",
+    "# Resolve GUI node names to their one-based register indices.",
+    "node_indices = Dict{String,Int}(",
+  ])
+  for (node_index, node) in enumerate(nodes)
+    node_name = _script_literal(node["name"], "node name")
+    push!(
+      lines,
+      "    $node_name => $node_index,",
+    )
+  end
+  append!(lines, [
+    ")",
+    "nodeid(name::String)::Int = node_indices[name]",
+  ])
 
   append!(lines, [
     "",

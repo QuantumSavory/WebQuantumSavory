@@ -209,6 +209,11 @@ async function expectEditorLayersAligned(valueEditor) {
 async function expectCustomFunctionValidationLifecycle(valueEditor) {
   const input = valueEditor.locator('textarea')
   await expect(input).toBeVisible()
+  const contextHelp = valueEditor.getByTestId('custom-function-context-help')
+  await expect(contextHelp).toBeVisible()
+  await expect(contextHelp).toContainText('nodeid("Node name")')
+  await expect(contextHelp).toContainText('self')
+  await expect(contextHelp).toContainText('node protocol')
   await expect(valueEditor.getByTestId('code-collapsed-view')).toHaveCount(0)
 
   await input.fill('invalid(')
@@ -254,6 +259,7 @@ test.describe('Code editor lifecycle', () => {
     await initialValue.click()
     const input = valueEditor.locator('textarea')
     await expect(input).toBeVisible()
+    await expect(valueEditor.getByTestId('custom-function-context-help')).toHaveCount(0)
     await input.fill('invalid(')
     await expectEditorLayersAligned(valueEditor)
     await valueEditor.locator('.validate-button').click()
@@ -293,6 +299,7 @@ test.describe('Code editor lifecycle', () => {
     const input = valueEditor.locator('textarea')
 
     await expect(input).toBeVisible()
+    await expect(valueEditor.getByTestId('custom-function-context-help')).toHaveCount(0)
     await expect(valueEditor.getByTestId('symbolic-collapsed-view')).toHaveCount(0)
     await input.fill('valid_variable_expression')
     await valueEditor.locator('.validate-button').click()
@@ -319,6 +326,19 @@ test.describe('Code editor lifecycle', () => {
 
     await initialValue.click()
     await expectCustomFunctionValidationLifecycle(valueEditor)
+
+    const serializedParameter = await page.evaluate(() => {
+      const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      const minimized = setupState?.minimizedProjectData?.value ?? setupState?.minimizedProjectData
+      return JSON.parse(JSON.stringify(
+        minimized.net.nodes[0].data.protocols[0].parameters[0]
+      ))
+    })
+    expect(serializedParameter).toEqual({
+      name: 'callback',
+      type: 'Lambda',
+      value: VALID_FUNCTION_SOURCE,
+    })
   })
 
   test('starts open for a new custom-function variable and collapses only after validation succeeds', async ({ page }) => {
@@ -331,5 +351,23 @@ test.describe('Code editor lifecycle', () => {
     const valueEditor = variableRow.locator('.code-editor-with-symbols')
 
     await expectCustomFunctionValidationLifecycle(valueEditor)
+
+    const variableId = await variableRow.getAttribute('data-variable-id')
+    const serializedVariables = await page.evaluate(() => {
+      const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      const minimized = setupState?.minimizedProjectData?.value ?? setupState?.minimizedProjectData
+      return {
+        full: JSON.parse(JSON.stringify(setupState.serializeProjectData().variables[0])),
+        minimized: JSON.parse(JSON.stringify(minimized.variables[0])),
+      }
+    })
+    const expectedVariable = {
+      id: variableId,
+      name: 'variable_1',
+      type: 'Lambda',
+      value: VALID_FUNCTION_SOURCE,
+    }
+    expect(serializedVariables.full).toEqual(expectedVariable)
+    expect(serializedVariables.minimized).toEqual(expectedVariable)
   })
 })

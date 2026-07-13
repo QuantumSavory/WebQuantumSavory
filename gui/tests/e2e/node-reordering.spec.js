@@ -97,6 +97,10 @@ test('reorders node IDs without replacing selection, endpoints, map markers, or 
   })
 
   const listRows = page.locator('#nodeListPanel .node-list-item')
+  const nodeContextHelp = page.getByTestId('node-context-help')
+  await expect(nodeContextHelp).toContainText('one-based simulator IDs')
+  await expect(nodeContextHelp).toContainText('nodeid("Node name")')
+  await expect(nodeContextHelp).toContainText('Use unique node names')
   await expect(listRows.locator('.node-list-name')).toHaveText(['Node 1', 'Node 2', 'Node 3'])
   await expect(listRows.locator('.node-index')).toHaveText(['#1', '#2', '#3'])
   await expect(page.locator('#nodePanel .node-index')).toHaveText('#2')

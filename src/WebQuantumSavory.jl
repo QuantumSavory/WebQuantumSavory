@@ -460,13 +460,22 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
 
   # Node-attached protocols: per-node under node["data"]["protocols"]
   nodes = data["graph_info"]["nodes"]
+  # The validated node order is the simulator's one-based register order.
+  # Construct this once per launch and share the same lookup with every
+  # node-, edge-, and net-attached protocol conversion.
+  node_name_to_index = _node_name_to_index(nodes)
   for (idx, node) in enumerate(nodes)
     node_data = get(node, "data", Dict{String,Any}())
     node_prots = Vector{Any}(get(node_data, "protocols", Any[]))
     @info "Processing node protocols" node_idx=idx node_name=node["name"] protocol_count=length(node_prots)
 
     for prot_def in node_prots
-      ctx = Dict{Symbol,Any}(:sim => sim, :net => net, :node => idx)
+      ctx = Dict{Symbol,Any}(
+        :sim => sim,
+        :net => net,
+        :node => idx,
+        NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+      )
       prot = _instantiate_protocol(prot_def, ctx, state; variables=variables)
       prot === nothing && continue
       @process prot()
@@ -501,7 +510,13 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
     (nodeA_idx > 0 && nodeB_idx > 0) || continue
 
     for prot_def in edge_prots
-      ctx = Dict{Symbol,Any}(:sim => sim, :net => net, :nodeA => nodeA_idx, :nodeB => nodeB_idx)
+      ctx = Dict{Symbol,Any}(
+        :sim => sim,
+        :net => net,
+        :nodeA => nodeA_idx,
+        :nodeB => nodeB_idx,
+        NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+      )
       prot = _instantiate_protocol(prot_def, ctx, state; variables=variables)
       prot === nothing && continue
       @process prot()
@@ -527,7 +542,11 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
   @info "Processing floating protocols" protocol_count=length(floating_prots)
 
   for prot_def in floating_prots
-    ctx = Dict{Symbol,Any}(:sim => sim, :net => net)
+    ctx = Dict{Symbol,Any}(
+      :sim => sim,
+      :net => net,
+      NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+    )
     prot = _instantiate_protocol(prot_def, ctx, state; variables=variables)
     prot === nothing && continue
     @info "Launching floating protocol" protocol_type=typeof(prot)

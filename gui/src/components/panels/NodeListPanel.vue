@@ -7,6 +7,12 @@
     @update:collapsed="emit('update:collapsed', $event)"
   >
     <template #content>
+      <p class="node-context-help" data-testid="node-context-help">
+        The <code>#</code> values are one-based simulator IDs.
+        In custom functions, <code>{{ nodeIdKeyword.syntax }}</code>:
+        {{ nodeIdKeyword.description }}
+        {{ nodeIdKeyword.recommendation }}
+      </p>
       <div v-if="!nodes.length" class="empty-list">No nodes</div>
       <div v-else style="max-height: 20vh; overflow-y: auto;">
         <div
@@ -59,6 +65,7 @@
 <script setup>
 import { computed } from 'vue'
 import { ArrowDown, ArrowUp, Plus } from '@lucide/vue'
+import { CUSTOM_FUNCTION_CONTEXT_BY_ID } from '../../utils/customFunctionContext'
 import BasePanel from './BasePanel.vue'
 import NodeIndex from './NodeIndex.vue'
 
@@ -83,6 +90,7 @@ const props = defineProps({
 const emit = defineEmits(['select', 'addNewNode', 'move-node', 'update:collapsed'])
 
 const isReorderingLocked = computed(() => props.editingLocked)
+const nodeIdKeyword = CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid
 
 function handleSelect(node) {
   emit('select', node)
@@ -109,6 +117,22 @@ function reorderTooltip(atBoundary) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.node-context-help {
+  margin: 0 0 var(--app-space-2);
+  padding: var(--app-space-2) var(--app-space-3);
+  border-left: 3px solid var(--app-color-primary);
+  border-radius: var(--app-radius-control);
+  background: var(--app-color-surface-subtle);
+  color: var(--app-color-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.node-context-help code {
+  color: var(--app-color-text);
+  font-size: inherit;
 }
 
 .node-list-item {
