@@ -398,19 +398,9 @@ test.describe('States Zoo variables', () => {
     await expect(note).toContainText('0.125')
 
     await page.getByRole('tab', { name: 'Variables', exact: true }).click()
-    const companionRow = page.locator(`.variable-row[data-variable-id="${traceId}"]`)
-    await expect(companionRow).toBeVisible()
-    await expect(companionRow.locator('.variable-name-input')).toHaveValue('heralded_pair_tr')
-    await expect(companionRow.locator('.variable-name-input')).toBeDisabled()
-    await expect(companionRow.locator('.variable-type-select')).toHaveValue('Float64')
-    await expect(companionRow.locator('.variable-type-select')).toBeDisabled()
-    await expect(companionRow.locator('.variable-value-input input')).toBeDisabled()
-    const companionDelete = companionRow.locator('.delete-variable-button')
-    await expect(companionDelete).toBeDisabled()
-    await expect(companionDelete).toHaveAttribute(
-      'title',
-      'Generated trace variables are managed by their States Zoo state',
-    )
+    const variablesPanel = page.getByTestId('variables-panel')
+    await expect(variablesPanel.locator('.variable-row')).toHaveCount(0)
+    await expect(variablesPanel.locator('.empty-variables')).toHaveText('No variables')
 
     await page.locator('.hamburger-btn').click()
     await page.getByText('Save', { exact: true }).click()
