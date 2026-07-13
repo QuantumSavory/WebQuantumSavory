@@ -448,6 +448,10 @@ export function toSimulationPayload(project) {
           name: variable?.name,
           type: variable?.type,
           value: cloneValue(variable?.value),
+          ...(typeof variable?.statesZooTraceSourceId === 'string'
+            && variable.statesZooTraceSourceId
+            ? { statesZooTraceSourceId: variable.statesZooTraceSourceId }
+            : {}),
         }))
       : [],
     net: {

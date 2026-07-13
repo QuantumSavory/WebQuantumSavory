@@ -391,6 +391,10 @@ end
                 type: array
                 items:
                   type: object
+                  properties:
+                    statesZooTraceSourceId:
+                      type: string
+                      description: Optional owner ID for a generated weighted States Zoo trace companion; used to compute tuple bindings rather than embedding its cached value
               simulationConfig:
                 type: object
                 properties:
@@ -489,6 +493,9 @@ end
                     type:
                       type: string
                       description: Concrete parameter type used to convert the value
+                    statesZooTraceSourceId:
+                      type: string
+                      description: Optional owner ID for a generated weighted States Zoo trace companion
                     value:
                       nullable: true
                       description: JSON-compatible variable value; Symbolic variables may use the structured States Zoo recipe object shown below
