@@ -41,10 +41,22 @@ test('reports a diagnostic protocol panic without uploading the project', async 
     origin: 'http://localhost:5173',
   })
   await page.addInitScript(() => {
-    window.__panicIssueUrls = []
-    window.open = url => {
-      window.__panicIssueUrls.push(String(url))
-      return { opener: null }
+    window.__panicIssueOpenCalls = []
+    window.open = (url, target, features) => {
+      const call = {
+        url: String(url),
+        target,
+        features: features ?? null,
+        openerCleared: false,
+      }
+      const popup = {}
+      Object.defineProperty(popup, 'opener', {
+        set(value) {
+          call.openerCleared = value === null
+        },
+      })
+      window.__panicIssueOpenCalls.push(call)
+      return popup
     }
   })
   page.on('response', async response => {
@@ -153,8 +165,12 @@ test('reports a diagnostic protocol panic without uploading the project', async 
     request.method !== 'GET' && request.postData?.includes(MOCK_PROTOCOL)
   ))).toBe(false)
 
-  await expect.poll(() => page.evaluate(() => window.__panicIssueUrls)).toHaveLength(1)
-  const issueUrl = new URL((await page.evaluate(() => window.__panicIssueUrls))[0])
+  await expect.poll(() => page.evaluate(() => window.__panicIssueOpenCalls)).toHaveLength(1)
+  const [issueOpenCall] = await page.evaluate(() => window.__panicIssueOpenCalls)
+  const issueUrl = new URL(issueOpenCall.url)
+  expect(issueOpenCall.target).toBe('_blank')
+  expect(issueOpenCall.features).toBeNull()
+  expect(issueOpenCall.openerCleared).toBe(true)
   expect(`${issueUrl.origin}${issueUrl.pathname}`).toBe(
     'https://github.com/QuantumSavory/WebQuantumSavory/issues/new',
   )
@@ -164,6 +180,7 @@ test('reports a diagnostic protocol panic without uploading the project', async 
   await panicDialog.getByRole('button', { name: 'Close', exact: true }).click()
   const panicLogs = page.locator('#logsPanel [aria-label="panic log from Simulator"]')
   await expect(panicLogs).toHaveCount(1)
+  await expect(page.locator('#logsPanel [aria-label="error log from Simulator"]')).toHaveCount(0)
   const panicLog = panicLogs.first()
   await expect(panicLog).toBeVisible()
 

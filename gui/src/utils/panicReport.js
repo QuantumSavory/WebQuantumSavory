@@ -203,6 +203,7 @@ export function downloadTextFile(
     documentRef = globalThis.document,
     urlApi = globalThis.URL,
     BlobClass = globalThis.Blob,
+    deferRevoke = callback => globalThis.setTimeout(callback, 0),
   } = {},
 ) {
   if (!documentRef?.body || typeof documentRef.createElement !== 'function') {
@@ -223,13 +224,13 @@ export function downloadTextFile(
     link.click()
   } finally {
     link.remove()
-    urlApi.revokeObjectURL(url)
+    deferRevoke(() => urlApi.revokeObjectURL(url))
   }
 }
 
 export function openPanicIssue(issueUrl, openWindow = globalThis.window?.open?.bind(globalThis.window)) {
   if (typeof openWindow !== 'function') throw new Error('Opening a GitHub issue is unavailable')
-  const issueWindow = openWindow(issueUrl, '_blank', 'noopener,noreferrer')
+  const issueWindow = openWindow(issueUrl, '_blank')
   if (issueWindow === null) throw new Error('The GitHub issue window was blocked')
   if (issueWindow && typeof issueWindow === 'object') issueWindow.opener = null
   return issueWindow

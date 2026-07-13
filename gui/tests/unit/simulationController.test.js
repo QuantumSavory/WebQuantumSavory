@@ -131,13 +131,6 @@ describe('simulation controller polling ownership', () => {
       message: 'index [100]',
       stacktrace: 'MockBrokenProtocol frame'
     }
-    const ordinaryError = {
-      id: 'error-terminal',
-      timestamp: '2026-07-13T12:00:00.000Z',
-      source: 'Simulator',
-      severity: 'error',
-      message: 'Error running simulation'
-    }
     const api = {
       getSimulationStatus: vi.fn(async () => ({
         success: true,
@@ -151,7 +144,7 @@ describe('simulation controller polling ownership', () => {
       })),
       getBackendLogs: vi.fn()
         .mockImplementationOnce(() => firstLogRequest.promise)
-        .mockResolvedValueOnce({ success: true, logs: [ordinaryError, panic] })
+        .mockResolvedValueOnce({ success: true, logs: [panic] })
     }
     const { controller, addLog, showPanic, stop } = createController(api)
 
@@ -169,13 +162,7 @@ describe('simulation controller polling ownership', () => {
     expect(api.getBackendLogs).toHaveBeenCalledTimes(2)
     expect(inFlightSignal.aborted).toBe(false)
     expect(controller.pollingActive.value).toBe(false)
-    expect(addLog).toHaveBeenCalledWith(
-      'error',
-      ordinaryError.message,
-      'Simulator',
-      JSON.stringify(ordinaryError, null, 2),
-      expect.objectContaining({ id: ordinaryError.id, raw: ordinaryError })
-    )
+    expect(addLog.mock.calls.filter(([level]) => level === 'error')).toHaveLength(0)
     expect(addLog.mock.calls.filter(([level]) => level === 'panic')).toHaveLength(1)
     expect(showPanic).toHaveBeenCalledTimes(1)
     stop()

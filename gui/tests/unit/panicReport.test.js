@@ -7,6 +7,7 @@ import {
   createPanicProjectDownload,
   downloadTextFile,
   normalizePanic,
+  openPanicIssue,
   panicProjectFilename,
   safeProjectName,
   writeReportToClipboard,
@@ -109,11 +110,13 @@ describe('panic project download', () => {
       this.parts = parts
       this.options = options
     })
+    const deferRevoke = vi.fn()
 
     downloadTextFile('project json', 'project-panic.json', 'application/json', {
       documentRef,
       urlApi,
       BlobClass,
+      deferRevoke,
     })
 
     expect(BlobClass).toHaveBeenCalledWith(['project json'], { type: 'application/json' })
@@ -121,6 +124,11 @@ describe('panic project download', () => {
     expect(link.href).toBe('blob:panic-project')
     expect(click).toHaveBeenCalledOnce()
     expect(remove).toHaveBeenCalledOnce()
+    expect(deferRevoke).toHaveBeenCalledOnce()
+    expect(deferRevoke).toHaveBeenCalledWith(expect.any(Function))
+    expect(urlApi.revokeObjectURL).not.toHaveBeenCalled()
+
+    deferRevoke.mock.calls[0][0]()
     expect(urlApi.revokeObjectURL).toHaveBeenCalledWith('blob:panic-project')
   })
 })
@@ -143,5 +151,20 @@ describe('panic report browser workflow', () => {
     await expect(writeReportToClipboard('report', clipboard)).resolves.toBeUndefined()
     expect(clipboard.writeText).toHaveBeenCalledWith('report')
     await expect(writeReportToClipboard('report', null)).rejects.toThrow('unavailable')
+  })
+
+  it('opens an issue without noopener features and clears the returned window opener', () => {
+    const popup = { opener: {} }
+    const openWindow = vi.fn(() => popup)
+    const issueUrl = buildPanicIssueUrl(panic, 'My Network')
+
+    expect(openPanicIssue(issueUrl, openWindow)).toBe(popup)
+    expect(openWindow.mock.calls[0]).toEqual([issueUrl, '_blank'])
+    expect(popup.opener).toBeNull()
+  })
+
+  it('reports a genuinely blocked issue popup', () => {
+    expect(() => openPanicIssue('https://example.test', vi.fn(() => null)))
+      .toThrow('The GitHub issue window was blocked')
   })
 })

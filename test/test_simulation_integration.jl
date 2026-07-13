@@ -254,7 +254,7 @@
       logs = parse_response(logs_response)["logs"]
       panic_log = only(filter(log -> get(log, "severity", nothing) == "panic", logs))
       @test panic_log["id"] == panic["id"]
-      @test any(log -> get(log, "severity", nothing) == "error", logs)
+      @test !any(log -> get(log, "message", nothing) == "Error running simulation", logs)
 
       export_response = make_request("POST", "/export_script"; body=payload)
       @test export_response.status == 400

@@ -114,7 +114,8 @@ export function serializeLogValue(value) {
 export function normalizeLogRecord(log) {
   const record = isRecord(log) ? log : { message: String(log ?? '') }
   const level = normalizeLogLevel(record.level ?? record.severity)
-  const source = normalizeLogSource(record.source).source
+  const normalizedSource = normalizeLogSource(record.source)
+  const source = normalizedSource.source
   const message = firstString(
     level === 'panic' ? record.summary : undefined,
     record.message,
@@ -131,31 +132,50 @@ export function normalizeLogRecord(log) {
   const exceptionType = firstString(record.exceptionType, record.exception_type)
   const stacktrace = firstString(record.stacktrace, record.stack_trace)
   const raw = rawLogPayload(record)
-  const rawText = serializeLogValue(raw)
+  const subsystem = source === 'App'
+    ? firstString(
+      record.subsystem,
+      normalizedSource.subsystem,
+      isRecord(raw) ? raw.subsystem : undefined
+    ) || null
+    : null
 
-  return {
+  const normalized = {
     id: record.id,
     timestamp: record.timestamp,
     level,
     source,
+    subsystem,
     message,
     fullMessage,
     exceptionType,
     stacktrace,
     count: Number.isFinite(Number(record.count)) ? Math.max(1, Number(record.count)) : 1,
     raw,
-    rawText,
-    original: log,
-    searchText: [
-      message,
-      fullMessage,
-      exceptionType,
-      stacktrace,
-      source,
-      level,
-      rawText
-    ].join('\n').toLowerCase()
+    original: log
   }
+
+  Object.defineProperties(normalized, {
+    rawText: {
+      enumerable: true,
+      get: () => serializeLogValue(raw)
+    },
+    searchText: {
+      enumerable: true,
+      get: () => [
+        message,
+        fullMessage,
+        exceptionType,
+        stacktrace,
+        source,
+        subsystem,
+        level,
+        serializeLogValue(raw)
+      ].join('\n').toLowerCase()
+    }
+  })
+
+  return normalized
 }
 
 export function areConsecutiveLogsEqual(first, second) {
@@ -164,4 +184,5 @@ export function areConsecutiveLogsEqual(first, second) {
   return firstRecord.message === secondRecord.message
     && firstRecord.level === secondRecord.level
     && firstRecord.source === secondRecord.source
+    && firstRecord.subsystem === secondRecord.subsystem
 }

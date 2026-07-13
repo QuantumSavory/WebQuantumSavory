@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import LogsPanel from '../../src/components/panels/LogsPanel.vue'
 import {
   areConsecutiveLogsEqual,
@@ -48,6 +48,12 @@ describe('log record presentation model', () => {
     expect(areConsecutiveLogsEqual(base, { ...base, id: 'log-2' })).toBe(true)
     expect(areConsecutiveLogsEqual(base, { ...base, id: 'log-2', level: 'error' })).toBe(false)
     expect(areConsecutiveLogsEqual(base, { ...base, id: 'log-2', source: 'Simulator' })).toBe(false)
+    expect(areConsecutiveLogsEqual(base, {
+      ...base,
+      id: 'log-2',
+      source: 'System',
+      raw: { subsystem: 'System' }
+    })).toBe(false)
   })
 })
 
@@ -93,7 +99,9 @@ describe('LogsPanel', () => {
     })
 
     expect(wrapper.get('[data-log-id="app"]').classes()).toContain('log-source-app')
-    expect(wrapper.get('[data-log-id="app"] .log-source').text()).toBe('[App]')
+    expect(wrapper.get('[data-log-id="app"] .log-source').text()).toBe('[App · Layout Tools]')
+    expect(wrapper.get('[data-log-id="app"]').attributes('aria-label'))
+      .toBe('info log from App · Layout Tools')
     expect(wrapper.get('[data-log-id="api"]').classes()).toContain('log-source-web-api')
     expect(wrapper.get('[data-log-id="api"]').classes()).toContain('is-backend-source')
     expect(wrapper.get('[data-log-id="api"] .log-source').text()).toBe('[Web API]')
@@ -158,11 +166,26 @@ describe('LogsPanel', () => {
     expect(wrapper.findAll('.raw-json-button')).toHaveLength(3)
     expect(wrapper.findAll('.message-disclosure')).toHaveLength(1)
     for (const button of wrapper.findAll('.raw-json-button')) {
-      expect(button.attributes('aria-label')).toMatch(/^Show raw JSON for (App|Web API|Simulator) log$/)
+      expect(button.attributes('aria-label'))
+        .toMatch(/^Show raw JSON for (App · System|Web API|Simulator) log$/)
       expect(button.attributes('title')).toBe(button.attributes('aria-label'))
       expect(button.find('svg').exists()).toBe(true)
       expect(button.text()).toBe('')
     }
+  })
+
+  it('serializes raw payloads only when their disclosure is opened', async () => {
+    const toJSON = vi.fn(() => ({ payload: 'large state response' }))
+    const wrapper = mount(LogsPanel, {
+      props: {
+        logs: [log({ id: 'lazy-raw', source: 'Web API', raw: { toJSON } })]
+      }
+    })
+
+    expect(toJSON).not.toHaveBeenCalled()
+    await wrapper.get('.raw-json-button').trigger('click')
+    expect(toJSON).toHaveBeenCalled()
+    expect(wrapper.get('.raw-json-content').text()).toContain('large state response')
   })
 
   it.each([

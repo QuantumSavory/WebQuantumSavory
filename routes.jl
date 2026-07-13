@@ -1955,7 +1955,7 @@ end
                       severity:
                         type: string
                         enum: [debug, info, success, warning, error, panic]
-                        description: Normalized log severity
+                        description: Normalized severity; terminating exceptions appear once as panic, while error represents ordinary emitted error logs
                       message:
                         type: string
                         description: Complete log or exception message

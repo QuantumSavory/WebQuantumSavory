@@ -30,7 +30,7 @@
               <section aria-labelledby="log-guide-sources">
                 <h3 id="log-guide-sources">Sources</h3>
                 <dl>
-                  <div><dt>App</dt><dd>Browser, project, map, and layout actions.</dd></div>
+                  <div><dt>App</dt><dd>Browser, project, map, and layout actions, with subsystem context when available.</dd></div>
                   <div><dt>Web API</dt><dd>Requests and responses handled by the web service.</dd></div>
                   <div><dt>Simulator</dt><dd>QuantumSavory runtime events.</dd></div>
                 </dl>
@@ -67,7 +67,7 @@
             { 'is-backend-source': log.source !== 'App' }
           ]"
           :data-log-id="log.stableId"
-          :aria-label="`${log.level} log from ${log.source}`"
+          :aria-label="`${log.level} log from ${sourceLabel(log)}`"
         >
           <div class="log-entry">
             <time
@@ -113,7 +113,7 @@
               </span>
             </span>
 
-            <span class="log-source">[{{ log.source }}]</span>
+            <span class="log-source">[{{ sourceLabel(log) }}]</span>
             <button
               type="button"
               class="raw-json-button"
@@ -205,10 +205,11 @@ function stableRecordId(log, index) {
   return `local-log-primitive-${index}`
 }
 
-const normalizedLogs = computed(() => props.logs.map((log, index) => ({
-  ...normalizeLogRecord(log),
-  stableId: stableRecordId(log, index)
-})))
+const normalizedLogs = computed(() => props.logs.map((log, index) => {
+  const normalized = normalizeLogRecord(log)
+  normalized.stableId = stableRecordId(log, index)
+  return normalized
+}))
 
 const filteredLogs = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
@@ -272,7 +273,13 @@ function messageDisclosureLabel(log) {
 
 function rawDisclosureLabel(log) {
   const action = isRawExpanded(log.stableId) ? 'Hide' : 'Show'
-  return `${action} raw JSON for ${log.source} log`
+  return `${action} raw JSON for ${sourceLabel(log)} log`
+}
+
+function sourceLabel(log) {
+  return log.source === 'App' && log.subsystem
+    ? `${log.source} · ${log.subsystem}`
+    : log.source
 }
 
 function safeDomId(id) {

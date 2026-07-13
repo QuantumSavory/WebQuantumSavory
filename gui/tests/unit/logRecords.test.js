@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  normalizeLogRecord,
   normalizeLogSeverity,
   normalizeLogSource,
   parseRawLogDetails
@@ -23,5 +24,32 @@ describe('log record normalization', () => {
   it('keeps structured raw fields searchable and wraps non-JSON text', () => {
     expect(parseRawLogDetails('{"slot":2}')).toEqual({ slot: 2 })
     expect(parseRawLogDetails('plain text')).toEqual({ details: 'plain text' })
+  })
+
+  it('preserves application subsystem context from legacy and normalized records', () => {
+    const legacy = normalizeLogRecord({ source: 'Layout Tools', message: 'Generated layout' })
+    const normalized = normalizeLogRecord({
+      source: 'App',
+      message: 'Moved a node',
+      raw: { subsystem: 'Map' }
+    })
+
+    expect(legacy).toMatchObject({ source: 'App', subsystem: 'Layout Tools' })
+    expect(normalized).toMatchObject({ source: 'App', subsystem: 'Map' })
+    expect(normalized.searchText).toContain('map')
+  })
+
+  it('defers expensive raw serialization until raw JSON or search text is requested', () => {
+    const toJSON = vi.fn(() => ({ response: 'complete backend state' }))
+    const normalized = normalizeLogRecord({
+      source: 'Web API',
+      message: 'State received',
+      raw: { toJSON }
+    })
+
+    expect(normalized.message).toBe('State received')
+    expect(toJSON).not.toHaveBeenCalled()
+    expect(normalized.rawText).toContain('complete backend state')
+    expect(toJSON).toHaveBeenCalledOnce()
   })
 })

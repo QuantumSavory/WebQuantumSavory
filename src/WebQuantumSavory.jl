@@ -699,7 +699,6 @@ end
 function _record_run_error!(state::State, error, backtrace=catch_backtrace())
   exception = error isa Exception ? error : ErrorException(string(error))
   @error "Error running simulation" exception=(exception, backtrace)
-  @log_event state Logging.Error "Error running simulation" error=exception
 
   panic = _panic_record(exception, backtrace)
   state.simulation_panic = copy(panic)
@@ -735,12 +734,8 @@ function _run_simulation(state::State)
         return state
       end
 
-      try
-        ConcurrentSim.step(state.simulation)
-        state.simulation_progress = QuantumSavory.now(state.simulation)
-      catch e
-        return _record_run_error!(state, e, catch_backtrace())
-      end
+      ConcurrentSim.step(state.simulation)
+      state.simulation_progress = QuantumSavory.now(state.simulation)
 
       # Give libuv a zero-delay scheduling point so pending HTTP I/O is serviced.
       sleep(0)

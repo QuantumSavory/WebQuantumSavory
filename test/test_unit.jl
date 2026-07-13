@@ -1843,9 +1843,8 @@
     panic_logs = filter(log -> get(log, "severity", nothing) == "panic", state.log_events)
     error_logs = filter(log -> get(log, "severity", nothing) == "error", state.log_events)
     @test length(panic_logs) == 1
-    @test length(error_logs) == 1
+    @test isempty(error_logs)
     @test panic_logs[1]["id"] == state.simulation_panic["id"]
-    @test panic_logs[1]["severity"] != error_logs[1]["severity"]
     @test JSON.parse(JSON.json(WebQuantumSavory.serialize_state(state))) isa Dict
 
     @test WebQuantumSavory.destroy_simulation(simulation_name)
@@ -1896,7 +1895,7 @@
         logs = WebQuantumSavory.get_logs(simulation_name, false)
         panic_log = only(filter(log -> get(log, "severity", nothing) == "panic", logs))
         @test panic_log == panic
-        @test any(log -> get(log, "severity", nothing) == "error", logs)
+        @test !any(log -> get(log, "message", nothing) == "Error running simulation", logs)
 
         purged_logs = WebQuantumSavory.get_logs(simulation_name, true)
         @test purged_logs == logs

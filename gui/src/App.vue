@@ -97,13 +97,29 @@ const projectData = ref(createEmptyProject())
 
 // Required variables and functions for composables
 // Log management functions
+const applicationLogs = ref([])
+const maxLogs = ref(1000)
+const applicationLogIds = new Map()
+
+function rememberApplicationLogId(id, logEntry) {
+  if (!id) return
+  applicationLogIds.delete(id)
+  applicationLogIds.set(id, logEntry)
+  while (applicationLogIds.size > maxLogs.value) {
+    applicationLogIds.delete(applicationLogIds.keys().next().value)
+  }
+}
+
 function addLog(level, message, source = 'App', extendedInfo = null, options = {}) {
   const normalizedLevel = normalizeLogSeverity(level)
   const normalizedSource = normalizeLogSource(source)
-  const stableId = options.id ? String(options.id) : null
+  const hasStableId = options.id !== undefined
+    && options.id !== null
+    && String(options.id).length > 0
+  const stableId = hasStableId ? String(options.id) : null
 
   if (stableId) {
-    const existing = applicationLogs.value.find(log => String(log.id) === stableId)
+    const existing = applicationLogIds.get(stableId)
     if (existing) return existing
   }
 
@@ -113,11 +129,13 @@ function addLog(level, message, source = 'App', extendedInfo = null, options = {
     lastLog
     && lastLog.message === message
     && lastLog.source === normalizedSource.source
+    && lastLog.subsystem === normalizedSource.subsystem
     && lastLog.level === normalizedLevel
   ) {
     // Update the timestamp of the existing log entry
     lastLog.timestamp = options.timestamp || new Date().toISOString();
     lastLog.count = (lastLog.count || 1) + 1;
+    rememberApplicationLogId(stableId, lastLog)
     return lastLog;
   }
 
@@ -138,6 +156,7 @@ function addLog(level, message, source = 'App', extendedInfo = null, options = {
     level: normalizedLevel,
     message,
     source: normalizedSource.source,
+    subsystem: normalizedSource.subsystem,
     extendedInfo,
     raw,
     fullMessage: options.fullMessage || null,
@@ -147,18 +166,21 @@ function addLog(level, message, source = 'App', extendedInfo = null, options = {
   };
   
   applicationLogs.value.push(logEntry);
+  const storedLogEntry = applicationLogs.value[applicationLogs.value.length - 1]
+  rememberApplicationLogId(stableId, storedLogEntry)
   
   // Keep only the last maxLogs entries
   if (applicationLogs.value.length > maxLogs.value) {
+    const removedLogs = new Set(applicationLogs.value.slice(0, -maxLogs.value))
+    for (const [id, indexedLog] of applicationLogIds) {
+      if (removedLogs.has(indexedLog)) applicationLogIds.delete(id)
+    }
     applicationLogs.value = applicationLogs.value.slice(-maxLogs.value);
   }
 
-  return logEntry
+  return storedLogEntry
 }
 
-// Application logs
-const applicationLogs = ref([])
-const maxLogs = ref(1000)
 const activePanic = ref(null)
 const panicPlatformInfo = computed(() => {
   const platformInfo = api.getPlatformInfo()
@@ -589,6 +611,7 @@ const appVersion = ref(packageJson.version)
 
 function clearLogs() {
   applicationLogs.value = []
+  applicationLogIds.clear()
 }
 
 function openRepeaterChainGenerator() {
