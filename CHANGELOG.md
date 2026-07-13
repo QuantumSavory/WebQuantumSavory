@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+
+- Added clipboard image pasting to the project Description editor, inserting safe bitmap images as Markdown data URLs at the current selection.
 
 ## 1.6.0
 
