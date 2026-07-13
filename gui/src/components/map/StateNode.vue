@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
+import { useUiServices } from '../../composables/uiServices'
 
 const props = defineProps({
   stateId: {
@@ -28,6 +29,7 @@ const props = defineProps({
 const emit = defineEmits(['select'])
 const marker = ref(null)
 const markerEl = ref(null)
+const { getProjectData, showResultsView } = useUiServices()
 
 onMounted(() => {
   if (props.isVisible) {
@@ -87,9 +89,9 @@ function handleClick(e) {
     let nodeName = 'Unknown Node'
     let slotIndex = 'Unknown'
     
-    // Access projectData from window (global variable)
-    if (window.projectData && window.projectData.net && window.projectData.net.nodes) {
-      for (const node of window.projectData.net.nodes) {
+    const projectData = getProjectData()
+    if (projectData?.net?.nodes) {
+      for (const node of projectData.net.nodes) {
         if (node.id === firstSlotRef.nodeId) {
           nodeName = node.name || node.id
           for (let i = 0; i < node.data.slots.length; i++) {
@@ -115,7 +117,7 @@ function handleClick(e) {
       }
       
       // Use the actual slot object to represent the entangled state
-      window.showResultsView('slot', actualSlot, context)
+      showResultsView('slot', actualSlot, context)
     } else {
       console.warn('StateNode: Could not find actual slot object for', firstSlotRef)
     }

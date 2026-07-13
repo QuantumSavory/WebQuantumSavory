@@ -9,7 +9,7 @@ export function useWindowManagement() {
   let nextWindowId = 1
   let nextWindowZIndex = 1000
 
-  window.showResultsView = ( type, item, context = {} ) => {
+  function showResultsView(type, item, context = {}) {
     const newWindow = {
       id: `result-window-${nextWindowId++}`,
       type,
@@ -117,6 +117,7 @@ export function useWindowManagement() {
 
   return {
     resultWindows,
+    showResultsView,
     closeResultWindow,
     closeAllResultWindows,
     bringWindowToFront,

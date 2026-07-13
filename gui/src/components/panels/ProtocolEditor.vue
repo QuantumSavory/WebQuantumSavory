@@ -163,6 +163,7 @@ import {
   unknownParameterTypes
 } from '../../utils/parameterTypes'
 import TypedValueInput from './TypedValueInput.vue'
+import { useUiServices } from '../../composables/uiServices'
 
 const props = defineProps({
   protocol: {
@@ -182,10 +183,9 @@ const props = defineProps({
     required: false,
     default: () => ({})
   },
-  simulationState: {
-    type: Object,
-    required: false,
-    default: () => ({})
+  editingLocked: {
+    type: Boolean,
+    default: false
   },
   variables: {
     type: Array,
@@ -193,11 +193,10 @@ const props = defineProps({
   }
 })
 const emit = defineEmits(['select', 'delete'])
+const { showResultsView } = useUiServices()
 
 // Check if protocol editing should be disabled
-const isEditingDisabled = computed(() => {
-  return props.simulationState?.hasSimulationRun || false
-})
+const isEditingDisabled = computed(() => props.editingLocked)
 const directParameterValues = new WeakMap()
 const variablePickerParameter = shallowRef(null)
 
@@ -210,7 +209,7 @@ function showResults(){
     ...props.contextInfo,
     protocolType: getProtocolTypeSimpleName(props.protocol.type)
   }
-  window.showResultsView( 'protocol', props.protocol, context )
+  showResultsView('protocol', props.protocol, context)
 }
 
 function isGrayedParameter(param){

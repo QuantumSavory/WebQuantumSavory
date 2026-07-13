@@ -1,7 +1,14 @@
 <script setup>
 import BasePanel from './BasePanel.vue'
 
-const emit = defineEmits(['collapsed-changed'])
+defineProps({
+  collapsed: {
+    type: Boolean,
+    default: false
+  }
+})
+
+const emit = defineEmits(['update:collapsed'])
 </script>
 
 <template>
@@ -9,7 +16,8 @@ const emit = defineEmits(['collapsed-changed'])
     panel_id="void_panel" 
     title="Selected Element" 
     :collapsable="true"
-    @collapsed-changed="$emit('collapsed-changed', $event)"
+    :collapsed="collapsed"
+    @update:collapsed="emit('update:collapsed', $event)"
   >
     <template #content>
       <div style="padding: 10px 0px; text-align: center; height: 100%;">
@@ -22,4 +30,4 @@ const emit = defineEmits(['collapsed-changed'])
 </template>
 
 <style scoped>
-</style> 
+</style>

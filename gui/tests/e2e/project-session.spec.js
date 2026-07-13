@@ -1,0 +1,183 @@
+import { expect, test } from '@playwright/test'
+
+async function mockBackend(page, parseRequests, { platformHandler } = {}) {
+  await page.route('**/known_functions', route => route.fulfill({ json: { known_functions: [] } }))
+  await page.route('**/background_types', route => route.fulfill({ json: { background_types: [] } }))
+  await page.route('**/protocol_types', route => route.fulfill({ json: { protocol_types: [] } }))
+  await page.route('**/states_zoo_types', route => route.fulfill({ json: { states_zoo_types: [] } }))
+  await page.route('**/platform_info', route => {
+    if (platformHandler) return platformHandler(route)
+    return route.fulfill({
+      json: {
+        versions: { julia: '1.12', quantumsavory: '0.7', app: '1.6' },
+        capabilities: { unsafe_code_evaluation: false }
+      }
+    })
+  })
+  await page.route('**/destroy_simulation', route => route.fulfill({ json: { success: true } }))
+  await page.route('**/get_state?**', route => route.fulfill({
+    status: 404,
+    json: { success: false, error_code: 'NOT_FOUND', message: 'Simulation not found' }
+  }))
+  await page.route('**/logs/**', route => route.fulfill({ json: { success: true, logs: [] } }))
+  await page.route('**/parse_network_graph', async route => {
+    parseRequests.push(route.request().postDataJSON())
+    await route.fulfill({ json: { success: true, message: 'Parsed' } })
+  })
+}
+
+test('Save As keeps storage, document, reload, and simulation namespaces aligned', async ({ page }) => {
+  const parseRequests = []
+  await mockBackend(page, parseRequests)
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+
+  await page.locator('.hamburger-btn').click()
+  await page.getByRole('menuitem', { name: 'New' }).click()
+  let dialog = page.getByRole('dialog', { name: 'New Project' })
+  await dialog.getByPlaceholder('Project name').fill('Project A')
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.locator('.project-name-label')).toHaveText('Project A')
+
+  await page.keyboard.down('Alt')
+  await page.locator('canvas').first().click({ position: { x: 420, y: 280 } })
+  await page.locator('canvas').first().click({ position: { x: 620, y: 380 } })
+  await page.keyboard.up('Alt')
+  await expect(page.locator('.node-marker')).toHaveCount(2)
+  const firstNode = page.locator('.node-marker').first()
+  await firstNode.hover()
+  await firstNode.locator('.connector.output').dragTo(page.locator('.node-marker').nth(1))
+  await expect(page.locator('.edge-list-item')).toHaveCount(1)
+  await page.evaluate(() => {
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    setup.projectData.net.nodes.forEach(node => node.createNewSlot())
+  })
+
+  await page.locator('.hamburger-btn').click()
+  await page.getByRole('menuitem', { name: 'Save As' }).click()
+  dialog = page.getByRole('dialog', { name: 'Save As' })
+  await dialog.getByPlaceholder('Project name').fill('Project B')
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(page.locator('.project-name-label')).toHaveText('Project B')
+
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('cqn_project_Project B')))
+  expect(stored).toMatchObject({ schemaVersion: 1, name: 'Project B' })
+  expect(stored.net.nodes).toHaveLength(2)
+
+  await page.getByRole('button', { name: 'Toggle advanced controls' }).click()
+  await page.getByRole('button', { name: 'Parse', exact: true }).click()
+  await expect.poll(() => parseRequests.length).toBe(1)
+  expect(parseRequests[0].name).toMatch(/_Project B$/)
+
+  await page.reload()
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.project-name-label')).toHaveText('Project B')
+  await expect(page.locator('.node-marker')).toHaveCount(2)
+
+  const reloaded = await page.evaluate(() => ({
+    recent: localStorage.getItem('recentProjectName'),
+    stored: JSON.parse(localStorage.getItem('cqn_project_Project B'))
+  }))
+  expect(reloaded.recent).toBe('Project B')
+  expect(reloaded.stored.name).toBe('Project B')
+})
+
+test('Save As refuses to overwrite a different existing project', async ({ page }) => {
+  await mockBackend(page, [])
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+
+  await page.getByRole('button', { name: 'Menu' }).click()
+  await page.getByRole('menuitem', { name: 'New' }).click()
+  const newProjectDialog = page.getByRole('dialog', { name: 'New Project' })
+  await newProjectDialog.getByPlaceholder('Project name').fill('Active Project')
+  await newProjectDialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.locator('.project-name-label')).toHaveText('Active Project')
+
+  const originalTarget = JSON.stringify({ sentinel: 'must not be overwritten' })
+  await page.evaluate(({ target }) => {
+    localStorage.setItem('cqn_project_Existing Target', target)
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    setup.projectData.description = 'unsaved active-session edit'
+  }, { target: originalTarget })
+
+  const saved = await page.evaluate(() => {
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    return setup.createSaveAsProject('Existing Target')
+  })
+  expect(saved).toBe(false)
+
+  const errorDialog = page.getByRole('dialog', { name: 'Project Error' })
+  await expect(errorDialog).toContainText(
+    'Failed to save project: A project named "Existing Target" already exists'
+  )
+  await expect(page.locator('.project-name-label')).toHaveText('Active Project')
+
+  const afterRejectedSaveAs = await page.evaluate(() => {
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    return {
+      activeName: setup.projectData.name,
+      activeDescription: setup.projectData.description,
+      recentName: localStorage.getItem('recentProjectName'),
+      target: localStorage.getItem('cqn_project_Existing Target'),
+    }
+  })
+  expect(afterRejectedSaveAs).toEqual({
+    activeName: 'Active Project',
+    activeDescription: 'unsaved active-session edit',
+    recentName: 'Active Project',
+    target: originalTarget,
+  })
+})
+
+test('a late startup restore cannot replace a user-created session', async ({ page }) => {
+  let releasePlatform
+  let markPlatformRequested
+  const platformReleased = new Promise(resolve => { releasePlatform = resolve })
+  const platformRequested = new Promise(resolve => { markPlatformRequested = resolve })
+
+  await page.addInitScript(() => {
+    const oldProject = {
+      schemaVersion: 1,
+      name: 'Old Project',
+      description: 'old snapshot',
+      variables: [],
+      simulationConfig: { time: 1, timeStep: 0.1 },
+      net: { nodes: [], edges: [], protocols: [] },
+      uiGlobal: { map: { position: [-98.5795, 39.8283], zoom: 4 } }
+    }
+    localStorage.setItem('cqn_project_Old Project', JSON.stringify(oldProject))
+    localStorage.setItem('recentProjectName', 'Old Project')
+  })
+
+  await mockBackend(page, [], {
+    platformHandler: async route => {
+      markPlatformRequested()
+      await platformReleased
+      await route.fulfill({
+        json: {
+          versions: { julia: '1.12', quantumsavory: '0.7', app: '1.6' },
+          capabilities: { unsafe_code_evaluation: false }
+        }
+      })
+    }
+  })
+
+  await page.goto('/')
+  await platformRequested
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  await page.evaluate(() => {
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    setup.createNewProject('New Session')
+    setup.projectData.description = 'unsaved edit made during startup'
+  })
+
+  const platformResponse = page.waitForResponse(response => response.url().endsWith('/platform_info'))
+  releasePlatform()
+  await platformResponse
+  await expect(page.locator('.project-name-label')).toHaveText('New Session')
+  await expect.poll(() => page.evaluate(() => {
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    return setup.projectData.description
+  })).toBe('unsaved edit made during startup')
+})

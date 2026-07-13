@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added schema-v1 project normalization with consistently trimmed project names, editing locks after Parse and through Prepare, shared dialog and button primitives, and a brand-aligned light PrimeVue palette.
 - Made the bottom Tools panel resizable upward and to the right with cursor-only border affordances, persistent dimensions, viewport-aware bounds, and compact collapse behavior.
 - Added a dismissible full-screen warning when the simulator is opened on a phone or other small viewport.
 - Added template-driven star, 2D grid, and all-to-all network layout helpers with deterministic geometry and 1-based clone names.

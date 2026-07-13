@@ -3,7 +3,8 @@
     panel_id="edge_panel" 
     title="Selected Edge" 
     :collapsable="true"
-    @collapsed-changed="$emit('collapsed-changed', $event)"
+    :collapsed="collapsed"
+    @update:collapsed="emit('update:collapsed', $event)"
   >
     <template #content>
 
@@ -44,7 +45,7 @@
             sourceNodeName: props.edge.source.name,
             targetNodeName: props.edge.target.name
           }"
-          :simulationState="props.simulationState"
+          :editingLocked="editingLocked"
           :variables="props.variables"
           :isVirtualEdge="props.edge.isLogic"
         />
@@ -68,11 +69,12 @@ import LucideMenuIcon from '../LucideMenuIcon.vue'
 const props = defineProps({
   edge:             { type: Object, required: true }, 
   projectData:      { type: Object, required: true },
-  simulationState:  { type: Object, required: false, default: () => ({}) },
-  variables:        { type: Array, default: () => [] }
+  editingLocked:    { type: Boolean, default: false },
+  variables:        { type: Array, default: () => [] },
+  collapsed:        { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['slot-updated', 'delete', 'name-edit-complete', 'collapsed-changed'])
+const emit = defineEmits(['slot-updated', 'delete', 'name-edit-complete', 'update:collapsed'])
 
 const optionsMenuElement = ref(null)
 const mainMenuItems = computed(() => {

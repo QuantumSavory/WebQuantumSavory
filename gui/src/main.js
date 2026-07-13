@@ -20,8 +20,8 @@ const MyPreset = definePreset(Aura, {
             200: '{indigo.200}',
             300: '{indigo.300}',
             400: '{indigo.400}',
-            500: '{indigo.500}',
-            600: '{indigo.600}',
+            500: '#4345ac',
+            600: '#3637a0',
             700: '{indigo.700}',
             800: '{indigo.800}',
             900: '{indigo.900}',
@@ -39,6 +39,11 @@ app.use(JsonViewer);
 app.use(PrimeVue, {
     theme: {
         preset: MyPreset,
+        options: {
+            // The application currently has one complete semantic palette.
+            // Keep PrimeVue on that same light palette until dark tokens exist.
+            darkModeSelector: false,
+        },
     }
 });
 

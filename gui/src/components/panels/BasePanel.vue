@@ -48,33 +48,21 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
 import { ChevronDown, ChevronUp } from '@lucide/vue'
 
 const props = defineProps({
   panel_id:     { type: String,   required: true  }, 
   title:        { type: String,   required: true  }, 
   indicator:    { type: String,   default: null  },
-  collapsable:  { type: Boolean,  default: false  }
+  collapsable:  { type: Boolean,  default: false  },
+  collapsed:    { type: Boolean,  default: false  }
 })
 
-const emit = defineEmits(['collapsed-changed'])
-
-const collapsed = ref( false )
-const initCollapsedState = props.collapsable;
-if( initCollapsedState ) {
-  const savedState = localStorage.getItem('panelCollapsed_' + props.panel_id);
-  collapsed.value = savedState === 'true';
-}
-
+const emit = defineEmits(['update:collapsed'])
 
 function toggleCollapsedPanel() {
-  console.log( 'toggleCollapsedPanel' );
-  collapsed.value = !collapsed.value
-  localStorage.setItem('panelCollapsed_' + props.panel_id, collapsed.value)
-  
-  // Emit the collapsed state change
-  emit('collapsed-changed', collapsed.value)
+  if (!props.collapsable) return
+  emit('update:collapsed', !props.collapsed)
 }
 
 </script>

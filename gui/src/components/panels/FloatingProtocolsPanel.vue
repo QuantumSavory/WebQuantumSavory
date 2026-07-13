@@ -3,7 +3,8 @@
     panel_id="floating_protocols" 
     title="Floating Protocols" 
     :collapsable="true"
-    @collapsed-changed="$emit('collapsed-changed', $event)"
+    :collapsed="collapsed"
+    @update:collapsed="emit('update:collapsed', $event)"
   >
     <template #content>
       <ProtocolsManager 
@@ -11,7 +12,7 @@
         :protocols="protocols" 
         protocolGroupName="floating" 
         :protocolClass="FloatingProtocol"
-        :simulationState="props.simulationState"
+        :editingLocked="editingLocked"
         :variables="props.variables"
       />
     </template>
@@ -21,7 +22,7 @@
 
 
 <script setup>
-import { defineProps, defineEmits, onMounted, computed, ref } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import BasePanel from './BasePanel.vue'
 import ProtocolsManager from './ProtocolsManager.vue'
 import FloatingProtocol from '../../models/FloatingProtocol'
@@ -31,14 +32,17 @@ const props = defineProps({
     type: Array,
     required: true
   },
-  simulationState: {
-    type: Object,
-    required: false,
-    default: () => ({})
+  editingLocked: {
+    type: Boolean,
+    default: false
   },
   variables: {
     type: Array,
     default: () => []
+  },
+  collapsed: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -48,7 +52,7 @@ function handleSelect(protocol) {
   protocolsManager.value.handleSelect(protocol)
 }
 
-const emit = defineEmits(['select', 'handleAddProtocolClick', 'collapsed-changed'])
+const emit = defineEmits(['select', 'handleAddProtocolClick', 'update:collapsed'])
 
 defineExpose({
   handleSelect

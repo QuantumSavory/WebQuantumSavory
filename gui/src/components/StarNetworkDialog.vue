@@ -1,19 +1,20 @@
 <template>
-  <div v-if="show" class="modal-overlay" @click.self="handleCancel">
-    <div
-      class="modal-dialog layout-helper-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="star-network-title"
-    >
-      <h3 id="star-network-title">Star Network Generator</h3>
+  <AppDialog
+    :show="show"
+    title="Star Network Generator"
+    width="min(540px, calc(100vw - 32px))"
+    class="layout-generator-dialog"
+    dismissable-mask
+    @close="handleCancel"
+  >
+    <form id="star-network-form" @submit.prevent="handleConfirm">
       <p class="dialog-description">
-        Replace one peripheral template with evenly spaced copies around a center node.
+      Replace one peripheral template with evenly spaced copies around a center node.
       </p>
 
-      <div class="form-grid">
+    <div class="form-grid">
         <label for="star-center-node">Center node</label>
-        <select id="star-center-node" ref="firstInput" v-model="form.centerNodeId">
+        <select id="star-center-node" v-model="form.centerNodeId" autofocus>
           <option value="" disabled>Select a center node</option>
           <option v-for="node in nodes" :key="node.id" :value="node.id">
             {{ node.name }}
@@ -53,35 +54,37 @@
           max="12"
           step="1"
         >
-      </div>
+    </div>
 
-      <p class="template-note">
-        The peripheral template and its edge are removed. The first generated node keeps the
-        template position; the remaining nodes rotate counterclockwise around the center.
-      </p>
-      <div v-if="validationMessage" class="validation-error" role="alert">
-        {{ validationMessage }}
-      </div>
+    <p class="template-note">
+      The peripheral template and its edge are removed. The first generated node keeps the
+      template position; the remaining nodes rotate counterclockwise around the center.
+    </p>
+    <div v-if="validationMessage" class="validation-error" role="alert">
+      {{ validationMessage }}
+    </div>
+    </form>
 
-      <div class="modal-actions">
-        <button type="button" @click="handleCancel">Cancel</button>
-        <button
-          type="button"
-          class="primary"
+    <template #footer>
+        <AppButton @click="handleCancel">Cancel</AppButton>
+        <AppButton
+          variant="primary"
+          type="submit"
+          form="star-network-form"
           :disabled="!validation.valid"
-          @click="handleConfirm"
         >
           Generate Star
-        </button>
-      </div>
-    </div>
-  </div>
+        </AppButton>
+    </template>
+  </AppDialog>
 </template>
 
 <script setup>
-import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { endpointId } from '../utils/layoutTemplates'
 import { validateStarNetwork } from '../utils/starNetwork'
+import AppButton from './ui/AppButton.vue'
+import AppDialog from './ui/AppDialog.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -90,7 +93,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['confirm', 'cancel'])
-const firstInput = ref(null)
 const form = reactive({
   centerNodeId: '',
   peripheralNodeId: '',
@@ -121,14 +123,9 @@ watch(
   }
 )
 
-watch(() => props.show, async isShown => {
+watch(() => props.show, isShown => {
   if (isShown) {
     resetForm()
-    document.addEventListener('keydown', handleGlobalKeydown)
-    await nextTick()
-    firstInput.value?.focus()
-  } else {
-    document.removeEventListener('keydown', handleGlobalKeydown)
   }
 })
 
@@ -152,93 +149,4 @@ function handleCancel() {
   emit('cancel')
 }
 
-function handleGlobalKeydown(event) {
-  if (event.key === 'Escape' && props.show) {
-    handleCancel()
-  } else if (event.key === 'Enter' && props.show && validation.value.valid) {
-    handleConfirm()
-  }
-}
-
-onUnmounted(() => document.removeEventListener('keydown', handleGlobalKeydown))
 </script>
-
-<style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.24);
-}
-
-.layout-helper-dialog {
-  width: min(540px, calc(100vw - 32px));
-  padding: 24px 22px 18px;
-}
-
-h3 {
-  margin: 0 0 8px;
-  font-size: 1.15rem;
-}
-
-.dialog-description,
-.template-note {
-  color: #555;
-  line-height: 1.4;
-}
-
-.dialog-description {
-  margin: 0 0 18px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: minmax(150px, auto) minmax(220px, 1fr);
-  gap: 11px 14px;
-  align-items: center;
-}
-
-.form-grid label {
-  color: #333;
-  font-weight: 600;
-}
-
-.form-grid select,
-.form-grid input {
-  width: 100%;
-  min-width: 0;
-}
-
-.template-note {
-  margin: 14px 0 0;
-  font-size: 0.86rem;
-}
-
-.validation-error {
-  margin-top: 7px;
-  color: #b42318;
-  font-size: 0.9rem;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-@media (max-width: 560px) {
-  .form-grid {
-    grid-template-columns: 1fr;
-    gap: 5px;
-  }
-
-  .form-grid select,
-  .form-grid input {
-    margin-bottom: 7px;
-  }
-}
-</style>

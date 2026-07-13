@@ -4,6 +4,7 @@ import maplibregl from 'maplibre-gl'
 import Slot from '../../models/Slot'
 import Tooltip from 'primevue/tooltip';
 import SlotIcon from './SlotIcon.vue';
+import { useUiServices } from '../../composables/uiServices'
 
 const props = defineProps({
   node: {       type: Object,   required: true },
@@ -17,6 +18,7 @@ const markerEl = ref(null)
 const isHovered = ref(false)
 const isDraggingConnector = ref(false)
 const slots = ref([])
+const { showEntangledSlots } = useUiServices()
 
 
 // Update marker style based on selection
@@ -164,7 +166,7 @@ function handleNodeLeave(e) {
 
 function handleSlotClick(slot, e){
   e.stopPropagation()
-  window.showEntangledSlots( slot.id );
+  showEntangledSlots(slot.id)
 }
 
 
@@ -307,4 +309,4 @@ defineExpose({ updatePosition })
 .is-selected .connector {
   border-color: #4345ac;
 }
-</style> 
+</style>

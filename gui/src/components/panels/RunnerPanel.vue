@@ -1,18 +1,30 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { Pause, Play, Settings2, Square } from '@lucide/vue'
+import { SimulationPhase } from '../../composables/simulationLifecycle.js'
 
 const props = defineProps({
   projectData: {
     type: Object,
     required: true
   }, 
-  simulationStatus: {
+  backendSimulation: {
     type: Object,
     required: true
   },
-  simulationState: {
+  targetSimulationTime: {
+    type: Number,
+    required: true
+  },
+  pollingActive: {
+    type: Boolean,
+    required: true
+  },
+  phase: {
+    type: String,
+    required: true
+  },
+  capabilities: {
     type: Object,
     required: true
   }
@@ -31,27 +43,16 @@ const currentTime = computed(() => {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`
 })
 
-const graphEmpty = computed(() => {
-  return props.projectData && props.projectData.net && props.projectData.net.nodes.length === 0 && props.projectData.net.edges.length === 0
-})
-
 // Backend simulation state (single source of truth)
-const backendSim = computed(() => props.simulationStatus?.state?.simulation || {})
+const backendSim = computed(() => props.backendSimulation || {})
 
-// Derived states from backend
-const isSimulationRunning = computed(() => {
-  return backendSim.value.simulation_running === true && 
-         backendSim.value.simulation_paused !== true
-})
-
-const isSimulationPaused = computed(() => {
-  return backendSim.value.simulation_paused === true
-})
+const isSimulationRunning = computed(() => props.phase === SimulationPhase.RUNNING)
+const isSimulationPaused = computed(() => props.phase === SimulationPhase.PAUSED)
 
 // Simplified progress calculation (using cumulative target time)
 const simulationProgress = computed(() => {
   const sim = backendSim.value
-  const targetTime = props.simulationState?.cumulativeTargetTime || sim.simulation_time
+  const targetTime = props.targetSimulationTime || sim.simulation_time
   
   if (!sim.simulation_progress || !targetTime) {
     return 0
@@ -61,21 +62,10 @@ const simulationProgress = computed(() => {
   return Math.min(Math.round(progress), 100)
 })
 
-const canRunSimulation = computed(() => {
-  return !graphEmpty.value && !isSimulationRunning.value && !isSimulationPaused.value
-})
-
-const canPauseSimulation = computed(() => {
-  return isSimulationRunning.value && !isSimulationPaused.value
-})
-
-const canResumeSimulation = computed(() => {
-  return isSimulationPaused.value
-})
-
-const canStopSimulation = computed(() => {
-  return isSimulationRunning.value || isSimulationPaused.value || !graphEmpty.value
-})
+const canRunSimulation = computed(() => props.capabilities.canRun)
+const canPauseSimulation = computed(() => props.capabilities.canPause)
+const canResumeSimulation = computed(() => props.capabilities.canResume)
+const canStopSimulation = computed(() => props.capabilities.canStop)
 
 function handleRun() {
   emit('run')
@@ -120,7 +110,7 @@ function toggleAdvancedControls() {
         <div v-if="isSimulationRunning || isSimulationPaused" class="simulation-progress">
           <div class="progress-info">
             <span>
-              {{ (backendSim.simulation_progress || 0).toFixed(3) }}s / {{ (simulationState.cumulativeTargetTime || backendSim.simulation_time || 0).toFixed(3) }}s
+              {{ (backendSim.simulation_progress || 0).toFixed(3) }}s / {{ (targetSimulationTime || backendSim.simulation_time || 0).toFixed(3) }}s
             </span>
             <span>{{ simulationProgress }}%</span>
           </div>
@@ -140,7 +130,7 @@ function toggleAdvancedControls() {
             step="0.001"
             min="0"
             class="duration-input"
-            :disabled="isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive"
+            :disabled="isSimulationRunning || isSimulationPaused || pollingActive"
           />
           <span class="unit">sec</span>
         </div>
@@ -152,7 +142,7 @@ function toggleAdvancedControls() {
           @click="toggleAdvancedControls"
           :class="{ active: showAdvancedControls }"
           title="Toggle advanced controls"
-          :disabled="isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive"
+          :disabled="isSimulationRunning || isSimulationPaused || pollingActive"
         >
           <Settings2 :size="16" aria-hidden="true" />
         </button>
@@ -189,7 +179,7 @@ function toggleAdvancedControls() {
         <!-- Stop button hidden - behavior TBD with backend developer -->
         <button 
           class="stop-btn" 
-          :disabled="!isSimulationPaused && !props.simulationState?.hasSimulationRun"
+          :disabled="!canStopSimulation"
           @click="handleStop"
           title="Stop simulation"
         >
@@ -202,21 +192,21 @@ function toggleAdvancedControls() {
     <div class="advanced-controls" :class="{ visible: showAdvancedControls }">
       <div class="advanced-buttons">
         <button 
-          :disabled="graphEmpty || isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive" 
+          :disabled="!props.capabilities.canPrepare || pollingActive"
           class="prepare-network-graph-btn" 
           @click="handlePrepareNetworkGraph"
         >
           Parse
         </button>
         <button 
-          :disabled="graphEmpty || props.simulationStatus.status != 'ready' || isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive" 
+          :disabled="props.phase !== SimulationPhase.PARSED || pollingActive"
           class="prepare-simulation-btn" 
           @click="handlePrepareSimulation"
         >
           Prepare
         </button>
         <button 
-          :disabled="graphEmpty || isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive" 
+          :disabled="!props.capabilities.canPrepare || pollingActive"
           class="reset-btn" 
           @click="handlePrepareNetworkGraph"
           title="Reset simulation (re-parse network graph)"

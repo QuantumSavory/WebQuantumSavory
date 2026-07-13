@@ -493,7 +493,7 @@ defineExpose({
 <style scoped>
 .map-container {
   width: 100%;
-  height: calc(100% - 40px);
+  height: 100%;
   position: relative;
 }
 

@@ -182,18 +182,17 @@ test.describe('Project description', () => {
       variables: [],
       net: { nodes: [], edges: [], protocols: [] },
     }
-    const invalidImportCall = page.evaluate(project => {
+    await page.evaluate(project => {
       const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
       setup.validateAndProcessImport(project)
     }, invalidImport)
-    const invalidDialog = await page.waitForEvent('dialog')
-    expect(invalidDialog.message()).toBe('Invalid project structure: "description" must be a string when present.')
-    await invalidDialog.accept()
-    await invalidImportCall
+    let appDialog = page.getByRole('dialog', { name: 'Import failed' })
+    await expect(appDialog).toContainText('Invalid project structure: "description" must be a string when present.')
+    await appDialog.getByRole('button', { name: 'OK' }).click()
     await expect.poll(() => page.evaluate(() => localStorage.getItem('cqn_project_Invalid Description Import'))).toBeNull()
 
     const importedDescription = '# Imported\n\nWith $a+b$.'
-    const validImportCall = page.evaluate(({ description }) => {
+    await page.evaluate(({ description }) => {
       const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
       setup.validateAndProcessImport({
         name: 'Imported Description Project',
@@ -203,10 +202,9 @@ test.describe('Project description', () => {
         net: { nodes: [], edges: [], protocols: [] },
       })
     }, { description: importedDescription })
-    const validDialog = await page.waitForEvent('dialog')
-    expect(validDialog.message()).toBe('Project "Imported Description Project" imported successfully!')
-    await validDialog.accept()
-    await validImportCall
+    appDialog = page.getByRole('dialog', { name: 'Project imported' })
+    await expect(appDialog).toContainText('Project "Imported Description Project" imported successfully!')
+    await appDialog.getByRole('button', { name: 'OK' }).click()
 
     await expect.poll(() => page.evaluate(() => {
       const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState

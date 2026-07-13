@@ -1,23 +1,20 @@
 <template>
-  <div
-    v-if="show"
-    class="modal-overlay repeater-chain-overlay"
-    @click.self="handleCancel"
+  <AppDialog
+    :show="show"
+    title="Repeater Chain Generator"
+    width="min(520px, calc(100vw - 32px))"
+    class="layout-generator-dialog"
+    dismissable-mask
+    @close="handleCancel"
   >
-    <div
-      class="modal-dialog repeater-chain-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="repeater-chain-title"
-    >
-      <h3 id="repeater-chain-title">Repeater Chain Generator</h3>
+    <form id="repeater-chain-form" @submit.prevent="handleConfirm">
       <p class="dialog-description">
-        Replace one template repeater and its edge with an evenly spaced chain.
+      Replace one template repeater and its edge with an evenly spaced chain.
       </p>
 
-      <div class="form-grid">
+    <div class="form-grid">
         <label for="chain-start-node">Start node</label>
-        <select id="chain-start-node" v-model="form.startNodeId" ref="firstInput">
+        <select id="chain-start-node" v-model="form.startNodeId" autofocus>
           <option value="" disabled>Select a node</option>
           <option v-for="node in nodes" :key="node.id" :value="node.id">
             {{ node.name }}
@@ -73,33 +70,35 @@
           >
           Connect the start and end nodes directly
         </label>
-      </div>
+    </div>
 
-      <p class="template-note">
-        The repeater node must have exactly one incident edge: the selected template edge.
-      </p>
-      <div v-if="validationMessage" class="validation-error" role="alert">
-        {{ validationMessage }}
-      </div>
+    <p class="template-note">
+      The repeater node must have exactly one incident edge: the selected template edge.
+    </p>
+    <div v-if="validationMessage" class="validation-error" role="alert">
+      {{ validationMessage }}
+    </div>
+    </form>
 
-      <div class="modal-actions">
-        <button type="button" @click="handleCancel">Cancel</button>
-        <button
-          type="button"
-          class="primary"
+    <template #footer>
+        <AppButton @click="handleCancel">Cancel</AppButton>
+        <AppButton
+          variant="primary"
+          type="submit"
+          form="repeater-chain-form"
           :disabled="!validation.valid"
-          @click="handleConfirm"
         >
           Generate Chain
-        </button>
-      </div>
-    </div>
-  </div>
+        </AppButton>
+    </template>
+  </AppDialog>
 </template>
 
 <script setup>
-import { computed, nextTick, reactive, ref, watch, onUnmounted } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { validateRepeaterChain } from '../utils/repeaterChain.js'
+import AppButton from './ui/AppButton.vue'
+import AppDialog from './ui/AppDialog.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -109,7 +108,6 @@ const props = defineProps({
 
 const emit = defineEmits(['confirm', 'cancel'])
 
-const firstInput = ref(null)
 const form = reactive({
   startNodeId: '',
   endNodeId: '',
@@ -147,14 +145,9 @@ watch(() => form.templateNodeId, () => {
   }
 })
 
-watch(() => props.show, async isShown => {
+watch(() => props.show, isShown => {
   if (isShown) {
     resetForm()
-    document.addEventListener('keydown', handleGlobalKeydown)
-    await nextTick()
-    firstInput.value?.focus()
-  } else {
-    document.removeEventListener('keydown', handleGlobalKeydown)
   }
 })
 
@@ -187,71 +180,9 @@ function handleCancel() {
   emit('cancel')
 }
 
-function handleGlobalKeydown(event) {
-  if (event.key === 'Escape' && props.show) {
-    handleCancel()
-  } else if (event.key === 'Enter' && props.show && validation.value.valid) {
-    handleConfirm()
-  }
-}
-
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleGlobalKeydown)
-})
 </script>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.24);
-}
-
-.modal-dialog {
-  width: min(520px, calc(100vw - 32px));
-  padding: 24px 22px 18px;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.2);
-}
-
-h3 {
-  margin: 0 0 8px;
-  font-size: 1.15rem;
-}
-
-.dialog-description,
-.template-note {
-  color: #555;
-  line-height: 1.4;
-}
-
-.dialog-description {
-  margin: 0 0 18px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: minmax(135px, auto) minmax(220px, 1fr);
-  gap: 11px 14px;
-  align-items: center;
-}
-
-.form-grid label {
-  font-weight: 600;
-  color: #333;
-}
-
-.form-grid select,
-.form-grid input {
-  width: 100%;
-  min-width: 0;
-}
-
 .checkbox-field {
   display: inline-flex;
   align-items: center;
@@ -264,33 +195,4 @@ h3 {
   margin: 0;
 }
 
-.template-note {
-  margin: 14px 0 0;
-  font-size: 0.86rem;
-}
-
-.validation-error {
-  margin-top: 7px;
-  color: #b42318;
-  font-size: 0.9rem;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-@media (max-width: 560px) {
-  .form-grid {
-    grid-template-columns: 1fr;
-    gap: 5px;
-  }
-
-  .form-grid select,
-  .form-grid input {
-    margin-bottom: 7px;
-  }
-}
 </style>

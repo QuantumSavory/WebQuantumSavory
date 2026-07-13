@@ -32,6 +32,7 @@
 
 <script setup>
 import { ChartNoAxesCombined, SlidersHorizontal, Trash2 } from '@lucide/vue'
+import { useUiServices } from '../../composables/uiServices'
 
 const props = defineProps({
     registerSlot: {
@@ -45,6 +46,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['deleteSlot', 'toggleDetails'])
+const { showResultsView } = useUiServices()
 
 function toggleDetails(){
   emit('toggleDetails', props.registerSlot)
@@ -56,7 +58,7 @@ function showResults(){
     nodeName: props.node?.name || 'Unknown Node',
     slotIndex: slotIndex >= 0 ? slotIndex : 'Unknown'
   }
-  window.showResultsView( 'slot', props.registerSlot, context )
+  showResultsView('slot', props.registerSlot, context)
 }
 
 function deleteSlot(){

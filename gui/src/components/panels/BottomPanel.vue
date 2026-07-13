@@ -21,7 +21,8 @@
       :panel_id="panelId"
       title="Tools"
       :collapsable="collapsable"
-      @collapsed-changed="handleCollapsedChanged"
+      :collapsed="collapsed"
+      @update:collapsed="emit('update:collapsed', $event)"
     >
       <template #content>
         <div class="bottom-panel-body">
@@ -251,7 +252,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import ResizeBounding from 'vue3-resize-bounding'
 import BasePanel from './BasePanel.vue'
 import DescriptionPanel from './DescriptionPanel.vue'
@@ -302,13 +303,19 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  collapsed: {
+    type: Boolean,
+    default: false
+  },
   panelId: {
     type: String,
     default: 'logs_panel'
   },
-  rightSidebarVisible: {
-    type: Boolean,
-    default: true
+  availableBounds: {
+    type: Object,
+    required: true,
+    validator: bounds => ['left', 'right', 'top', 'bottom']
+      .every(key => Number.isFinite(bounds?.[key]))
   }
 })
 
@@ -319,7 +326,7 @@ const emit = defineEmits([
   'open-repeater-chain-generator',
   'open-star-network-generator',
   'open-graph-network-generator',
-  'collapsed-changed'
+  'update:collapsed'
 ])
 
 const activeTab = ref('logs')
@@ -331,37 +338,16 @@ const DEFAULT_PANEL_HEIGHT = 180
 const MIN_PANEL_WIDTH = 480
 const MIN_PANEL_HEIGHT = 180
 const COLLAPSED_PANEL_HEIGHT = 36
-const PANEL_LEFT_OFFSET = 50
-const VIEWPORT_EDGE_GAP = 10
-const RIGHT_SIDEBAR_WIDTH = 320
-const RIGHT_SIDEBAR_OFFSET = 10
-const RIGHT_SIDEBAR_GAP = 10
-const PANEL_TOP_LIMIT = 50
 const KEYBOARD_RESIZE_STEP = 16
 
-const viewportWidth = ref(window.innerWidth)
-const viewportHeight = ref(window.innerHeight)
-const isCollapsed = ref(
-  props.collapsable && localStorage.getItem(`panelCollapsed_${props.panelId}`) === 'true'
-)
-
-const maxPanelWidth = computed(() => {
-  const viewportLimit = Math.max(
-    1,
-    viewportWidth.value - PANEL_LEFT_OFFSET - VIEWPORT_EDGE_GAP
-  )
-  if (!props.rightSidebarVisible) return viewportLimit
-
-  const sidebarLimit = viewportWidth.value
-    - PANEL_LEFT_OFFSET
-    - RIGHT_SIDEBAR_WIDTH
-    - RIGHT_SIDEBAR_OFFSET
-    - RIGHT_SIDEBAR_GAP
-  return Math.max(1, sidebarLimit)
-})
-
-const maxPanelHeight = computed(() => (
-  Math.max(1, viewportHeight.value - PANEL_TOP_LIMIT)
+const isCollapsed = computed(() => props.collapsable && props.collapsed)
+const maxPanelWidth = computed(() => Math.max(
+  1,
+  props.availableBounds.right - props.availableBounds.left
+))
+const maxPanelHeight = computed(() => Math.max(
+  1,
+  props.availableBounds.bottom - props.availableBounds.top
 ))
 const effectiveMinPanelWidth = computed(() => Math.min(MIN_PANEL_WIDTH, maxPanelWidth.value))
 const effectiveMinPanelHeight = computed(() => Math.min(MIN_PANEL_HEIGHT, maxPanelHeight.value))
@@ -480,11 +466,6 @@ function updatePanelHeight(height) {
   panelHeight.value = clamp(Math.round(height), effectiveMinPanelHeight.value, maxPanelHeight.value)
 }
 
-function handleCollapsedChanged(collapsed) {
-  isCollapsed.value = collapsed
-  emit('collapsed-changed', collapsed)
-}
-
 function handleResizeKeydown(dimension, event) {
   const isWidth = dimension === 'width'
   const currentValue = isWidth ? panelWidth.value : panelHeight.value
@@ -515,11 +496,6 @@ function handleResizeKeydown(dimension, event) {
   persistPanelSize()
 }
 
-function updateViewportSize() {
-  viewportWidth.value = window.innerWidth
-  viewportHeight.value = window.innerHeight
-}
-
 function handleTabKeydown(event, currentIndex) {
   let nextIndex = currentIndex
 
@@ -542,12 +518,7 @@ function handleTabKeydown(event, currentIndex) {
 }
 
 onMounted(() => {
-  window.addEventListener('resize', updateViewportSize)
   persistPanelSize()
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', updateViewportSize)
 })
 </script>
 

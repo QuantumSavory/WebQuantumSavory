@@ -1,10 +1,25 @@
+import { summarizeProject } from '../utils/projectCodec'
+
 // ProjectStore.js
 // Abstraction for saving/loading project data (localStorage for now)
 
 const STORAGE_PREFIX = 'cqn_project_'
 const METADATA_INDEX_KEY = 'cqn_projects_metadata_index'
+const RECENT_PROJECT_NAME_KEY = 'recentProjectName'
 
 export default class ProjectStore {
+  static getRecentProjectName() {
+    return localStorage.getItem(RECENT_PROJECT_NAME_KEY)
+  }
+
+  static setRecentProjectName(name) {
+    localStorage.setItem(RECENT_PROJECT_NAME_KEY, name)
+  }
+
+  static clearRecentProjectName() {
+    localStorage.removeItem(RECENT_PROJECT_NAME_KEY)
+  }
+
   // Get the metadata index (creates empty one if doesn't exist)
   static getMetadataIndex() {
     const raw = localStorage.getItem(METADATA_INDEX_KEY)
@@ -27,34 +42,14 @@ export default class ProjectStore {
     const existingMetadata = index[name] || {}
     const now = new Date().toISOString()
     
-    // Calculate aggregated counts
-    const nodes = projectData.net?.nodes || []
-    const edges = projectData.net?.edges || []
-    const floatingProtocols = projectData.net?.protocols || []
-    
-    // Calculate total slots (sum of all slots in all nodes)
-    const totalSlots = nodes.reduce((total, node) => {
-      return total + (node.data?.slots?.length || 0)
-    }, 0)
-    
-    // Calculate total protocols (nodes + edges + floating)
-    const nodeProtocols = nodes.reduce((total, node) => {
-      return total + (node.data?.protocols?.length || 0)
-    }, 0)
-    const edgeProtocols = edges.reduce((total, edge) => {
-      return total + (edge.data?.protocols?.length || 0)
-    }, 0)
-    const totalProtocols = nodeProtocols + edgeProtocols + floatingProtocols.length
+    const summary = summarizeProject(projectData)
     
     // Extract metadata from project data
     const metadata = {
       createdAt: existingMetadata.createdAt || now, // Set only if new project
       updatedAt: now, // Always update when saving
       openedAt: isOpening ? now : existingMetadata.openedAt, // Only update when opening
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-      slotCount: totalSlots,
-      protocolCount: totalProtocols
+      ...summary
     }
     
     index[name] = metadata
@@ -173,32 +168,14 @@ export default class ProjectStore {
       const existingMetadata = existingIndex[name] || {}
       
       if (projectData) {
-        // Calculate aggregated counts for rebuild
-        const nodes = projectData.net?.nodes || []
-        const edges = projectData.net?.edges || []
-        const floatingProtocols = projectData.net?.protocols || []
-        
-        const totalSlots = nodes.reduce((total, node) => {
-          return total + (node.data?.slots?.length || 0)
-        }, 0)
-        
-        const nodeProtocols = nodes.reduce((total, node) => {
-          return total + (node.data?.protocols?.length || 0)
-        }, 0)
-        const edgeProtocols = edges.reduce((total, edge) => {
-          return total + (edge.data?.protocols?.length || 0)
-        }, 0)
-        const totalProtocols = nodeProtocols + edgeProtocols + floatingProtocols.length
+        const summary = summarizeProject(projectData)
         
         newIndex[name] = {
           // For legacy projects, try to get timestamps from old format, otherwise use existing or defaults
           createdAt: projectData.uiGlobal?.createdAt || projectData.createdAt || existingMetadata.createdAt || now,
           updatedAt: projectData.uiGlobal?.updatedAt || projectData.updatedAt || existingMetadata.updatedAt || now,
           openedAt: projectData.uiGlobal?.openedAt || projectData.openedAt || existingMetadata.openedAt || null,
-          nodeCount: nodes.length,
-          edgeCount: edges.length,
-          slotCount: totalSlots,
-          protocolCount: totalProtocols
+          ...summary
         }
       }
     })
@@ -206,4 +183,4 @@ export default class ProjectStore {
     this.saveMetadataIndex(newIndex)
     return newIndex
   }
-} 
+}

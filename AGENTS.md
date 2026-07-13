@@ -3,6 +3,7 @@
 ## Scope and project boundary
 
 - This repository is the WebQuantumSavory application. The root is the Julia/Genie API package named `WebQuantumSavory`; `gui/` is a separate Vue/Vite package governed by `gui/AGENTS.md`.
+- Frontend unit tests live in `gui/tests/unit/` and use Vitest, jsdom, and Vue Test Utils. Browser workflows live separately in `gui/tests/e2e/` and use Playwright.
 - Use the root `Project.toml` for backend work and `test/Project.toml` for backend tests. Both manifests are local generated files and must not be committed.
 - `../QuantumSavory.jl` is a separate reference checkout with its own `AGENTS.md`. Normal package resolution uses the GitHub `master` source declared in this repository's `Project.toml`, not that sibling directory. Do not edit the sibling unless a task explicitly spans both repositories.
 - `_docs_/` and `_tests_/` contain historical examples and fixtures. The maintained automated suite is under `test/`; confirm behavior in current source and tests before trusting legacy material.
@@ -76,7 +77,7 @@ The backend test runner is working-directory-sensitive. Run targeted unit tests 
 Running `runtests.jl` without a test name also includes integration tests. Those require a separate test-mode server on port 8000 and a built UI:
 
 ```sh
-(cd gui && npm ci && npm run build)
+(cd gui && npm ci && npm run test:unit && npm run build)
 GENIE_ENV=test julia --project=. -e 'using WebQuantumSavory; WebQuantumSavory.main(); WebQuantumSavory.up(async=false)'
 (cd test && julia --project=. runtests.jl test_integration)
 ```
@@ -92,13 +93,17 @@ The checked-in CI entry points install their own project dependencies and can al
 ./ci/browser.sh
 ```
 
+`ci/frontend-build.sh` installs the locked frontend dependencies, runs the Vitest unit suite, and then creates the production build. The backend-integration and browser entry points reuse it, so GitHub Actions and Buildkite enforce the same unit-test-and-build sequence.
+
 `ci/run-with-server.sh` provides bounded readiness polling, failure logs, and cleanup for the integration and browser entry points. GitHub Actions and Buildkite use Julia 1.12 and Node.js 24. Buildkite provisions Julia, Node.js, and the Playwright Chromium dependencies during each relevant job; its smaller host baseline is documented in `README.md`.
 
 ## Change discipline
 
 - Base frontend work that adds or changes UI controls on the Lucide icon migration, and use the `@lucide/vue` conventions documented in `gui/AGENTS.md`; do not reintroduce PrimeIcons, icon-font classes, or plain Unicode control glyphs in follow-up branches. Preserve documented library-native exceptions such as MapLibre navigation controls.
+- Follow the frontend ownership boundaries in `gui/`: `projectCodec.js` for project schemas and payloads, `ProjectStore` plus `useProjectSession` for persistence and session transitions, `simulationLifecycle.js` plus `useSimulationController.js` for lifecycle state and polling, `usePanelLayout.js` for panel state, `uiServices.js` and `components/ui/` for shared UI behavior, and `legacyBridge.js` for retained `window.*` compatibility. Use the semantic `--app-*` CSS tokens for shared styling.
+- Frontend codec, session, lifecycle, composable, utility, or shared UI changes require `npm run test:unit` in `gui/` in addition to the broader checks appropriate to the behavior.
 - Prefer the smallest relevant check first, then broaden based on risk. Run backend unit tests for `src/` changes, integration tests for routes/contracts, and the GUI checks in `gui/AGENTS.md` for frontend-facing changes.
-- GitHub Actions and Buildkite both run backend unit, frontend version/build, backend integration, and full headless Chromium checks through the shared `ci/` scripts.
+- GitHub Actions and Buildkite both run backend unit, frontend unit/version/build, backend integration, and full headless Chromium checks through the shared `ci/` scripts.
 - Do not commit root or test manifests, `node_modules`, logs, SQLite runtime files, Genie build/cache/session output, Playwright results, or generated Vite output under `public/`.
 - Edit `gui/index.html`, `gui/public/`, or `gui/src/` for frontend changes; never edit generated `public/index.html`, `public/vite.svg`, or `public/assets/`.
 - Keep unrelated cleanup out of behavioral changes, avoid broad formatting churn, and preserve user work already present in the tree.

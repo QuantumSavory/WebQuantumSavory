@@ -98,6 +98,8 @@ const htmlContent = ref(null)
 const loading = ref(true)
 const currentView = ref('png') // 'png' or 'html'
 const imageAlt = computed(() => `${props.itemDetails.type} results`)
+let fetchGeneration = 0
+let fetchAbortController = null
 
 // Check if HTML content is available
 const hasHtmlContent = computed(() => !!htmlContent.value)
@@ -200,15 +202,24 @@ async function fetchResults() {
     }
   }
   
+  const projectName = props.projectData?.name
+  if (!projectName) {
+    clearPlot()
+    return
+  }
+
+  const generation = ++fetchGeneration
+  fetchAbortController?.abort()
+  fetchAbortController = new AbortController()
   loading.value = true
   console.log('fetchResults', props.itemDetails.type, props.itemDetails.item)
   
   try {
     let response = null
     if (props.itemDetails.type === 'protocol') {
-      response = await api.getProtocolResults(props.itemDetails.item)
+      response = await api.getProtocolResults(projectName, props.itemDetails.item, { signal: fetchAbortController.signal })
     } else if (props.itemDetails.type === 'slot') {
-      response = await api.getSlotResults(props.itemDetails.item)
+      response = await api.getSlotResults(projectName, props.itemDetails.item, { signal: fetchAbortController.signal })
       
       // After fetching, check again if slot is still assigned
       // If not, clear the plot
@@ -219,6 +230,8 @@ async function fetchResults() {
       }
     }
     
+    if (generation !== fetchGeneration || projectName !== props.projectData?.name) return
+
     // Set PNG content
     imgSrc.value = response?.png_base64
     
@@ -237,11 +250,12 @@ async function fetchResults() {
       htmlContent.value = null
     }
   } catch (error) {
+    if (error?.name === 'AbortError' || generation !== fetchGeneration) return
     console.error('Error fetching results:', error)
     imgSrc.value = null
     htmlContent.value = null
   } finally {
-    loading.value = false
+    if (generation === fetchGeneration) loading.value = false
   }
 }
 
@@ -419,6 +433,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  fetchGeneration += 1
+  fetchAbortController?.abort()
+  fetchAbortController = null
   document.removeEventListener('keydown', handleGlobalKeydown)
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)

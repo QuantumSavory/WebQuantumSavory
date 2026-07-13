@@ -1,17 +1,19 @@
 <template>
-  <div v-if="show" class="modal-overlay">
-    <div class="modal-dialog">
-      <div class="dialog-header">
-        <h3>Open Project</h3>
-        <div class="search-container">
-          <input 
-            v-model="searchQuery"
-            type="text"
-            placeholder="Search projects..."
-            class="search-input"
-            ref="searchInputRef"
-          />
-        </div>
+  <AppDialog
+    :show="show"
+    title="Open Project"
+    width="min(1200px, calc(100vw - 32px))"
+    class="open-project-dialog"
+    @close="handleClose"
+  >
+      <div class="search-container">
+        <input
+          v-model="searchQuery"
+          type="search"
+          placeholder="Search projects..."
+          class="search-input"
+          autofocus
+        />
       </div>
       <div v-if="filteredProjects.length === 0 && searchQuery" class="no-projects">No projects match your search.</div>
       <div v-else-if="projects.length === 0" class="no-projects">No saved projects.</div>
@@ -123,30 +125,31 @@
           </Column>
         </DataTable>
       </div>
-      <div class="modal-actions">
+      <template #footer>
+      <div class="open-project-actions">
         <div class="left-actions">
-          <button @click="handleNewProject" class="btn-primary">
-            <FilePlus2 :size="16" aria-hidden="true" />
+          <AppButton variant="primary" @click="handleNewProject">
+            <template #icon><FilePlus2 :size="16" /></template>
             Create New
-          </button>
-          <button @click="handleImportProject" class="btn-secondary">
-            <FileUp :size="16" aria-hidden="true" />
+          </AppButton>
+          <AppButton @click="handleImportProject">
+            <template #icon><FileUp :size="16" /></template>
             Import from File
-          </button>
+          </AppButton>
         </div>
-        <div class="right-actions">
-          <button @click="handleClose">Close</button>
-        </div>
+        <AppButton @click="handleClose">Close</AppButton>
       </div>
-    </div>
-  </div>
+      </template>
+  </AppDialog>
 </template>
 
 <script setup>
-import { watch, onUnmounted, ref, onMounted, computed, nextTick } from 'vue'
+import { watch, ref, onMounted, computed } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import { FilePlus2, FileUp, Trash2 } from '@lucide/vue'
+import AppButton from './ui/AppButton.vue'
+import AppDialog from './ui/AppDialog.vue'
 import LucideSortIcon from './LucideSortIcon.vue'
 
 const props = defineProps({
@@ -164,7 +167,6 @@ const emit = defineEmits(['select-project', 'close', 'delete-project', 'new-proj
 
 // Search functionality
 const searchQuery = ref('')
-const searchInputRef = ref(null)
 
 // Computed filtered projects based on search query
 const filteredProjects = computed(() => {
@@ -206,29 +208,8 @@ function saveSortSettings() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
 }
 
-// Global keydown handler for dialog
-function handleGlobalKeydown(event) {
-  if (event.key === 'Escape' && props.show) {
-    handleClose()
-  }
-}
-
-// Watch for show prop changes to add/remove global listener
-watch(() => props.show, async (newShow) => {
-  if (newShow) {
-    // Add global keydown listener when dialog opens
-    document.addEventListener('keydown', handleGlobalKeydown)
-    // Focus search input after dialog is rendered
-    await nextTick()
-    if (searchInputRef.value) {
-      searchInputRef.value.focus()
-    }
-  } else {
-    // Remove global keydown listener when dialog closes
-    document.removeEventListener('keydown', handleGlobalKeydown)
-    // Clear search when dialog closes
-    searchQuery.value = ''
-  }
+watch(() => props.show, newShow => {
+  if (!newShow) searchQuery.value = ''
 })
 
 function handleRowClick(event) {
@@ -340,58 +321,20 @@ function getCountBadgeClass(value) {
   return 'count-badge-zero' // fallback
 }
 
-// Cleanup on component unmount
-onUnmounted(() => {
-  document.removeEventListener('keydown', handleGlobalKeydown)
-})
 </script>
 
 <style scoped>
-.modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.18);
-  z-index: 2001;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal-dialog {
-  background: #fff;
-  border-radius: 8px;
-  padding: 24px 20px 18px;
-  min-width: 900px;
-  max-width: 1200px;
-  max-height: 80vh;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.13);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.dialog-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 18px;
-}
-
-.dialog-header h3 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-
 .search-container {
   display: flex;
+  justify-content: flex-end;
   align-items: center;
+  margin-bottom: var(--app-space-5);
 }
 
 .search-input {
   padding: 6px 12px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid var(--app-color-border);
+  border-radius: var(--app-radius-control);
   font-size: 0.9rem;
   width: 200px;
   transition: border-color 0.15s;
@@ -399,16 +342,16 @@ onUnmounted(() => {
 
 .search-input:focus {
   outline: none;
-  border-color: #0066cc;
+  border-color: var(--app-color-focus);
 }
 
 .search-input::placeholder {
-  color: #999;
+  color: var(--app-color-disabled-text);
 }
 
 .no-projects {
   text-align: center;
-  color: #666;
+  color: var(--app-color-text-muted);
   padding: 40px 20px;
   font-style: italic;
 }
@@ -422,7 +365,7 @@ onUnmounted(() => {
 
 .project-name {
   font-weight: 500;
-  color: #333;
+  color: var(--app-color-text);
 }
 
 /* Base count badge styling */
@@ -465,14 +408,14 @@ onUnmounted(() => {
 
 .date-text {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--app-color-text-muted);
   border-bottom: 1px dotted transparent;
   transition: border-bottom-color 0.15s;
 }
 
 
-.modal-actions {
-  margin-top: 20px;
+.open-project-actions {
+  width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -482,53 +425,6 @@ onUnmounted(() => {
   display: flex;
   gap: 12px;
 }
-
-.right-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.btn-primary {
-  background: #4345ac;
-  color: white;
-  border: 1px solid #4345ac;
-  padding: 8px 16px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.15s;
-}
-
-.btn-primary:hover {
-  background: #5f61f1;
-  border-color: #5f61f1;
-}
-
-.btn-secondary {
-  background: white;
-  color: #4345ac;
-  border: 1px solid #4345ac;
-  padding: 8px 16px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.15s;
-}
-
-.btn-secondary:hover {
-  background: #f8f9fa;
-  border-color: #5f61f1;
-  color: #5f61f1;
-}
-
-
-
 
 /* DataTable row hover effect */
 :deep(.p-datatable-tbody > tr:hover) {

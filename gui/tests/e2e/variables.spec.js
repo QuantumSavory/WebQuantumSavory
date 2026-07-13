@@ -108,13 +108,13 @@ async function expectIconCentered(button) {
     .toBeLessThanOrEqual(1)
 }
 
-async function setCumulativeTargetTime(page, value) {
-  await page.evaluate(targetTime => {
+async function setSimulationPhase(page, phase) {
+  await page.evaluate(nextPhase => {
     const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
     const simulationState = setupState?.simulationState?.value ?? setupState?.simulationState
     if (!simulationState) throw new Error('Simulation state is unavailable')
-    simulationState.cumulativeTargetTime = targetTime
-  }, value)
+    simulationState.phase = nextPhase
+  }, phase)
 }
 
 test.describe('Protocol variable type compatibility', () => {
@@ -236,7 +236,7 @@ test.describe('Global protocol variables', () => {
     expect(serialized.fullParameter).toEqual(expectedParameter)
     expect(serialized.minimizedParameter).toEqual(expectedParameter)
 
-    await setCumulativeTargetTime(page, 1)
+    await setSimulationPhase(page, 'parsed')
     await expect(addVariableButton).toBeDisabled()
     await expect(nameInput).toBeDisabled()
     await expect(typeSelect).toBeDisabled()
@@ -244,7 +244,7 @@ test.describe('Global protocol variables', () => {
     await expect(variableSelector).toBeDisabled()
     await expect(roundsRow.getByRole('button', { name: 'Use a direct value for rounds' })).toBeDisabled()
 
-    await setCumulativeTargetTime(page, 0)
+    await setSimulationPhase(page, 'empty')
     await expect(addVariableButton).toBeEnabled()
     await expect(nameInput).toBeEnabled()
     await expect(typeSelect).toBeEnabled()
