@@ -3,7 +3,11 @@ import { expect, test } from '@playwright/test'
 const PANEL_SIZE_STORAGE_KEY = 'bottomPanel_size'
 const BOTTOM_PANEL_COLLAPSED_STORAGE_KEY = 'panelCollapsed_logs_panel'
 const SELECTED_PANEL_STORAGE_KEY = 'panelCollapsed_selected_element'
-const LEGACY_SELECTED_PANEL_STORAGE_KEY = 'panelCollapsed_node_panel'
+const LEGACY_SELECTED_PANEL_STORAGE_KEYS = [
+  'panelCollapsed_node_panel',
+  'panelCollapsed_edge_panel',
+  'panelCollapsed_void_panel',
+]
 
 async function mockBackend(page) {
   await page.route('http://localhost:8000/**', route => {
@@ -169,9 +173,9 @@ test.describe('Resizable bottom Tools panel', () => {
   })
 
   test('migrates legacy selected-panel collapse state into the controlled layout registry', async ({ page }) => {
-    await page.addInitScript(({ legacyKey }) => {
-      localStorage.setItem(legacyKey, 'true')
-    }, { legacyKey: LEGACY_SELECTED_PANEL_STORAGE_KEY })
+    await page.addInitScript(({ legacyKeys }) => {
+      legacyKeys.forEach((key, index) => localStorage.setItem(key, index === 0 ? 'true' : 'false'))
+    }, { legacyKeys: LEGACY_SELECTED_PANEL_STORAGE_KEYS })
     await loadApp(page)
 
     const selectedPanelToggle = page.locator(
@@ -180,6 +184,10 @@ test.describe('Resizable bottom Tools panel', () => {
     await expect(selectedPanelToggle).toHaveAttribute('aria-expanded', 'false')
     await expect.poll(() => page.evaluate(key => localStorage.getItem(key), SELECTED_PANEL_STORAGE_KEY))
       .toBe('true')
+    await expect.poll(() => page.evaluate(
+      keys => keys.map(key => localStorage.getItem(key)),
+      LEGACY_SELECTED_PANEL_STORAGE_KEYS
+    )).toEqual([null, null, null])
 
     await selectedPanelToggle.click()
     await expect(selectedPanelToggle).toHaveAttribute('aria-expanded', 'true')
@@ -189,6 +197,10 @@ test.describe('Resizable bottom Tools panel', () => {
     await page.reload()
     await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
     await expect(selectedPanelToggle).toHaveAttribute('aria-expanded', 'true')
+    await expect.poll(() => page.evaluate(
+      keys => keys.map(key => localStorage.getItem(key)),
+      LEGACY_SELECTED_PANEL_STORAGE_KEYS
+    )).toEqual([null, null, null])
   })
 
   test('clamps saved dimensions to viewport and visible sidebar space', async ({ page }) => {

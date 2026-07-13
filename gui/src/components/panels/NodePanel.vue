@@ -71,7 +71,7 @@
                   />
                 </div>
                 <div class="slot-cell bg-noise-cell">
-                  <select :value="slot.backgroundNoise.type" @change="updateSlotBgNoise(slot, $event)" class="bg-noise-select" :disabled="props.simulationState?.hasSimulationRun">
+                  <select :value="slot.backgroundNoise.type" @change="updateSlotBgNoise(slot, $event)" class="bg-noise-select" :disabled="editingLocked">
                     <option v-for="opt in bgNoiseOptions" :key="opt.type" :value="opt.type">{{ opt.type == 'default' ? 'No background noise' : opt.type }}</option>
                   </select>
                 </div>
@@ -106,7 +106,7 @@
                       {{ param.field }}
                     </div>
                     <div>
-                      <input type="number" v-model.number="param.value" :disabled="props.simulationState?.hasSimulationRun" />
+                      <input type="number" v-model.number="param.value" :disabled="editingLocked" />
                     </div>
                   </div>
                 </div>
@@ -231,7 +231,7 @@
           :contextInfo="{
             nodeName: props.node.name
           }"
-          :simulationState="props.simulationState"
+          :editingLocked="editingLocked"
           :variables="props.variables"
         />
       </section>
@@ -269,10 +269,9 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
-  simulationState: {
-    type: Object,
-    required: false,
-    default: () => ({})
+  editingLocked: {
+    type: Boolean,
+    default: false
   },
   variables: {
     type: Array,
@@ -326,7 +325,7 @@ function toggleSlotExpanded(slot) {
 // Handler: add new slot
 function addSlot() {
   // Prevent adding slots if simulation has run
-  if (props.simulationState?.hasSimulationRun) {
+  if (props.editingLocked) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
@@ -338,7 +337,7 @@ function addSlot() {
 
 function deleteSlot(slot) {
   // Prevent deleting slots if simulation has run
-  if (props.simulationState?.hasSimulationRun) {
+  if (props.editingLocked) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
@@ -374,7 +373,7 @@ function hideOptionsMenu(event){
 
 
 // Editable node name logic
-const isNodeEditingLocked = computed(() => props.simulationState?.hasSimulationRun || false)
+const isNodeEditingLocked = computed(() => props.editingLocked)
 const editingName = ref(false)
 const nameInput = ref('')
 
@@ -436,7 +435,7 @@ function cancelAddNSlots() {
 
 function executeAddNSlots() {
   // Prevent adding slots if simulation has run
-  if (props.simulationState?.hasSimulationRun) {
+  if (props.editingLocked) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }

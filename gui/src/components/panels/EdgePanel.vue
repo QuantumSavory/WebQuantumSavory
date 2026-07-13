@@ -45,7 +45,7 @@
             sourceNodeName: props.edge.source.name,
             targetNodeName: props.edge.target.name
           }"
-          :simulationState="props.simulationState"
+          :editingLocked="editingLocked"
           :variables="props.variables"
           :isVirtualEdge="props.edge.isLogic"
         />
@@ -69,7 +69,7 @@ import LucideMenuIcon from '../LucideMenuIcon.vue'
 const props = defineProps({
   edge:             { type: Object, required: true }, 
   projectData:      { type: Object, required: true },
-  simulationState:  { type: Object, required: false, default: () => ({}) },
+  editingLocked:    { type: Boolean, default: false },
   variables:        { type: Array, default: () => [] },
   collapsed:        { type: Boolean, default: false }
 })

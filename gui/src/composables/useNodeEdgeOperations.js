@@ -1,17 +1,18 @@
 import { ref } from 'vue'
 import Node from '../models/Node'
 import { generateUUid, setEdgeCorrectNodeOrder } from '../utils/Utils'
+import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../utils/projectCodec'
 import { SIMULATION_EDITING_LOCK_MESSAGE } from './uiServices'
 
 /**
  * useNodeEdgeOperations - Composable for node and edge operations
  */
-export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog, {
+export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
   hideSlotState = () => {},
   showAlert = (_title, message) => window.alert(message)
 } = {}) {
-  const mapCenter = ref([-98.5795, 39.8283])
-  const mapZoom = ref(4)
+  const mapCenter = ref([...DEFAULT_MAP_CENTER])
+  const mapZoom = ref(DEFAULT_MAP_ZOOM)
   
   const selectedItem = ref(null)
   const selectedType = ref(null)
@@ -29,7 +30,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog, {
   }
 
   function addNewNode(name, type, position){
-    if (hasSimulationRun.value) {
+    if (editingLocked.value) {
       showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
       return
     }
@@ -64,7 +65,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog, {
     console.log( 'deleteSelected', item )
     if (!item) return
 
-    if (hasSimulationRun.value) {
+    if (editingLocked.value) {
       showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
       return
     }
@@ -91,7 +92,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog, {
   }
 
   function handleEdgeCreated(edge) {
-    if (hasSimulationRun.value) {
+    if (editingLocked.value) {
       showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
       return
     }
@@ -101,7 +102,7 @@ export function useNodeEdgeOperations(projectData, hasSimulationRun, addLog, {
   }
 
   function moveNode(fromIndex, toIndex) {
-    if (hasSimulationRun.value) return false
+    if (editingLocked.value) return false
 
     const nodes = projectData.value.net.nodes
     if (

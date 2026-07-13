@@ -33,9 +33,10 @@
 </template>
 
 <script setup>
-import { nextTick, watch } from 'vue'
+import { inject, nextTick, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import { X } from '@lucide/vue'
+import { UI_SERVICES_KEY } from '../../composables/uiServices'
 
 defineOptions({ inheritAttrs: false })
 
@@ -75,6 +76,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
+const uiServices = inject(UI_SERVICES_KEY, null)
 let returnFocusElement = null
 
 watch(() => props.show, (show, wasShown) => {
@@ -90,7 +92,7 @@ watch(() => props.show, (show, wasShown) => {
         && returnFocusElement.getClientRects().length > 0
       const target = candidateIsVisible
         ? returnFocusElement
-        : document.querySelector('.hamburger-btn')
+        : uiServices?.getDialogFallbackFocus?.()
       target?.focus?.()
       returnFocusElement = null
     })

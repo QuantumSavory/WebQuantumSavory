@@ -11,7 +11,7 @@
         @delete="deleteProtocol"
         :category="protocolGroupName"
         :contextInfo="contextInfo"
-        :simulationState="props.simulationState"
+        :editingLocked="editingLocked"
         :variables="props.variables"
         />
     </div>
@@ -58,10 +58,9 @@ const props = defineProps({
     required: false,
     default: () => ({})
   },
-  simulationState: {
-    type: Object,
-    required: false,
-    default: () => ({})
+  editingLocked: {
+    type: Boolean,
+    default: false
   },
   variables: {
     type: Array,
@@ -103,7 +102,7 @@ const items = computed(() => {
 
 function deleteProtocol( protocol ){
   // Prevent deleting protocols if simulation has run
-  if (props.simulationState?.hasSimulationRun) {
+  if (props.editingLocked) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
@@ -135,7 +134,7 @@ function getProtocolTypeSimpleName( protocolType ){
 
 function toggleAddProtocolMenu(event) {
   // Prevent adding protocols if simulation has run
-  if (props.simulationState?.hasSimulationRun) {
+  if (props.editingLocked) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
@@ -152,7 +151,7 @@ function handleSelect(protocol) {
 
 function handleAddProtocol( protocolTypeId) {
   // Prevent adding protocols if simulation has run
-  if (props.simulationState?.hasSimulationRun) {
+  if (props.editingLocked) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }

@@ -181,13 +181,13 @@ async function addNodeWithSymbolicProtocol(page) {
   return editor
 }
 
-async function setCumulativeTargetTime(page, value) {
-  await page.evaluate(targetTime => {
+async function setSimulationPhase(page, phase) {
+  await page.evaluate(nextPhase => {
     const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
     const simulationState = setupState?.simulationState?.value ?? setupState?.simulationState
     if (!simulationState) throw new Error('Simulation state is unavailable')
-    simulationState.cumulativeTargetTime = targetTime
-  }, value)
+    simulationState.phase = nextPhase
+  }, phase)
 }
 
 test.describe('States Zoo variables', () => {
@@ -297,7 +297,7 @@ test.describe('States Zoo variables', () => {
       'Unlink this variable from protocol parameters before deleting it',
     )
 
-    await setCumulativeTargetTime(page, 1)
+    await setSimulationPhase(page, 'parsed')
     await expect(panel.getByRole('button', { name: 'Add State' })).toBeDisabled()
     await expect(row.locator('.states-zoo-name-input')).toBeDisabled()
     await expect(row.locator('.states-zoo-type-select')).toBeDisabled()
@@ -305,7 +305,7 @@ test.describe('States Zoo variables', () => {
     await expect(row.locator('.states-zoo-parameter-input').first()).toBeDisabled()
     await expect(variableSelector).toBeDisabled()
 
-    await setCumulativeTargetTime(page, 0)
+    await setSimulationPhase(page, 'empty')
     await expect(row.locator('.states-zoo-name-input')).toBeEnabled()
     await expect(row.locator('.states-zoo-type-select')).toBeEnabled()
     await expect(variableSelector).toBeEnabled()

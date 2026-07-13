@@ -92,7 +92,6 @@
           type="submit"
           form="graph-network-form"
           :disabled="!validation.valid"
-          @click="handleConfirm"
         >
           Generate Graph
         </AppButton>

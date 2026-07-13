@@ -9,8 +9,8 @@ export const PROJECT_SCHEMA_VERSION = 1
 const DEFAULT_PROJECT_NAME = 'New Project'
 const DEFAULT_SIMULATION_TIME = 1.0
 const DEFAULT_SIMULATION_TIME_STEP = 0.1
-const DEFAULT_MAP_CENTER = [-98.5795, 39.8283]
-const DEFAULT_MAP_ZOOM = 4
+export const DEFAULT_MAP_CENTER = [-98.5795, 39.8283]
+export const DEFAULT_MAP_ZOOM = 4
 
 const STORAGE_ONLY_PROJECT_FIELDS = new Set([
   'schemaVersion',
@@ -125,6 +125,8 @@ function hydrateNode(rawNode, context) {
           return {
             ...storedSlot,
             backgroundNoise: normalizeBackgroundNoise(storedSlot.backgroundNoise, context),
+            isLocked: false,
+            assignment: false,
           }
         })
       : [],
@@ -497,15 +499,25 @@ export function toSimulationPayload(project) {
 /**
  * Add the run configuration required by the script-export endpoint.
  */
-export function toScriptExportPayload(project, simulationConfig = project?.simulationConfig) {
+export function toScriptExportPayloadFromSimulationPayload(payload, simulationConfig) {
   const sourceConfig = isRecord(simulationConfig) ? simulationConfig : {}
   return {
-    ...toSimulationPayload(project),
+    ...payload,
     simulationConfig: {
       time: finiteNumber(sourceConfig.time, DEFAULT_SIMULATION_TIME),
       timeStep: finiteNumber(sourceConfig.timeStep, DEFAULT_SIMULATION_TIME_STEP),
     },
   }
+}
+
+/**
+ * Compatibility wrapper for callers that still have a live project graph.
+ */
+export function toScriptExportPayload(project, simulationConfig = project?.simulationConfig) {
+  return toScriptExportPayloadFromSimulationPayload(
+    toSimulationPayload(project),
+    simulationConfig,
+  )
 }
 
 /**

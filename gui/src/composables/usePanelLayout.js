@@ -23,13 +23,17 @@ function readStoredBoolean(key) {
 
 function readSelectedElementCollapsed() {
   const stored = readStoredBoolean(SELECTED_ELEMENT_STORAGE_KEY)
-  if (stored !== null) return stored
+  const selectedElementCollapsed = stored !== null
+    ? stored
+    : LEGACY_SELECTED_ELEMENT_KEYS
+        .map(readStoredBoolean)
+        .some(value => value === true)
 
-  const legacyCollapsed = LEGACY_SELECTED_ELEMENT_KEYS
-    .map(readStoredBoolean)
-    .some(value => value === true)
-  localStorage.setItem(SELECTED_ELEMENT_STORAGE_KEY, String(legacyCollapsed))
-  return legacyCollapsed
+  if (stored === null) {
+    localStorage.setItem(SELECTED_ELEMENT_STORAGE_KEY, String(selectedElementCollapsed))
+  }
+  LEGACY_SELECTED_ELEMENT_KEYS.forEach(key => localStorage.removeItem(key))
+  return selectedElementCollapsed
 }
 
 function readPanelCollapsed(key) {

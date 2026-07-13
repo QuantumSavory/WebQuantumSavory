@@ -5,8 +5,21 @@ import { summarizeProject } from '../utils/projectCodec'
 
 const STORAGE_PREFIX = 'cqn_project_'
 const METADATA_INDEX_KEY = 'cqn_projects_metadata_index'
+const RECENT_PROJECT_NAME_KEY = 'recentProjectName'
 
 export default class ProjectStore {
+  static getRecentProjectName() {
+    return localStorage.getItem(RECENT_PROJECT_NAME_KEY)
+  }
+
+  static setRecentProjectName(name) {
+    localStorage.setItem(RECENT_PROJECT_NAME_KEY, name)
+  }
+
+  static clearRecentProjectName() {
+    localStorage.removeItem(RECENT_PROJECT_NAME_KEY)
+  }
+
   // Get the metadata index (creates empty one if doesn't exist)
   static getMetadataIndex() {
     const raw = localStorage.getItem(METADATA_INDEX_KEY)

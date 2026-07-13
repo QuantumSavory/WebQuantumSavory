@@ -12,7 +12,7 @@
         :protocols="protocols" 
         protocolGroupName="floating" 
         :protocolClass="FloatingProtocol"
-        :simulationState="props.simulationState"
+        :editingLocked="editingLocked"
         :variables="props.variables"
       />
     </template>
@@ -32,10 +32,9 @@ const props = defineProps({
     type: Array,
     required: true
   },
-  simulationState: {
-    type: Object,
-    required: false,
-    default: () => ({})
+  editingLocked: {
+    type: Boolean,
+    default: false
   },
   variables: {
     type: Array,

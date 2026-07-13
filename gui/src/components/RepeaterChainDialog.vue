@@ -87,7 +87,6 @@
           type="submit"
           form="repeater-chain-form"
           :disabled="!validation.valid"
-          @click="handleConfirm"
         >
           Generate Chain
         </AppButton>

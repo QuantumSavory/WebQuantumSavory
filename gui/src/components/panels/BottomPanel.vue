@@ -252,7 +252,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import ResizeBounding from 'vue3-resize-bounding'
 import BasePanel from './BasePanel.vue'
 import DescriptionPanel from './DescriptionPanel.vue'
@@ -311,9 +311,11 @@ const props = defineProps({
     type: String,
     default: 'logs_panel'
   },
-  rightSidebarVisible: {
-    type: Boolean,
-    default: true
+  availableBounds: {
+    type: Object,
+    required: true,
+    validator: bounds => ['left', 'right', 'top', 'bottom']
+      .every(key => Number.isFinite(bounds?.[key]))
   }
 })
 
@@ -335,24 +337,17 @@ const DEFAULT_PANEL_WIDTH = 800
 const DEFAULT_PANEL_HEIGHT = 180
 const MIN_PANEL_WIDTH = 480
 const MIN_PANEL_HEIGHT = 180
-const COLLAPSED_PANEL_HEIGHT = shellCssPixels('--app-panel-collapsed-height')
+const COLLAPSED_PANEL_HEIGHT = 36
 const KEYBOARD_RESIZE_STEP = 16
 
 const isCollapsed = computed(() => props.collapsable && props.collapsed)
-const shellGeometry = ref({
-  left: 0,
-  right: window.innerWidth,
-  top: 0,
-  bottom: window.innerHeight
-})
-
 const maxPanelWidth = computed(() => Math.max(
   1,
-  shellGeometry.value.right - shellGeometry.value.left
+  props.availableBounds.right - props.availableBounds.left
 ))
 const maxPanelHeight = computed(() => Math.max(
   1,
-  shellGeometry.value.bottom - shellGeometry.value.top
+  props.availableBounds.bottom - props.availableBounds.top
 ))
 const effectiveMinPanelWidth = computed(() => Math.min(MIN_PANEL_WIDTH, maxPanelWidth.value))
 const effectiveMinPanelHeight = computed(() => Math.min(MIN_PANEL_HEIGHT, maxPanelHeight.value))
@@ -501,33 +496,6 @@ function handleResizeKeydown(dimension, event) {
   persistPanelSize()
 }
 
-function shellCssPixels(propertyName) {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(propertyName)
-  return Number.parseFloat(value) || 0
-}
-
-function measureShellGeometry() {
-  const panelContainer = document.querySelector('.logs-panel-container')
-  const topbar = document.querySelector('.topbar')
-  const sidebar = document.querySelector('.sidebar-right')
-  const gap = shellCssPixels('--app-shell-panel-gap')
-  const left = panelContainer?.getBoundingClientRect().left ?? 0
-  const top = (topbar?.getBoundingClientRect().bottom ?? 0) + gap
-  let right = window.innerWidth - gap
-
-  if (props.rightSidebarVisible && sidebar) {
-    const layoutLeft = sidebar.offsetLeft || sidebar.getBoundingClientRect().left
-    right = layoutLeft - gap
-  }
-
-  shellGeometry.value = {
-    left,
-    right: Math.max(left + 1, right),
-    top,
-    bottom: window.innerHeight
-  }
-}
-
 function handleTabKeydown(event, currentIndex) {
   let nextIndex = currentIndex
 
@@ -549,26 +517,8 @@ function handleTabKeydown(event, currentIndex) {
   tabs?.[nextIndex]?.focus()
 }
 
-let shellResizeObserver = null
-
-watch(() => props.rightSidebarVisible, measureShellGeometry, { flush: 'post' })
-
 onMounted(() => {
-  measureShellGeometry()
-  window.addEventListener('resize', measureShellGeometry)
-  if (typeof ResizeObserver !== 'undefined') {
-    shellResizeObserver = new ResizeObserver(measureShellGeometry)
-    const topbar = document.querySelector('.topbar')
-    const sidebar = document.querySelector('.sidebar-right')
-    if (topbar) shellResizeObserver.observe(topbar)
-    if (sidebar) shellResizeObserver.observe(sidebar)
-  }
   persistPanelSize()
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', measureShellGeometry)
-  shellResizeObserver?.disconnect()
 })
 </script>
 

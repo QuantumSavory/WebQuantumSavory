@@ -1,19 +1,23 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { Pause, Play, Settings2, Square } from '@lucide/vue'
+import { SimulationPhase } from '../../composables/simulationLifecycle.js'
 
 const props = defineProps({
   projectData: {
     type: Object,
     required: true
   }, 
-  simulationStatus: {
+  backendSimulation: {
     type: Object,
     required: true
   },
-  simulationState: {
-    type: Object,
+  targetSimulationTime: {
+    type: Number,
+    required: true
+  },
+  pollingActive: {
+    type: Boolean,
     required: true
   },
   phase: {
@@ -40,15 +44,15 @@ const currentTime = computed(() => {
 })
 
 // Backend simulation state (single source of truth)
-const backendSim = computed(() => props.simulationStatus?.state?.simulation || {})
+const backendSim = computed(() => props.backendSimulation || {})
 
-const isSimulationRunning = computed(() => props.phase === 'running')
-const isSimulationPaused = computed(() => props.phase === 'paused')
+const isSimulationRunning = computed(() => props.phase === SimulationPhase.RUNNING)
+const isSimulationPaused = computed(() => props.phase === SimulationPhase.PAUSED)
 
 // Simplified progress calculation (using cumulative target time)
 const simulationProgress = computed(() => {
   const sim = backendSim.value
-  const targetTime = props.simulationState?.cumulativeTargetTime || sim.simulation_time
+  const targetTime = props.targetSimulationTime || sim.simulation_time
   
   if (!sim.simulation_progress || !targetTime) {
     return 0
@@ -106,7 +110,7 @@ function toggleAdvancedControls() {
         <div v-if="isSimulationRunning || isSimulationPaused" class="simulation-progress">
           <div class="progress-info">
             <span>
-              {{ (backendSim.simulation_progress || 0).toFixed(3) }}s / {{ (simulationState.cumulativeTargetTime || backendSim.simulation_time || 0).toFixed(3) }}s
+              {{ (backendSim.simulation_progress || 0).toFixed(3) }}s / {{ (targetSimulationTime || backendSim.simulation_time || 0).toFixed(3) }}s
             </span>
             <span>{{ simulationProgress }}%</span>
           </div>
@@ -126,7 +130,7 @@ function toggleAdvancedControls() {
             step="0.001"
             min="0"
             class="duration-input"
-            :disabled="isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive"
+            :disabled="isSimulationRunning || isSimulationPaused || pollingActive"
           />
           <span class="unit">sec</span>
         </div>
@@ -138,7 +142,7 @@ function toggleAdvancedControls() {
           @click="toggleAdvancedControls"
           :class="{ active: showAdvancedControls }"
           title="Toggle advanced controls"
-          :disabled="isSimulationRunning || isSimulationPaused || props.simulationState?.pollingActive"
+          :disabled="isSimulationRunning || isSimulationPaused || pollingActive"
         >
           <Settings2 :size="16" aria-hidden="true" />
         </button>
@@ -188,21 +192,21 @@ function toggleAdvancedControls() {
     <div class="advanced-controls" :class="{ visible: showAdvancedControls }">
       <div class="advanced-buttons">
         <button 
-          :disabled="!props.capabilities.canPrepare || props.simulationState?.pollingActive"
+          :disabled="!props.capabilities.canPrepare || pollingActive"
           class="prepare-network-graph-btn" 
           @click="handlePrepareNetworkGraph"
         >
           Parse
         </button>
         <button 
-          :disabled="props.phase !== 'parsed' || props.simulationState?.pollingActive"
+          :disabled="props.phase !== SimulationPhase.PARSED || pollingActive"
           class="prepare-simulation-btn" 
           @click="handlePrepareSimulation"
         >
           Prepare
         </button>
         <button 
-          :disabled="!props.capabilities.canPrepare || props.simulationState?.pollingActive"
+          :disabled="!props.capabilities.canPrepare || pollingActive"
           class="reset-btn" 
           @click="handlePrepareNetworkGraph"
           title="Reset simulation (re-parse network graph)"

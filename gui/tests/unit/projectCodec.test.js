@@ -5,6 +5,8 @@ import FloatingProtocol from '../../src/models/FloatingProtocol'
 import Node from '../../src/models/Node'
 import Variable from '../../src/models/Variable'
 import {
+  DEFAULT_MAP_CENTER,
+  DEFAULT_MAP_ZOOM,
   PROJECT_SCHEMA_VERSION,
   createEmptyProject,
   decodeStoredProject,
@@ -12,6 +14,7 @@ import {
   normalizeProjectName,
   summarizeProject,
   toScriptExportPayload,
+  toScriptExportPayloadFromSimulationPayload,
   toSimulationPayload,
 } from '../../src/utils/projectCodec'
 
@@ -186,6 +189,13 @@ describe('decodeStoredProject', () => {
     expect(decoded.map).toEqual({ position: [1, 2], zoom: 3 })
   })
 
+  it('uses copied exported map defaults when storage has no map state', () => {
+    const decoded = decodeStoredProject({ name: 'Defaults', net: {} })
+
+    expect(decoded.map).toEqual({ position: DEFAULT_MAP_CENTER, zoom: DEFAULT_MAP_ZOOM })
+    expect(decoded.map.position).not.toBe(DEFAULT_MAP_CENTER)
+  })
+
   it('normalizes non-default legacy noise strings into editable objects', () => {
     const raw = legacyProject()
     raw.net.nodes[0].data.slots[0].backgroundNoise = 'CustomNoise'
@@ -196,6 +206,20 @@ describe('decodeStoredProject', () => {
       type: 'CustomNoise',
       parameters: [],
     })
+  })
+
+  it('clears stale runtime slot state during hydration without mutating storage input', () => {
+    const raw = legacyProject()
+    raw.net.nodes[0].data.slots[0].isLocked = true
+    raw.net.nodes[0].data.slots[0].assignment = { remoteSlot: 'slot_a' }
+    const original = structuredClone(raw)
+
+    const { project } = decodeStoredProject(raw)
+    const slot = project.net.nodes[0].data.slots[0]
+
+    expect(slot.isLocked).toBe(false)
+    expect(slot.assignment).toBe(false)
+    expect(raw).toEqual(original)
   })
 
   it('rejects unsupported future schemas before hydration', () => {
@@ -378,6 +402,20 @@ describe('backend payload codecs', () => {
     expect(payload.simulationConfig).toEqual({ time: 2.5, timeStep: 0.25 })
     expect(payload).not.toHaveProperty('description')
     expect(payload).not.toHaveProperty('schemaVersion')
+  })
+
+  it('adds script configuration to an existing simulation payload without rebuilding its graph', () => {
+    const simulationPayload = toSimulationPayload(createEmptyProject('Fast Path'))
+
+    const payload = toScriptExportPayloadFromSimulationPayload(
+      simulationPayload,
+      { time: 3, timeStep: 0.2, ignored: true }
+    )
+
+    expect(payload).not.toBe(simulationPayload)
+    expect(payload.net).toBe(simulationPayload.net)
+    expect(payload.variables).toBe(simulationPayload.variables)
+    expect(payload.simulationConfig).toEqual({ time: 3, timeStep: 0.2 })
   })
 })
 

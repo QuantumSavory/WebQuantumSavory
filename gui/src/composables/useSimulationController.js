@@ -50,8 +50,8 @@ export function useSimulationController({
   let aliveAbortController = null
   let disposed = false
 
-  // Compatibility ref for existing panels and test helpers. The controller is
-  // still the only production writer; App adds the derived hasSimulationRun.
+  // Compatibility views for legacy callers and browser test helpers. First-party
+  // panels consume the explicit lifecycle contracts below.
   const simulationState = state
   const simulationStatus = computed(() => legacySimulationStatus(state.value))
   const backendSimulation = computed(() => state.value.backendState?.simulation || {})
@@ -66,7 +66,13 @@ export function useSimulationController({
   const isSimulationComplete = computed(() => state.value.phase === SimulationPhase.COMPLETED)
   const isSimulationIdle = computed(() => state.value.phase === SimulationPhase.EMPTY)
   const currentSimulationTime = computed(() => Number(backendSimulation.value.simulation_progress || 0))
-  const targetSimulationTime = computed(() => Number(backendSimulation.value.simulation_time || projectData.value?.simulationConfig?.time || 1))
+  const targetSimulationTime = computed(() => Number(
+    state.value.cumulativeTargetTime
+    || backendSimulation.value.simulation_time
+    || projectData.value?.simulationConfig?.time
+    || 1
+  ))
+  const pollingActive = computed(() => state.value.pollingActive)
   const hasSimulationRun = computed(() => state.value.cumulativeTargetTime > 0)
 
   function dispatch(event) {
@@ -534,6 +540,7 @@ export function useSimulationController({
     isSimulationIdle,
     currentSimulationTime,
     targetSimulationTime,
+    pollingActive,
     hasSimulationRun,
     getSlotById,
     calculateSimulationProgress,

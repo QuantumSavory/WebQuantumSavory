@@ -128,7 +128,7 @@ test.describe('Layout Tools repeater chain generator', () => {
 
     await page.evaluate(() => {
       const app = document.querySelector('#app')?.__vue_app__
-      app._instance.setupState.simulationState.cumulativeTargetTime = 1
+      app._instance.setupState.simulationState.phase = 'parsed'
     })
     await expect(helper).toBeDisabled()
     await expect(page.getByText('Layout helpers are unavailable after a simulation has started.')).toBeVisible()

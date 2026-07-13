@@ -72,7 +72,6 @@
           type="submit"
           form="star-network-form"
           :disabled="!validation.valid"
-          @click="handleConfirm"
         >
           Generate Star
         </AppButton>

@@ -144,7 +144,7 @@ export function useProjectSession({
         defaultMapZoom
       })
       store.openProject(name, encoded)
-      window.localStorage.setItem('recentProjectName', name)
+      store.setRecentProjectName(name)
     }
     if (generation !== transitionGeneration.value) return false
 
@@ -183,8 +183,10 @@ export function useProjectSession({
 
       transitionPhase.value = 'committing'
       try {
-        await api.destroySimulation(name)
-        addLog?.('info', `Cleaned up existing simulation for: ${name}`, 'System')
+        const cleanupResult = await api.destroySimulation(name)
+        if (cleanupResult?.success === true) {
+          addLog?.('info', `Cleaned up existing simulation for: ${name}`, 'System')
+        }
       } catch (error) {
         console.warn('Failed to destroy simulation on project load:', error)
       }
@@ -250,7 +252,7 @@ export function useProjectSession({
         defaultMapZoom
       })
       store.saveProject(name, encoded)
-      window.localStorage.setItem('recentProjectName', name)
+      store.setRecentProjectName(name)
       if (generation !== transitionGeneration.value) return false
 
       stopSessionActivity()
@@ -283,9 +285,14 @@ export function useProjectSession({
     return true
   }
 
-  function saveAs(name) {
+  function saveAs(name, { overwrite = false } = {}) {
     try {
       name = canonicalName(name)
+      const targetIsDifferentProject = name !== currentProjectName.value
+        && store.listProjects().includes(name)
+      if (targetIsDifferentProject && !overwrite) {
+        throw new Error(`A project named "${name}" already exists`)
+      }
       transitionGeneration.value += 1
       const encoded = encodeStoredProject(projectData.value, {
         name,
@@ -295,7 +302,7 @@ export function useProjectSession({
         defaultMapZoom
       })
       store.saveProject(name, encoded)
-      window.localStorage.setItem('recentProjectName', name)
+      store.setRecentProjectName(name)
       stopSessionActivity()
       clearLogs?.()
       currentProjectName.value = name
@@ -330,7 +337,7 @@ export function useProjectSession({
       selectedType.value = null
       mapCenter.value = [...defaultMapCenter]
       mapZoom.value = defaultMapZoom
-      window.localStorage.removeItem('recentProjectName')
+      store.clearRecentProjectName()
       syncLegacyProjectData()
       markAsSaved?.()
     }

@@ -18,7 +18,6 @@
         type="submit"
         form="project-name-form"
         :disabled="!isValid"
-        @click="handleConfirm"
       >{{ confirmButtonText }}</AppButton>
     </template>
   </AppDialog>

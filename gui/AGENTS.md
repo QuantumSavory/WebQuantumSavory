@@ -3,9 +3,9 @@
 ## Scope and stack
 
 - This file governs `gui/`. Repository-wide and Julia backend guidance is in `../AGENTS.md`.
-- The frontend uses Vue 3's Composition API and `<script setup>`, plain ESM JavaScript, Vite 6, PrimeVue with the Aura theme, MapLibre, and Playwright.
+- The frontend uses Vue 3's Composition API and `<script setup>`, plain ESM JavaScript, Vite 6, PrimeVue with the Aura theme, and MapLibre. Vitest with jsdom and Vue Test Utils covers unit/component behavior; Playwright covers browser workflows.
 - `package.json` and the committed `package-lock.json` define this independent npm environment. Use `npm ci`; Vite 6 requires Node.js 18 or newer.
-- No ESLint, formatter, TypeScript build, or frontend unit-test runner is configured. Avoid introducing repository-wide tooling for a localized change.
+- No ESLint, formatter, or TypeScript build is configured. Avoid introducing repository-wide tooling for a localized change.
 
 ## Source map
 
@@ -13,10 +13,14 @@
 - `src/App.vue` is the composition root. It owns canonical reactive `projectData`, derives the minimized backend payload, wires composables, and coordinates menus, dialogs, panels, maps, logs, and result windows.
 - `src/components/map/` contains the MapLibre map, node/edge/slot rendering, and entanglement overlays.
 - `src/components/panels/` contains node/edge/protocol editors, the simulation runner, logs, Julia script export, and result views. Direct children of `src/components/` are project and confirmation dialogs.
-- `src/composables/` separates project management, import/export, simulation control, polling, panel layout, unsaved-change handling, and result-window state.
-- `src/models/` contains the in-memory node, edge, slot, and protocol objects plus the local-storage `ProjectStore`.
-- `src/utils/ApiConnector.js` is the singleton backend client and runtime metadata store. Other utilities contain project validation/serialization, backend log conversion, and map/window helpers.
+- `src/components/ui/` contains shared application primitives. Dialogs compose `AppDialog`, and common actions use `AppButton`; keep application-shell dependencies out of these reusable components.
+- `src/utils/projectCodec.js` is the schema boundary for empty projects, stored-project decoding/encoding, backend payloads, script-export payloads, and summaries. `src/models/ProjectStore.js` owns local-storage persistence, while `src/composables/useProjectSession.js` owns named-project transitions and session cleanup.
+- `src/composables/simulationLifecycle.js` defines the pure phase reducer and capability model. `src/composables/useSimulationController.js` owns backend simulation commands, state/log/aliveness polling, and lifecycle cleanup; consumers should use its phase and capability contracts rather than reconstructing status.
+- `src/composables/usePanelLayout.js` is the owner for panel visibility, collapse state, flex layout, and their storage migrations. `src/composables/uiServices.js` exposes optional application UI services to reusable components.
+- `src/utils/legacyBridge.js` is the explicit compatibility boundary for retained `window.*` consumers. Do not add new global access outside that bridge.
+- `src/models/` also contains the in-memory node, edge, slot, protocol, and variable objects. `src/utils/ApiConnector.js` is the singleton backend client and runtime metadata store; the remaining focused composables and utilities own import/export, node/edge operations, unsaved changes, results, layout generation, parameter compatibility, and rendering helpers.
 - `src/demos/` contains importable example projects. `tests/e2e/` contains smoke tests and the serial full-workflow test.
+- `tests/unit/` contains Vitest tests for codecs, storage/session invariants, API behavior, lifecycle reduction, controllers, composables, and shared Vue components. Tests use the jsdom environment and Vue Test Utils where mounting is required.
 - `public/` inside this directory is source copied verbatim by Vite. The repository-root `../public/index.html`, `../public/vite.svg`, and `../public/assets/` are generated output.
 
 ## Data and lifecycle contracts
@@ -34,7 +38,9 @@
 - MapLibre takes marker elements out of Vue's normal DOM tree. Keep `BaseMap`'s marker-component render order stable and decoupled from simulator node order; changing that render order can make Vue move MapLibre-owned elements and abort other reactive updates.
 - `App.vue` strips UI-only and read-only slot/protocol fields before sending data to the API. Do not submit saved UI state directly to the backend.
 - Projects, the user UUID, panel state, and view preferences use established `localStorage` keys. Preserve keys and migration/rebuild behavior so existing projects remain readable.
+- All durable project documents pass through the schema-v1 codec. Preserve schema-v0 decoding, normalize at the codec boundary without mutating imported input, and keep project-name trimming consistent across save, load, import, and storage operations.
 - Switching, importing, resetting, or deleting a project must stop both polling loops, reset simulation state, close stale result windows, and remove obsolete entanglement overlays.
+- Derive editing locks from lifecycle capabilities. Network and protocol editing is locked as soon as Parse produces lifecycle state and remains locked through Prepare and every later non-empty phase; do not infer this from accumulated simulation time or a legacy status object.
 - Keep the Runner's Play control visible but disabled with an explanatory tooltip while the network is empty; replace it with Pause or Resume only while a simulation is running or paused.
 - Existing `window.projectData`, `window.showEntangledSlots`, `window.hideSlotState`, and result-window bridges connect older map/panel code. Do not remove them without migrating all consumers.
 
@@ -44,6 +50,8 @@
 - PrimeVue menu models store imported components in `lucideIcon` and render them through the `itemicon` slot with `LucideMenuIcon.vue`; customize other PrimeVue icon slots, including DataTable `sorticon`, instead of accepting non-Lucide defaults. Avoid replacing a third-party control's clean native artwork through manual DOM mounting or alignment CSS; MapLibre navigation intentionally keeps its default controls.
 - Brand marks, genuine simulation/data geometry, and documented third-party defaults may keep their purpose-built artwork. Other slot status controls, loading indicators, and disclosure affordances are UI icons and must use Lucide.
 - Keep `App.vue` focused on composition and orchestration. Put reusable domain behavior in a focused composable, model, or utility rather than expanding the root component further.
+- Express application colors, spacing, radii, focus rings, and control dimensions through the semantic `--app-*` tokens in `src/css/style.css`. Keep PrimeVue's light Aura preset aligned with the same brand primary palette, and add a semantic token instead of scattering a new raw color through components.
+- Reuse and extend `components/ui/` for application-wide dialog and button behavior. Shared primitives must remain independently mountable, explicitly declare their contracts, and avoid querying application-shell selectors.
 - Declare component props and emitted events explicitly. Preserve object identity where map markers, selected items, and edge endpoint references depend on it.
 - Keep the Symbolic editor lifecycle in the shared typed-value components: protocol parameters start compact, newly selected Symbolic variables start open, only successful validation collapses to the rendered result, and clicking that result reopens editing. Failed validation must remain editable, and transient open/closed state must not be added to serialized parameters or variables.
 - Keep States Zoo definitions in the shared `projectData.variables` array as `Symbolic` variables with tagged recipe values, while filtering them out of the ordinary Variables panel. Protocol pickers must continue to see the unified collection so a Zoo state remains assignable to compatible symbolic parameters.
@@ -66,6 +74,8 @@ Run frontend commands from `gui/`:
 ```sh
 npm ci
 npm run dev
+npm run test:unit
+npm run test:unit:watch
 npm run build
 npx playwright install chromium
 npm test
@@ -73,14 +83,16 @@ npm run test:headed
 ```
 
 - `npm run dev` starts Vite at `http://localhost:5173`; it does not start the backend.
+- `npm run test:unit` runs the Vitest suite once in jsdom; `npm run test:unit:watch` keeps it active for local iteration.
 - `npm run build` synchronizes `package.json`'s version from the root `Project.toml`, cleans the generated asset directory, and writes the production bundle to `../public/`.
 - `npm test` and `npm run test:headless` run all Playwright specs headlessly in Chromium. Playwright starts Vite but expects the backend to already be available at `http://localhost:8000`.
 - `npm run test:headed` runs the Chromium suite with a visible browser for local debugging. On a host without an attached display, run it under Xvfb: `xvfb-run -a npm run test:headed`.
-- CI provisions Node.js 24 and uses the repository-root `ci/browser.sh` entry point. GitHub Actions and Buildkite install Chromium's Linux packages during the browser job; Buildkite's remaining host requirements are described in `../README.md`.
+- CI provisions Node.js 24. The repository-root `ci/frontend-build.sh` installs dependencies, runs `npm run test:unit`, and then runs the production build; backend integration and `ci/browser.sh` reuse that entry point. GitHub Actions and Buildkite install Chromium's Linux packages during the browser job; Buildkite's remaining host requirements are described in `../README.md`.
 
 Minimum checks:
 
-- Frontend source, styles, or build changes: `npm run build`.
+- Composables, utilities, codecs, storage/session logic, lifecycle logic, or shared `components/ui/` changes: `npm run test:unit` plus the relevant focused Vitest files while iterating.
+- Frontend source, styles, or build changes: `npm run build`; run `npm run test:unit` as well when shared behavior is affected.
 - Icon changes: run `tests/e2e/lucide-icons.spec.js` in Chromium in addition to the build.
 - UI behavior or API-flow changes: build, then the relevant Chromium Playwright specs with the backend running.
 - Backend/frontend contract changes: backend integration tests plus the affected Playwright workflow.

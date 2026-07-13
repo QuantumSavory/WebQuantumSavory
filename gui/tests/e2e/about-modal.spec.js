@@ -60,4 +60,8 @@ test('About describes the project, its support, and ways to participate', async 
     'https://quantumsavory.org/community/bounties/'
   )
   await expect(dialog).not.toContainText(/Friday|12:30|Zoom/)
+
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Menu' })).toBeFocused()
 })

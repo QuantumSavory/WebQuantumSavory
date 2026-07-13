@@ -58,11 +58,18 @@ import { useProjectSession } from './composables/useProjectSession.js'
 import { useImportExport } from './composables/useImportExport.js'
 import { useAppState } from './composables/useAppState.js'
 import { useUnsavedChanges } from './composables/useUnsavedChanges.js'
+import { useShellGeometry } from './composables/useShellGeometry.js'
 
 // Import utils
 import { validatePayload } from './utils/projectHelpers.js'
 import { isEntangledStateStillValid } from './utils/SlotConnectionUtils.js'
-import { createEmptyProject, toScriptExportPayload, toSimulationPayload } from './utils/projectCodec.js'
+import {
+  DEFAULT_MAP_CENTER,
+  DEFAULT_MAP_ZOOM,
+  createEmptyProject,
+  toScriptExportPayloadFromSimulationPayload,
+  toSimulationPayload
+} from './utils/projectCodec.js'
 import { UI_SERVICES_KEY } from './composables/uiServices.js'
 import { registerLegacyBridge, syncLegacyProjectData } from './utils/legacyBridge.js'
 import { generateRepeaterChain } from './utils/repeaterChain.js'
@@ -75,12 +82,9 @@ import demo2 from './demos/2.Entangler.Example.with.consumer.json'
 
 
 const baseMapInstance = ref(null);
+const menuButtonRef = ref(null)
 
 const TIME_STEP = 0.1;
-
-// Default map configuration (must be defined before composables that use it)
-const DEFAULT_MAP_CENTER = [-98.5795, 39.8283] // Roughly the center of continental US
-const DEFAULT_MAP_ZOOM = 4 // Zoom level to show most of the US
 
 // Initialize composables
 const projectData = ref(createEmptyProject())
@@ -138,7 +142,10 @@ function resolveConfirmation(result) {
 
 // Minimized project data - cleans up project data for API calls
 const minimizedProjectData = computed(() => toSimulationPayload(projectData.value))
-const exportScriptPayload = computed(() => toScriptExportPayload(projectData.value))
+const exportScriptPayload = computed(() => toScriptExportPayloadFromSimulationPayload(
+  minimizedProjectData.value,
+  projectData.value.simulationConfig
+))
 
 // Window management is the authoritative owner of result-window state.
 const {
@@ -157,6 +164,7 @@ const {
 
 provide(UI_SERVICES_KEY, {
   getProjectData: () => projectData.value,
+  getDialogFallbackFocus: () => menuButtonRef.value,
   showAlert,
   showResultsView,
   showEntangledSlots,
@@ -232,7 +240,9 @@ const {
   capabilities: simulationCapabilities,
   simulationState,
   simulationStatus,
-  hasSimulationRun,
+  backendSimulation,
+  targetSimulationTime,
+  pollingActive,
   resetSimulation,
   prepareNetworkGraph,
   prepareSimulation,
@@ -259,9 +269,7 @@ const {
   showAlert
 })
 
-const isNetworkEditingDisabled = computed(() => (
-  simulationCapabilities.value.editingDisabled || hasSimulationRun.value
-))
+const isNetworkEditingDisabled = computed(() => simulationCapabilities.value.editingDisabled)
 
 const {
   isRightSidebarVisible,
@@ -269,6 +277,16 @@ const {
   panelFlexValues,
   toggleRightSidebar
 } = usePanelLayout()
+
+const topbarElement = ref(null)
+const rightSidebarElement = ref(null)
+const bottomPanelContainerElement = ref(null)
+const bottomPanelAvailableBounds = useShellGeometry({
+  topbar: topbarElement,
+  rightSidebar: rightSidebarElement,
+  bottomPanelContainer: bottomPanelContainerElement,
+  rightSidebarVisible: isRightSidebarVisible
+})
 
 // Initialize node/edge operations composable  
 const {
@@ -315,7 +333,7 @@ const {
   create: createNewProject,
   saveAs: createSaveAsProject,
   save: saveProject,
-  delete: handleDeleteProjectPM,
+  delete: handleDeleteProject,
   importProject: importProjectIntoSession,
   serializeProjectData,
   deserializeProjectData,
@@ -727,7 +745,7 @@ function handleProjectNameConfirm(projectName) {
   if (projectNameDialogMode.value === 'new') {
     createNewProject(projectName)
   } else if (projectNameDialogMode.value === 'saveas') {
-    createSaveAsProject(projectName)
+    if (!createSaveAsProject(projectName)) return
     // If there's a pending action (from unsaved changes dialog), execute it
     if (pendingAction.value) {
       const action = pendingAction.value
@@ -769,8 +787,6 @@ function handleImportProjectFromDialog() {
   showLoadDialog.value = false
   handleMenu('import')
 }
-
-const handleDeleteProject = handleDeleteProjectPM
 
 function toggleJsonViewerMode(){
   jsonViewerMode.value = jsonViewerMode.value === 'full' ? 'minimized' : 'full'
@@ -860,7 +876,7 @@ onMounted( async () => {
   // Capture the startup restore target before any await. A user can create or
   // open a project while platform metadata is loading; that newer session must
   // not be replaced by a late read of `recentProjectName`.
-  const startupRecentProjectName = localStorage.getItem('recentProjectName')
+  const startupRecentProjectName = ProjectStore.getRecentProjectName()
   const startupTransitionGeneration = projectTransitionGeneration.value
 
   // fetch platform info
@@ -913,7 +929,7 @@ onUnmounted(() => {
 <template>
   <div>
     <SmallScreenWarning />
-    <div class="topbar">
+    <div ref="topbarElement" class="topbar">
       <div class="topbar-title">
         <img src="./assets/logo.png" alt="WebQuantumSavory Logo" class="topbar-logo">
         WebQuantumSavory Simulation Builder
@@ -926,7 +942,7 @@ onUnmounted(() => {
           </div>
           
           <div class="action-buttons">
-            <button class="menu-btn hamburger-btn" @click="toggleMainMenu" aria-label="Menu">
+            <button ref="menuButtonRef" class="menu-btn hamburger-btn" @click="toggleMainMenu" aria-label="Menu">
               <MenuIcon :size="28" aria-hidden="true" />
             </button>
             <TieredMenu ref="mainMenuElement" id="main_menu" :model="mainMenuItems" :popup="true">
@@ -976,6 +992,7 @@ onUnmounted(() => {
       </button>
       
       <div 
+        ref="rightSidebarElement"
         class="sidebar sidebar-right" 
         :class="{ 'sidebar-hidden': !isRightSidebarVisible }"
         v-if="projectData"
@@ -984,9 +1001,10 @@ onUnmounted(() => {
             <div style="padding: 1px 4px 0px !important;">
               <RunnerPanel 
                 id="runnerPanel" 
-                :projectData="projectData" 
-                :simulationStatus="simulationStatus" 
-                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
+                :projectData="projectData"
+                :backendSimulation="backendSimulation"
+                :targetSimulationTime="targetSimulationTime"
+                :pollingActive="pollingActive"
                 :phase="simulationPhase"
                 :capabilities="simulationCapabilities"
                 @run="runSimulationWithSteps" 
@@ -1011,7 +1029,7 @@ onUnmounted(() => {
                 :node="selectedItem" 
                 :nodeIndex="selectedNodeIndex"
                 :justCreated="justCreatedNode"
-                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
+                :editingLocked="isNetworkEditingDisabled"
                 :variables="projectData.variables"
                 v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
@@ -1024,7 +1042,7 @@ onUnmounted(() => {
                 :projectData="projectData"
                 :key="selectedItem && selectedItem.id"
                 :edge="selectedItem"
-                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
+                :editingLocked="isNetworkEditingDisabled"
                 :variables="projectData.variables"
                 v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
@@ -1044,7 +1062,7 @@ onUnmounted(() => {
                 id="nodeListPanel" 
                 :nodes="projectData.net.nodes"
                 :selected-node="selectedItem && selectedType === 'node' ? selectedItem : null"
-                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
+                :editingLocked="isNetworkEditingDisabled"
                 v-model:collapsed="panelCollapsedStates.nodeListPanel"
                 @select="node => handleSelect(node, 'node')" 
                 @addNewNode="addNodeClickHandler"
@@ -1062,7 +1080,6 @@ onUnmounted(() => {
                 :projectData="projectData" 
                 :edges="projectData.net.edges"
                 :selected-edge="selectedItem && selectedType === 'edge' ? selectedItem : null"
-                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
                 v-model:collapsed="panelCollapsedStates.edgeListPanel"
                 @select="edge => handleSelect(edge, 'edge')"
               />
@@ -1077,7 +1094,7 @@ onUnmounted(() => {
                 id="floatingProtocolsPanel" 
                 v-if="api.config.value.protocolTypes?.floating"
                 :protocols="projectData.net.protocols"
-                :simulationState="{ ...simulationState, hasSimulationRun: isNetworkEditingDisabled }"
+                :editingLocked="isNetworkEditingDisabled"
                 :variables="projectData.variables"
                 v-model:collapsed="panelCollapsedStates.floatingProtocolsPanel"
               />
@@ -1092,7 +1109,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Tabbed tools panel at bottom -->
-    <div class="logs-panel-container">
+    <div ref="bottomPanelContainerElement" class="logs-panel-container">
       <BottomPanel
         :logs="applicationLogs"
         :max-logs="200"
@@ -1103,7 +1120,7 @@ onUnmounted(() => {
         :project-data="projectData"
         :export-script-payload="exportScriptPayload"
         :variables-disabled="isNetworkEditingDisabled"
-        :right-sidebar-visible="isRightSidebarVisible"
+        :available-bounds="bottomPanelAvailableBounds"
         v-model:collapsed="panelCollapsedStates.bottomPanel"
         @clear-logs="clearLogs"
         @update-description="projectData.description = $event"

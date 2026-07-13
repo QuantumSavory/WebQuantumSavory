@@ -82,6 +82,54 @@ test('Save As keeps storage, document, reload, and simulation namespaces aligned
   expect(reloaded.stored.name).toBe('Project B')
 })
 
+test('Save As refuses to overwrite a different existing project', async ({ page }) => {
+  await mockBackend(page, [])
+  await page.goto('/')
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+
+  await page.getByRole('button', { name: 'Menu' }).click()
+  await page.getByRole('menuitem', { name: 'New' }).click()
+  const newProjectDialog = page.getByRole('dialog', { name: 'New Project' })
+  await newProjectDialog.getByPlaceholder('Project name').fill('Active Project')
+  await newProjectDialog.getByRole('button', { name: 'Create' }).click()
+  await expect(page.locator('.project-name-label')).toHaveText('Active Project')
+
+  const originalTarget = JSON.stringify({ sentinel: 'must not be overwritten' })
+  await page.evaluate(({ target }) => {
+    localStorage.setItem('cqn_project_Existing Target', target)
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    setup.projectData.description = 'unsaved active-session edit'
+  }, { target: originalTarget })
+
+  const saved = await page.evaluate(() => {
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    return setup.createSaveAsProject('Existing Target')
+  })
+  expect(saved).toBe(false)
+
+  const errorDialog = page.getByRole('dialog', { name: 'Project Error' })
+  await expect(errorDialog).toContainText(
+    'Failed to save project: A project named "Existing Target" already exists'
+  )
+  await expect(page.locator('.project-name-label')).toHaveText('Active Project')
+
+  const afterRejectedSaveAs = await page.evaluate(() => {
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    return {
+      activeName: setup.projectData.name,
+      activeDescription: setup.projectData.description,
+      recentName: localStorage.getItem('recentProjectName'),
+      target: localStorage.getItem('cqn_project_Existing Target'),
+    }
+  })
+  expect(afterRejectedSaveAs).toEqual({
+    activeName: 'Active Project',
+    activeDescription: 'unsaved active-session edit',
+    recentName: 'Active Project',
+    target: originalTarget,
+  })
+})
+
 test('a late startup restore cannot replace a user-created session', async ({ page }) => {
   let releasePlatform
   let markPlatformRequested
