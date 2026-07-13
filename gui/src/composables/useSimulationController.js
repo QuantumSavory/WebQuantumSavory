@@ -1,5 +1,6 @@
 import { computed, onScopeDispose, ref } from 'vue'
 import { api as sharedApi } from '../utils/ApiConnector'
+import { normalizeLogSeverity, normalizeLogSource } from '../utils/logRecords.js'
 import {
   SimulationPhase,
   createSimulationState,
@@ -37,6 +38,7 @@ export function useSimulationController({
   clearAllPlots,
   hideSlotState = () => {},
   showAlert,
+  showPanic,
   api = sharedApi
 }) {
   const state = ref(createSimulationState())
@@ -47,8 +49,10 @@ export function useSimulationController({
   let aliveTimer = null
   let stateAbortController = null
   let logAbortController = null
+  let logFetchPromise = null
   let aliveAbortController = null
   let disposed = false
+  const seenPanicIds = new Set()
 
   // Compatibility views for legacy callers and browser test helpers. First-party
   // panels consume the explicit lifecycle contracts below.
@@ -142,6 +146,48 @@ export function useSimulationController({
     return payload
   }
 
+  function panicDetails(record = {}) {
+    const message = String(record.message || record.full_message || record.fullMessage || record.summary || 'Simulator panic')
+    const summary = String(record.summary || message.split('\n')[0] || 'Simulator panic')
+    const exceptionType = String(record.exception_type || record.exceptionType || 'Exception')
+    const stacktrace = String(record.stacktrace || record.stack_trace || '')
+    const timestamp = record.timestamp || new Date().toISOString()
+    const id = String(
+      record.id
+      || record.panic_id
+      || `panic:${timestamp}:${exceptionType}:${summary}`
+    )
+
+    return {
+      id,
+      timestamp,
+      source: 'Simulator',
+      severity: 'panic',
+      summary,
+      exception_type: exceptionType,
+      message,
+      stacktrace
+    }
+  }
+
+  function ingestPanic(record) {
+    if (!record || typeof record !== 'object') return false
+    const panic = panicDetails(record)
+    if (seenPanicIds.has(panic.id)) return false
+    seenPanicIds.add(panic.id)
+
+    addLog('panic', panic.summary, 'Simulator', JSON.stringify(record, null, 2), {
+      id: panic.id,
+      timestamp: panic.timestamp,
+      raw: record,
+      fullMessage: panic.message,
+      exceptionType: panic.exception_type,
+      stacktrace: panic.stacktrace
+    })
+    showPanic?.(panic)
+    return true
+  }
+
   function applyBackendResponse(response, { fallbackPhase, message } = {}) {
     if (!response || response.success === false || response.detail) {
       if (isNotFoundResponse(response)) {
@@ -154,6 +200,7 @@ export function useSimulationController({
 
     if (response.state) {
       dispatch({ type: 'BACKEND_STATE', backendState: response.state, fallbackPhase, message })
+      ingestPanic(response.state.simulation?.simulation_panic)
       updateSlotStates(response.state)
       refreshAllWindows?.()
       checkAndHideInvalidEntangledStates?.(response)
@@ -163,7 +210,7 @@ export function useSimulationController({
 
   async function ensureParsed(payload, context, showSuccessLogs = true) {
     if (state.value.isParsed) return true
-    if (showSuccessLogs) addLog('info', 'Parsing network graph...', 'Backend')
+    if (showSuccessLogs) addLog('info', 'Parsing network graph...', 'Web API')
     dispatch({ type: 'REQUEST', message: 'Parsing network graph...' })
     const response = await api.parseNetworkGraph(payload)
     if (!contextIsCurrent(context)) return false
@@ -171,14 +218,14 @@ export function useSimulationController({
       throw responseError(response, 'Failed to parse network graph')
     }
     dispatch({ type: 'PARSED', message: response.message, backendState: response.state })
-    if (showSuccessLogs) addLog('success', 'Network graph parsed OK', 'Backend', JSON.stringify(response, null, 2))
+    if (showSuccessLogs) addLog('success', 'Network graph parsed OK', 'Web API', JSON.stringify(response, null, 2))
     return true
   }
 
   async function ensurePrepared(payload, context) {
     if (state.value.isPrepared) return true
     if (!(await ensureParsed(payload, context))) return false
-    addLog('info', 'Preparing simulation...', 'Backend')
+    addLog('info', 'Preparing simulation...', 'Web API')
     dispatch({ type: 'REQUEST', message: 'Preparing simulation...' })
     const response = await api.prepareSimulation(payload)
     if (!contextIsCurrent(context)) return false
@@ -186,7 +233,7 @@ export function useSimulationController({
       throw responseError(response, 'Failed to prepare simulation')
     }
     dispatch({ type: 'PREPARED', message: response.message, backendState: response.state })
-    addLog('success', 'Simulation prepared OK', 'Backend', JSON.stringify(response, null, 2))
+    addLog('success', 'Simulation prepared OK', 'Web API', JSON.stringify(response, null, 2))
     return true
   }
 
@@ -203,7 +250,7 @@ export function useSimulationController({
     } catch (error) {
       if (!contextIsCurrent(context) || isAbortError(error)) return false
       dispatch({ type: 'ERROR', error, message: error.message })
-      addLog('error', 'Failed to parse network graph', 'Backend', JSON.stringify(error.response || {}, null, 2))
+      addLog('error', 'Failed to parse network graph', 'Web API', JSON.stringify(error.response || {}, null, 2))
       return false
     }
   }
@@ -217,7 +264,7 @@ export function useSimulationController({
     } catch (error) {
       if (!contextIsCurrent(context) || isAbortError(error)) return false
       dispatch({ type: 'ERROR', error, message: error.message })
-      addLog('error', 'Failed to prepare simulation', 'Backend', JSON.stringify(error.response || {}, null, 2))
+      addLog('error', 'Failed to prepare simulation', 'Web API', JSON.stringify(error.response || {}, null, 2))
       return false
     }
   }
@@ -229,7 +276,7 @@ export function useSimulationController({
     const additionalTime = Number(projectData.value?.simulationConfig?.time || 1)
     const target = state.value.cumulativeTargetTime + additionalTime
     dispatch({ type: 'REQUEST', message: 'Initializing simulation...' })
-    addLog('info', `Starting simulation: adding ${additionalTime}s (total target: ${target}s)`, 'Backend')
+    addLog('info', `Starting simulation: adding ${additionalTime}s (total target: ${target}s)`, 'Web API')
 
     try {
       if (!(await ensurePrepared(payload, context)) || !contextIsCurrent(context)) return false
@@ -247,7 +294,7 @@ export function useSimulationController({
       if (!contextIsCurrent(context) || isAbortError(error)) return false
       stopPolling()
       dispatch({ type: 'ERROR', error, message: error.message })
-      addLog('error', `Simulation failed: ${error.message}`, 'Backend', error.response ? JSON.stringify(error.response, null, 2) : null)
+      addLog('error', `Simulation failed: ${error.message}`, 'Web API', error.response ? JSON.stringify(error.response, null, 2) : null)
       return false
     }
   }
@@ -266,12 +313,12 @@ export function useSimulationController({
         backendState = status?.state
       }
       if (backendState) applyBackendResponse({ success: true, state: backendState }, { fallbackPhase: SimulationPhase.PAUSED })
-      addLog('info', 'Simulation paused', 'Backend')
+      addLog('info', 'Simulation paused', 'Web API')
       return true
     } catch (error) {
       if (!contextIsCurrent(context) || isAbortError(error)) return false
       dispatch({ type: 'ERROR', error, message: error.message })
-      addLog('error', `Failed to pause: ${error.message}`, 'Backend', error.response ? JSON.stringify(error.response, null, 2) : null)
+      addLog('error', `Failed to pause: ${error.message}`, 'Web API', error.response ? JSON.stringify(error.response, null, 2) : null)
       return false
     }
   }
@@ -285,7 +332,7 @@ export function useSimulationController({
       const simulation = current.state.simulation
       if (!simulation.simulation_paused) {
         applyBackendResponse(current)
-        addLog('info', 'Simulation was not paused', 'Backend')
+        addLog('info', 'Simulation was not paused', 'Web API')
         return false
       }
       if (Number(simulation.simulation_progress || 0) >= Number(simulation.simulation_time || 0)) {
@@ -298,13 +345,13 @@ export function useSimulationController({
       if (response.state) applyBackendResponse(response, { fallbackPhase: SimulationPhase.RUNNING, message: 'Simulation resumed' })
       startAlivePolling()
       startPolling()
-      addLog('info', 'Simulation resumed', 'Backend')
+      addLog('info', 'Simulation resumed', 'Web API')
       return true
     } catch (error) {
       if (!contextIsCurrent(context) || isAbortError(error)) return false
       stopPolling()
       dispatch({ type: 'ERROR', error, message: error.message })
-      addLog('error', `Failed to resume: ${error.message}`, 'Backend', error.response ? JSON.stringify(error.response, null, 2) : null)
+      addLog('error', `Failed to resume: ${error.message}`, 'Web API', error.response ? JSON.stringify(error.response, null, 2) : null)
       return false
     }
   }
@@ -320,14 +367,14 @@ export function useSimulationController({
       const response = await api.destroySimulation(context.projectName)
       if (!contextIsCurrent(context)) return false
       if (!response || response.success === false) throw responseError(response, 'Failed to destroy simulation')
-      addLog('info', 'Simulation destroyed', 'Backend')
+      addLog('info', 'Simulation destroyed', 'Web API')
       resetSimulation()
       clearAllPlots?.()
       return true
     } catch (error) {
       if (!contextIsCurrent(context) || isAbortError(error)) return false
       dispatch({ type: 'ERROR', error, message: error.message })
-      addLog('error', `Failed to stop simulation: ${error.message}`, 'Backend', error.response ? JSON.stringify(error.response, null, 2) : null)
+      addLog('error', `Failed to stop simulation: ${error.message}`, 'Web API', error.response ? JSON.stringify(error.response, null, 2) : null)
       return false
     }
   }
@@ -347,18 +394,18 @@ export function useSimulationController({
       dispatch({ type: 'NOT_FOUND' })
       return null
     }
-    if (addLogs && !updatePreviousLog) addLog('info', 'Getting simulation status...', 'Backend')
+    if (addLogs && !updatePreviousLog) addLog('info', 'Getting simulation status...', 'Web API')
     try {
       const response = await api.getSimulationStatus(context.projectName)
       if (!contextIsCurrent(context)) return null
       const applied = applyBackendResponse(response)
       if (applied && updatePreviousLog) updatePreviousRunningLog(response)
-      else if (applied && addLogs) addLog('success', 'Simulation status retrieved OK', 'Backend', JSON.stringify(response, null, 2))
+      else if (applied && addLogs) addLog('success', 'Simulation status retrieved OK', 'Web API', JSON.stringify(response, null, 2))
       return response
     } catch (error) {
       if (!contextIsCurrent(context) || isAbortError(error)) return null
       dispatch({ type: 'ERROR', error, message: error.message })
-      if (addLogs) addLog('error', 'Failed to get simulation status', 'Backend', JSON.stringify(error.response || {}, null, 2))
+      if (addLogs) addLog('error', 'Failed to get simulation status', 'Web API', JSON.stringify(error.response || {}, null, 2))
       return error.response || null
     }
   }
@@ -386,8 +433,7 @@ export function useSimulationController({
 
     const pollLogs = async () => {
       if (disposed || generation !== pollingGeneration || projectName !== getProjectName()) return
-      logAbortController = new AbortController()
-      await fetchBackendLogs(projectName, generation, logAbortController.signal)
+      await requestBackendLogs(projectName, generation)
       if (disposed || generation !== pollingGeneration || projectName !== getProjectName()) return
       logTimer = setTimeout(pollLogs, LOG_POLL_INTERVAL)
     }
@@ -399,7 +445,7 @@ export function useSimulationController({
         stopPolling()
         const message = 'Simulation timeout - exceeded 15 minutes'
         dispatch({ type: 'ERROR', message })
-        addLog('error', message, 'Backend')
+        addLog('error', message, 'Web API')
         return
       }
 
@@ -414,13 +460,17 @@ export function useSimulationController({
           return
         }
         if (previousPhase !== SimulationPhase.COMPLETED && state.value.phase === SimulationPhase.COMPLETED) {
-          addLog('success', 'Simulation completed', 'Backend')
+          addLog('success', 'Simulation completed', 'Web API')
         }
         if ([SimulationPhase.PAUSED, SimulationPhase.COMPLETED, SimulationPhase.BLOCKED, SimulationPhase.ERROR].includes(state.value.phase)) {
           const terminalPhase = state.value.phase
+          const drained = await drainBackendLogs(projectName, generation)
+          if (!drained) return
           stopPolling()
           if (terminalPhase === SimulationPhase.ERROR) {
-            addLog('error', state.value.message, 'Backend')
+            if (!backendSimulation.value.simulation_panic) {
+              addLog('error', state.value.message, 'Web API')
+            }
             if (backendSimulation.value.simulation_execution_time_exceeded) {
               showAlert?.('Simulation Error', state.value.message)
             }
@@ -432,7 +482,7 @@ export function useSimulationController({
         if (isAbortError(error) || generation !== pollingGeneration || projectName !== getProjectName()) return
         stopPolling()
         dispatch({ type: 'ERROR', error, message: `Polling error: ${error.message}` })
-        addLog('error', `Polling error: ${error.message}`, 'Backend')
+        addLog('error', `Polling error: ${error.message}`, 'Web API')
       }
     }
 
@@ -444,6 +494,29 @@ export function useSimulationController({
     clearStateTimer()
     clearLogTimer()
     if (state.value.pollingActive) dispatch({ type: 'POLLING_STOPPED' })
+  }
+
+  async function requestBackendLogs(projectName, generation) {
+    const controller = new AbortController()
+    const request = fetchBackendLogs(projectName, generation, controller.signal)
+    logAbortController = controller
+    logFetchPromise = request
+
+    try {
+      await request
+    } finally {
+      if (logFetchPromise === request) logFetchPromise = null
+      if (logAbortController === controller) logAbortController = null
+    }
+  }
+
+  async function drainBackendLogs(projectName, generation) {
+    const inFlight = logFetchPromise
+    if (inFlight) await inFlight
+    if (disposed || generation !== pollingGeneration || projectName !== getProjectName()) return false
+
+    await requestBackendLogs(projectName, generation)
+    return !disposed && generation === pollingGeneration && projectName === getProjectName()
   }
 
   async function fetchBackendLogs(
@@ -461,10 +534,24 @@ export function useSimulationController({
         || !Array.isArray(response?.logs)
       ) return
       for (const backendLog of response.logs) {
-        const message = backendLog.message || backendLog.msg || ''
+        const severity = normalizeLogSeverity(backendLog.severity || backendLog.level)
+        if (severity === 'panic') {
+          ingestPanic(backendLog)
+          continue
+        }
+
+        const message = String(backendLog.message || backendLog.msg || '')
         const normalized = message.trim().toLowerCase()
         if (normalized === 'simulation started' || normalized.startsWith('simulation progress')) continue
-        addLog('debug', message, 'Backend', JSON.stringify(backendLog, null, 2))
+        const source = normalizeLogSource(backendLog.source || 'Simulator').source
+        addLog(severity, message, source, JSON.stringify(backendLog, null, 2), {
+          id: backendLog.id,
+          timestamp: backendLog.timestamp,
+          raw: backendLog,
+          fullMessage: backendLog.full_message || backendLog.fullMessage || message,
+          exceptionType: backendLog.exception_type || backendLog.exceptionType || null,
+          stacktrace: backendLog.stacktrace || backendLog.stack_trace || null
+        })
       }
     } catch (error) {
       if (!isAbortError(error)) console.error('Failed to fetch backend logs', error)
@@ -488,7 +575,7 @@ export function useSimulationController({
         if (response.state.simulation.simulation_auto_purged) {
           stopPolling()
           stopAlivePolling()
-          addLog('error', 'Simulation purged after long inactivity', 'Backend')
+          addLog('error', 'Simulation purged after long inactivity', 'Web API')
           showAlert?.('Simulation Stopped', 'Simulation purged after long inactivity')
         }
       }
@@ -512,6 +599,7 @@ export function useSimulationController({
   function resetSimulation() {
     lifecycleGeneration += 1
     stopPolling()
+    seenPanicIds.clear()
     resetSlotStates()
     hideSlotState?.()
     dispatch({ type: 'RESET' })
@@ -560,6 +648,7 @@ export function useSimulationController({
     stopAlivePolling,
     checkAlive,
     fetchBackendLogs,
+    ingestPanic,
     dispose
   }
 }

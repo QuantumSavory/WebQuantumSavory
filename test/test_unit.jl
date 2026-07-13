@@ -4,6 +4,7 @@
   using .WebQuantumSavory
   using Graphs
   using QuantumSavory
+  using Logging
   import LinearAlgebra
   using ConcurrentSim
   using Dates
@@ -96,6 +97,27 @@
     @test occursin("ConcurrentSim.run(sim, simulation_duration)", script)
     @test occursin("CairoMakie.record", script)
     @test occursin("show(io, MIME\"image/png\"(), protocol)", script)
+
+    diagnostic_payload = deepcopy(payload)
+    diagnostic_payload["net"]["protocols"] = Any[
+      Dict(
+        "id" => "diagnostic-broken",
+        "type" => WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE,
+        "parameters" => Any[],
+      ),
+    ]
+    diagnostic_export_error = try
+      WebQuantumSavory.generate_julia_script(diagnostic_payload)
+      nothing
+    catch error
+      error
+    end
+    @test diagnostic_export_error isa WebQuantumSavory.APIError
+    if diagnostic_export_error isa WebQuantumSavory.APIError
+      @test diagnostic_export_error.status_code == 400
+      @test occursin("diagnostic-only", diagnostic_export_error.message)
+      @test occursin("cannot be exported", diagnostic_export_error.message)
+    end
 
     generated_module = Module(gensym(:GeneratedExport))
     Core.eval(generated_module, :(using Base))
@@ -369,6 +391,45 @@
   end
 
   @testset "Protocol Types" begin
+      @test !WebQuantumSavory.mock_broken_protocol_enabled(override=nothing)
+      @test WebQuantumSavory.mock_broken_protocol_enabled(override=" TRUE ")
+      @test !WebQuantumSavory.mock_broken_protocol_enabled(override="False")
+      @test_throws ArgumentError WebQuantumSavory.mock_broken_protocol_enabled(override="1")
+      @test_throws ArgumentError WebQuantumSavory.mock_broken_protocol_enabled(override="yes")
+
+      withenv(WebQuantumSavory.MOCK_BROKEN_PROTOCOL_ENV_VAR => nothing) do
+        hidden_types = WebQuantumSavory.get_protocol_types()
+        @test all(pt["type"] != WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE for pt in hidden_types)
+        @test WebQuantumSavory._resolve_protocol_type_from_string(
+          WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE,
+        ) === nothing
+      end
+
+      withenv(WebQuantumSavory.MOCK_BROKEN_PROTOCOL_ENV_VAR => "false") do
+        hidden_types = WebQuantumSavory.get_protocol_types()
+        @test all(pt["type"] != WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE for pt in hidden_types)
+        @test WebQuantumSavory._resolve_protocol_type_from_string(
+          WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE,
+        ) === nothing
+      end
+
+      withenv(WebQuantumSavory.MOCK_BROKEN_PROTOCOL_ENV_VAR => "true") do
+        diagnostic_types = WebQuantumSavory.get_protocol_types()
+        diagnostic = only(filter(
+          pt -> pt["type"] == WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE,
+          diagnostic_types,
+        ))
+        @test diagnostic["group"] == "floating"
+        @test isempty(diagnostic["parameters"])
+        @test WebQuantumSavory._resolve_protocol_type_from_string(
+          WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE,
+        ) === WebQuantumSavory.MockBrokenProtocol
+      end
+
+      withenv(WebQuantumSavory.MOCK_BROKEN_PROTOCOL_ENV_VAR => "invalid") do
+        @test_throws ArgumentError WebQuantumSavory.get_protocol_types()
+      end
+
       protocol_types = WebQuantumSavory.get_protocol_types()
       @test isa(protocol_types, Vector)
       @test !isempty(protocol_types)
@@ -1071,6 +1132,8 @@
       @test haskey(serialized["simulation"], "simulation_started_at")
       @test haskey(serialized["simulation"], "simulation_execution_time_exceeded")
       @test haskey(serialized["simulation"], "simulation_auto_purged")
+      @test haskey(serialized["simulation"], "simulation_panic")
+      @test serialized["simulation"]["simulation_panic"] === nothing
   end
 
   @testset "Status Determination" begin
@@ -1533,6 +1596,47 @@
   end
 
   @testset "Log Management" begin
+    structured_state = WebQuantumSavory.State(name="structured_logs")
+    captured_error, captured_backtrace = try
+      error("structured logger failure")
+    catch error
+      (error, catch_backtrace())
+    end
+    logger = WebQuantumSavory.Logger.make_logger(structured_state)
+    Logging.handle_message(
+      logger,
+      Logging.Error,
+      "ordinary simulator error",
+      QuantumSavory,
+      :unit,
+      :ordinary_error,
+      @__FILE__,
+      @__LINE__;
+      attempt=2,
+      context=Dict(:slot => 3, :active => true),
+      exception=(captured_error, captured_backtrace),
+    )
+    WebQuantumSavory.Logger.log_event(
+      structured_state,
+      "success",
+      "manual simulator success";
+      result=(:ok, 4),
+    )
+
+    captured = structured_state.log_events[1]
+    @test captured["source"] == "Simulator"
+    @test captured["severity"] == "error"
+    @test captured["message"] == "ordinary simulator error"
+    @test captured["attempt"] == 2
+    @test captured["context"] == Dict("slot" => 3, "active" => true)
+    @test captured["exception"]["exception_type"] == "ErrorException"
+    @test occursin("structured logger failure", captured["exception"]["message"])
+    @test occursin("Stacktrace", captured["exception"]["stacktrace"])
+    @test structured_state.log_events[2]["severity"] == "success"
+    @test all(log["source"] == "Simulator" for log in structured_state.log_events)
+    @test length(unique(log["id"] for log in structured_state.log_events)) == 2
+    @test JSON.parse(JSON.json(structured_state.log_events)) isa Vector
+
     # Create a test state with log events
     test_logs = [
       Dict("timestamp" => "2023-01-01T00:00:00", "level" => "info", "message" => "Test log 1"),
@@ -1687,13 +1791,17 @@
     @test state.run_task === nothing
     paused_progress = state.simulation_progress
     paused_logs = state.log_events
+    retained_panic = Dict{String,Any}("id" => "retained-while-resuming")
+    state.simulation_panic = retained_panic
 
-    # Resume retains the cumulative target, progress, and captured logs.
+    # Resume retains the cumulative target, progress, captured logs, and panic
+    # report associated with the same interrupted run.
     @test_throws WebQuantumSavory.APIError WebQuantumSavory.run_simulation(state, 3.0, simulation_name)
     WebQuantumSavory.run_simulation(state, 2.0, simulation_name)
     @test state.simulation_time == 2.0
     @test state.simulation_progress == paused_progress
     @test state.log_events === paused_logs
+    @test state.simulation_panic === retained_panic
     @test timedwait(() -> state.run_task === nothing, 10.0) == :ok
     @test state.has_run
     @test !state.is_running
@@ -1705,6 +1813,7 @@
     completed_logs = state.log_events
     WebQuantumSavory.run_simulation(state, 3.0, simulation_name)
     @test state.log_events !== completed_logs
+    @test state.simulation_panic === nothing
     @test timedwait(() -> state.run_task === nothing, 10.0) == :ok
     @test state.has_run
     @test state.simulation_progress >= 3.0
@@ -1724,8 +1833,80 @@
     @test !state.simulation_paused
     @test state.error isa ConcurrentSim.EmptySchedule
     @test !state.has_run
+    @test state.simulation_panic !== nothing
+    @test state.simulation_panic["severity"] == "panic"
+    @test state.simulation_panic["source"] == "Simulator"
+    @test state.simulation_panic["exception_type"] == string(ConcurrentSim.EmptySchedule)
+    @test occursin("EmptySchedule", state.simulation_panic["message"])
+    @test occursin("Stacktrace", state.simulation_panic["stacktrace"])
+
+    panic_logs = filter(log -> get(log, "severity", nothing) == "panic", state.log_events)
+    error_logs = filter(log -> get(log, "severity", nothing) == "error", state.log_events)
+    @test length(panic_logs) == 1
+    @test length(error_logs) == 1
+    @test panic_logs[1]["id"] == state.simulation_panic["id"]
+    @test panic_logs[1]["severity"] != error_logs[1]["severity"]
+    @test JSON.parse(JSON.json(WebQuantumSavory.serialize_state(state))) isa Dict
 
     @test WebQuantumSavory.destroy_simulation(simulation_name)
+  end
+
+  @testset "Diagnostic Broken Protocol Panic" begin
+    withenv(WebQuantumSavory.MOCK_BROKEN_PROTOCOL_ENV_VAR => "true") do
+      payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+      simulation_name = "mock_broken_protocol_panic"
+      payload["name"] = simulation_name
+      payload["net"]["protocols"] = Any[
+        Dict(
+          "id" => "broken-diagnostic",
+          "type" => WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE,
+          "parameters" => Any[],
+        ),
+      ]
+
+      try
+        state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(payload))
+        state = WebQuantumSavory.prepare_simulation(state, simulation_name)
+        @test state.protocols_launched["floating"] == 1
+        @test state.protocol_mapping["broken-diagnostic"] isa WebQuantumSavory.MockBrokenProtocol
+
+        WebQuantumSavory.run_simulation(state, 1.0, simulation_name)
+        @test timedwait(() -> state.run_task === nothing, 10.0) == :ok
+        @test state.error isa BoundsError
+        @test state.simulation_panic !== nothing
+
+        panic = state.simulation_panic
+        @test Set(keys(panic)) == Set([
+          "id",
+          "timestamp",
+          "source",
+          "severity",
+          "summary",
+          "exception_type",
+          "message",
+          "stacktrace",
+        ])
+        @test panic["source"] == "Simulator"
+        @test panic["severity"] == "panic"
+        @test panic["exception_type"] == "BoundsError"
+        @test occursin("index [100]", panic["message"])
+        @test occursin("MockBrokenProtocol", panic["stacktrace"])
+        @test JSON.parse(JSON.json(panic))["id"] == panic["id"]
+
+        logs = WebQuantumSavory.get_logs(simulation_name, false)
+        panic_log = only(filter(log -> get(log, "severity", nothing) == "panic", logs))
+        @test panic_log == panic
+        @test any(log -> get(log, "severity", nothing) == "error", logs)
+
+        purged_logs = WebQuantumSavory.get_logs(simulation_name, true)
+        @test purged_logs == logs
+        @test isempty(state.log_events)
+        @test state.simulation_panic == panic
+      finally
+        haskey(WebQuantumSavory.STATE, simulation_name) &&
+          WebQuantumSavory.destroy_simulation(simulation_name)
+      end
+    end
   end
 
   @testset "Cleanup Stale Simulations - Basic Test" begin

@@ -261,6 +261,7 @@ import LayoutToolsPanel from './LayoutToolsPanel.vue'
 import LogsPanel from './LogsPanel.vue'
 import StatesZooPanel from './StatesZooPanel.vue'
 import VariablesPanel from './VariablesPanel.vue'
+import { normalizeLogSeverity } from '../../utils/logRecords.js'
 
 const props = defineProps({
   logs: {
@@ -398,19 +399,12 @@ const logCounts = computed(() => {
     warning: 0,
     error: 0,
     success: 0,
-    debug: 0
+    debug: 0,
+    panic: 0
   }
 
   props.logs.forEach(log => {
-    const level = log.level ? String(log.level).toLowerCase() : 'info'
-
-    if (level === 'warning' || level === 'warn') {
-      counts.warning += 1
-    } else if (Object.hasOwn(counts, level)) {
-      counts[level] += 1
-    } else {
-      counts.info += 1
-    }
+    counts[normalizeLogSeverity(log.level ?? log.severity)] += 1
   })
 
   return counts
@@ -702,5 +696,11 @@ onMounted(() => {
 .badge-debug {
   background: #9c27b020;
   color: #762086;
+}
+
+.badge-panic {
+  background: var(--app-color-panic-soft);
+  color: var(--app-color-panic);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-color-panic) 32%, transparent);
 }
 </style>

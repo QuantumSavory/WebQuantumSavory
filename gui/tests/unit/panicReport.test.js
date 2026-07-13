@@ -1,0 +1,147 @@
+import { describe, expect, it, vi } from 'vitest'
+
+import {
+  PANIC_ISSUE_URL,
+  buildPanicIssueUrl,
+  buildPanicReport,
+  createPanicProjectDownload,
+  downloadTextFile,
+  normalizePanic,
+  panicProjectFilename,
+  safeProjectName,
+  writeReportToClipboard,
+} from '../../src/utils/panicReport'
+
+const panic = {
+  id: 'panic-123',
+  timestamp: '2026-07-13T16:17:18.000Z',
+  source: 'Simulator',
+  summary: 'A mock protocol failed',
+  exception_type: 'BoundsError',
+  message: 'BoundsError: attempt to access 3-element Vector at index [100]',
+  stacktrace: 'BoundsError: attempt to access\n [1] getindex\n [2] mock_process',
+}
+
+describe('panic report data', () => {
+  it('normalizes the backend schema without truncating the message or stacktrace', () => {
+    expect(normalizePanic(panic)).toEqual({
+      id: 'panic-123',
+      timestamp: '2026-07-13T16:17:18.000Z',
+      source: 'Simulator',
+      summary: 'A mock protocol failed',
+      exceptionType: 'BoundsError',
+      message: panic.message,
+      stacktrace: panic.stacktrace,
+    })
+  })
+
+  it('builds complete Markdown with panic, version, and reproduction details', () => {
+    const report = buildPanicReport(panic, {
+      versions: { app: '1.6.0', quantumSavory: '0.7.2', julia: '1.12.1' },
+    })
+
+    expect(report).toContain('# WebQuantumSavory simulator panic report')
+    expect(report).toContain('- Panic ID: panic-123')
+    expect(report).toContain('- Exception type: BoundsError')
+    expect(report).toContain(panic.message)
+    expect(report).toContain(panic.stacktrace)
+    expect(report).toContain('- WebQuantumSavory: 1.6.0')
+    expect(report).toContain('- QuantumSavory: 0.7.2')
+    expect(report).toContain('- Julia: 1.12.1')
+    expect(report).toContain('## Reproduction')
+    expect(report).toContain('not uploaded automatically')
+  })
+
+  it('accepts backend-style platform version keys', () => {
+    const report = buildPanicReport(panic, {
+      versions: { app: '2.0', quantumsavory: '1.0', julia: '1.13' },
+    })
+
+    expect(report).toContain('- WebQuantumSavory: 2.0')
+    expect(report).toContain('- QuantumSavory: 1.0')
+  })
+})
+
+describe('panic project download', () => {
+  it('makes a portable panic filename and handles empty or reserved names', () => {
+    expect(safeProjectName('  Démo / network: one  ')).toBe('Demo-network-one')
+    expect(panicProjectFilename('  Démo / network: one  ')).toBe('Demo-network-one-panic.json')
+    expect(panicProjectFilename('...')).toBe('webquantumsavory-project-panic.json')
+    expect(panicProjectFilename('CON')).toBe('project-CON-panic.json')
+  })
+
+  it('uses the canonical object serializer and falls back to its project name', () => {
+    const project = {
+      schemaVersion: 1,
+      name: 'Canonical Project',
+      description: 'complete project',
+      net: { nodes: [{ id: 'node-1' }], edges: [], protocols: [] },
+    }
+    const prepared = createPanicProjectDownload(() => project)
+
+    expect(prepared.filename).toBe('Canonical-Project-panic.json')
+    expect(prepared.mimeType).toBe('application/json;charset=utf-8')
+    expect(JSON.parse(prepared.content)).toEqual(project)
+  })
+
+  it('preserves valid JSON returned directly by the canonical serializer', () => {
+    const serialized = '{"name":"String Project","schemaVersion":1}'
+    expect(createPanicProjectDownload(() => serialized)).toEqual({
+      content: serialized,
+      filename: 'String-Project-panic.json',
+      mimeType: 'application/json;charset=utf-8',
+    })
+  })
+
+  it('creates and revokes a local object URL without uploading anything', () => {
+    const click = vi.fn()
+    const remove = vi.fn()
+    const link = { style: {}, click, remove }
+    const documentRef = {
+      body: { appendChild: vi.fn() },
+      createElement: vi.fn(() => link),
+    }
+    const urlApi = {
+      createObjectURL: vi.fn(() => 'blob:panic-project'),
+      revokeObjectURL: vi.fn(),
+    }
+    const BlobClass = vi.fn(function Blob(parts, options) {
+      this.parts = parts
+      this.options = options
+    })
+
+    downloadTextFile('project json', 'project-panic.json', 'application/json', {
+      documentRef,
+      urlApi,
+      BlobClass,
+    })
+
+    expect(BlobClass).toHaveBeenCalledWith(['project json'], { type: 'application/json' })
+    expect(link.download).toBe('project-panic.json')
+    expect(link.href).toBe('blob:panic-project')
+    expect(click).toHaveBeenCalledOnce()
+    expect(remove).toHaveBeenCalledOnce()
+    expect(urlApi.revokeObjectURL).toHaveBeenCalledWith('blob:panic-project')
+  })
+})
+
+describe('panic report browser workflow', () => {
+  it('prepares an official GitHub issue title and attachment instructions', () => {
+    const issueUrl = new URL(buildPanicIssueUrl(panic, 'My Network'))
+
+    expect(`${issueUrl.origin}${issueUrl.pathname}`).toBe(PANIC_ISSUE_URL)
+    expect(issueUrl.searchParams.get('title')).toBe(
+      '[Simulator panic] BoundsError: A mock protocol failed',
+    )
+    expect(issueUrl.searchParams.get('body')).toContain('paste the panic report')
+    expect(issueUrl.searchParams.get('body')).toContain('My-Network-panic.json')
+    expect(issueUrl.searchParams.get('body')).toContain('attach the downloaded')
+  })
+
+  it('uses the supplied clipboard API and rejects when one is unavailable', async () => {
+    const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) }
+    await expect(writeReportToClipboard('report', clipboard)).resolves.toBeUndefined()
+    expect(clipboard.writeText).toHaveBeenCalledWith('report')
+    await expect(writeReportToClipboard('report', null)).rejects.toThrow('unavailable')
+  })
+})

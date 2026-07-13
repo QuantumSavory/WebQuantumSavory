@@ -14,4 +14,5 @@ else
 fi
 
 export CI=true
+export WEBQUANTUMSAVORY_MOCK_BROKEN=true
 exec "$app_root/ci/run-with-server.sh" gui npm test

@@ -29,7 +29,7 @@ const BasePanelStub = defineComponent({
   template: '<section><slot name="content" /></section>'
 })
 
-function mountPanel(availableBounds) {
+function mountPanel(availableBounds, extraProps = {}) {
   return mount(BottomPanel, {
     props: {
       projectData: {
@@ -40,7 +40,8 @@ function mountPanel(availableBounds) {
       },
       variables: [],
       exportScriptPayload: { name: 'Bounds Test', net: {} },
-      availableBounds
+      availableBounds,
+      ...extraProps
     },
     global: {
       stubs: {
@@ -96,5 +97,24 @@ describe('BottomPanel bounds contract', () => {
       width: 600,
       height: 180
     })
+  })
+
+  it('gives panic records a distinct accessible count badge in the Logs tab', () => {
+    const wrapper = mountPanel(
+      { left: 0, right: 1000, top: 0, bottom: 800 },
+      {
+        logs: [
+          { id: 'panic-1', level: 'panic' },
+          { id: 'panic-2', severity: 'PANIC' },
+          { id: 'error-1', level: 'error' }
+        ]
+      }
+    )
+
+    const panicBadge = wrapper.get('#bottom-panel-logs-tab .badge-panic')
+    expect(panicBadge.text()).toBe('2')
+    expect(panicBadge.attributes('aria-label')).toBe('2 panic logs')
+    expect(panicBadge.attributes('title')).toBe('2 panic logs')
+    expect(wrapper.get('#bottom-panel-logs-tab .badge-error').text()).toBe('1')
   })
 })

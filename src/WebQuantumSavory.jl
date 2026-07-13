@@ -14,6 +14,8 @@ using Base64
 import CairoMakie
 using Genie
 using Dates
+import ResumableFunctions
+using ResumableFunctions: @resumable
 
 struct APIError <: Exception
   message::String
@@ -36,6 +38,7 @@ include("Sandbox.jl")
 include("Logger.jl")
 include("states_zoo.jl")
 include("parser.jl")
+include("diagnostics.jl")
 include("script_export.jl")
 using .Logger: @log_event
 
@@ -64,6 +67,7 @@ const MAX_SIM_RUNTIME_MINUTES = 10
   simulation_progress::Union{Nothing, Float64} = nothing
   log_events::Vector{Any} = Any[]
   error::Union{Nothing, Exception} = nothing
+  simulation_panic::Union{Nothing, Dict} = nothing
   simulation_last_active_time::Union{Nothing, DateTime} = nothing
   simulation_started_at::Union{Nothing, DateTime} = nothing
   execution_time_exceeded::Bool = false
@@ -78,6 +82,8 @@ function main()
   unsafe_code_evaluation_enabled(
     environment=get(ENV, "GENIE_ENV", Genie.Configuration.env()),
   )
+  # Fail before Genie starts if the diagnostic-protocol flag is malformed.
+  mock_broken_protocol_enabled()
   Genie.genie(; context = @__MODULE__)
 end
 
@@ -252,6 +258,7 @@ function serialize_state(state::State)
       "simulation_running" => state.is_running,
       "simulation_paused" => state.simulation_paused,
       "simulation_error" => state.error !== nothing ? string(state.error) : nothing,
+      "simulation_panic" => state.simulation_panic,
       "simulation_last_active_time" => state.simulation_last_active_time,
       "simulation_started_at" => state.simulation_started_at,
       "simulation_execution_time_exceeded" => state.execution_time_exceeded,
@@ -675,10 +682,28 @@ function prepare_simulation(state::State, simulation_name::String)
   return state
 end
 
-function _record_run_error!(state::State, error)
+function _panic_record(error::Exception, backtrace)
+  exception_type = string(typeof(error))
+  Dict{String,Any}(
+    "id" => Logger.next_event_id("panic"),
+    "timestamp" => Logger.event_timestamp(),
+    "source" => "Simulator",
+    "severity" => "panic",
+    "summary" => "Simulation crashed with $exception_type",
+    "exception_type" => exception_type,
+    "message" => sprint(showerror, error),
+    "stacktrace" => Logger.format_exception_stacktrace(error, backtrace),
+  )
+end
+
+function _record_run_error!(state::State, error, backtrace=catch_backtrace())
   exception = error isa Exception ? error : ErrorException(string(error))
-  @error "Error running simulation" error=exception
+  @error "Error running simulation" exception=(exception, backtrace)
   @log_event state Logging.Error "Error running simulation" error=exception
+
+  panic = _panic_record(exception, backtrace)
+  state.simulation_panic = copy(panic)
+  push!(state.log_events, panic)
 
   state.is_running = false
   state.simulation_paused = false
@@ -714,7 +739,7 @@ function _run_simulation(state::State)
         ConcurrentSim.step(state.simulation)
         state.simulation_progress = QuantumSavory.now(state.simulation)
       catch e
-        return _record_run_error!(state, e)
+        return _record_run_error!(state, e, catch_backtrace())
       end
 
       # Give libuv a zero-delay scheduling point so pending HTTP I/O is serviced.
@@ -764,6 +789,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
 
   if !resuming
     state.log_events = []
+    state.simulation_panic = nothing
     state.simulation_time = time_units
   end
 
@@ -782,7 +808,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
       sleep(0)
       _run_simulation(state)
     catch e
-      _record_run_error!(state, e)
+      _record_run_error!(state, e, catch_backtrace())
     finally
       state.is_running = false
       state.run_task = nothing

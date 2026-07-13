@@ -65,10 +65,26 @@ GENIE_ENV=test julia --color=yes --project="$app_root" \
   -e 'using WebQuantumSavory; WebQuantumSavory.main(); WebQuantumSavory.up(async=false)' >"$server_log" 2>&1 &
 server_pid=$!
 
+server_owns_port() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -H -ltnp '( sport = :8000 )' 2>/dev/null | grep -Fq "pid=$server_pid,"
+    return
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -a -p "$server_pid" -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null \
+      | grep -Fxq "$server_pid"
+    return
+  fi
+  grep -Fq "Listening on: 127.0.0.1:8000" "$server_log"
+}
+
 ready=false
 attempts=0
 while [ "$attempts" -lt 120 ]; do
-  if curl --fail --silent --show-error http://127.0.0.1:8000/status >/dev/null 2>&1; then
+  # A different worktree can answer /status while this process is still
+  # starting. Require our own process to own port 8000 before accepting it.
+  if curl --fail --silent --show-error http://127.0.0.1:8000/status >/dev/null 2>&1 \
+    && server_owns_port; then
     ready=true
     break
   fi

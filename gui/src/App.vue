@@ -48,6 +48,7 @@ import VoidPanel from './components/panels/VoidPanel.vue'
 import ResultsView from './components/panels/ResultsView.vue'
 import LucideMenuIcon from './components/LucideMenuIcon.vue'
 import SmallScreenWarning from './components/SmallScreenWarning.vue'
+import PanicReportDialog from './components/PanicReportDialog.vue'
 
 // Import composables
 import { useSimulationController } from './composables/useSimulationController.js'
@@ -75,6 +76,11 @@ import { registerLegacyBridge, syncLegacyProjectData } from './utils/legacyBridg
 import { generateRepeaterChain } from './utils/repeaterChain.js'
 import { generateStarNetwork } from './utils/starNetwork.js'
 import { generateGraphNetwork, GRAPH_TOPOLOGIES } from './utils/graphNetwork.js'
+import {
+  normalizeLogSeverity,
+  normalizeLogSource,
+  parseRawLogDetails
+} from './utils/logRecords.js'
 
 // Import demo projects
 import demo1 from './demos/1.Entangler.Example.json'
@@ -91,23 +97,52 @@ const projectData = ref(createEmptyProject())
 
 // Required variables and functions for composables
 // Log management functions
-function addLog(level, message, source = 'App', extendedInfo = null) {
+function addLog(level, message, source = 'App', extendedInfo = null, options = {}) {
+  const normalizedLevel = normalizeLogSeverity(level)
+  const normalizedSource = normalizeLogSource(source)
+  const stableId = options.id ? String(options.id) : null
+
+  if (stableId) {
+    const existing = applicationLogs.value.find(log => String(log.id) === stableId)
+    if (existing) return existing
+  }
+
   // Check if this message is the same as the last log entry
   const lastLog = applicationLogs.value[applicationLogs.value.length - 1];
-  if (lastLog && lastLog.message === message && lastLog.source === source) {
+  if (
+    lastLog
+    && lastLog.message === message
+    && lastLog.source === normalizedSource.source
+    && lastLog.level === normalizedLevel
+  ) {
     // Update the timestamp of the existing log entry
-    lastLog.timestamp = new Date().toISOString();
+    lastLog.timestamp = options.timestamp || new Date().toISOString();
     lastLog.count = (lastLog.count || 1) + 1;
-    return;
+    return lastLog;
   }
-  
+
+  const suppliedRaw = options.raw ?? parseRawLogDetails(extendedInfo)
+  const raw = suppliedRaw && typeof suppliedRaw === 'object' && !Array.isArray(suppliedRaw)
+    ? { ...suppliedRaw }
+    : suppliedRaw === null
+      ? {}
+      : { details: suppliedRaw }
+  raw.source ??= normalizedSource.source
+  raw.severity ??= normalizedLevel
+  raw.message ??= message
+  if (normalizedSource.subsystem) raw.subsystem ??= normalizedSource.subsystem
+
   const logEntry = {
-    id: generateUUid('log'),
-    timestamp: new Date().toISOString(),
-    level,
+    id: stableId || generateUUid('log'),
+    timestamp: options.timestamp || new Date().toISOString(),
+    level: normalizedLevel,
     message,
-    source,
+    source: normalizedSource.source,
     extendedInfo,
+    raw,
+    fullMessage: options.fullMessage || null,
+    exceptionType: options.exceptionType || null,
+    stacktrace: options.stacktrace || null,
     count: 1
   };
   
@@ -117,11 +152,18 @@ function addLog(level, message, source = 'App', extendedInfo = null) {
   if (applicationLogs.value.length > maxLogs.value) {
     applicationLogs.value = applicationLogs.value.slice(-maxLogs.value);
   }
+
+  return logEntry
 }
 
 // Application logs
 const applicationLogs = ref([])
 const maxLogs = ref(1000)
+const activePanic = ref(null)
+const panicPlatformInfo = computed(() => {
+  const platformInfo = api.getPlatformInfo()
+  return platformInfo && typeof platformInfo === 'object' ? platformInfo : {}
+})
 const showRepeaterChainDialog = ref(false)
 const showStarNetworkDialog = ref(false)
 const showGraphNetworkDialog = ref(false)
@@ -235,6 +277,10 @@ function closeAlertModal() {
   showAlertModal.value = false
 }
 
+function showSimulationPanic(panic) {
+  activePanic.value = panic ? { ...panic } : null
+}
+
 const {
   phase: simulationPhase,
   capabilities: simulationCapabilities,
@@ -266,7 +312,8 @@ const {
   checkAndHideInvalidEntangledStates,
   clearAllPlots,
   hideSlotState,
-  showAlert
+  showAlert,
+  showPanic: showSimulationPanic
 })
 
 const isNetworkEditingDisabled = computed(() => simulationCapabilities.value.editingDisabled)
@@ -373,6 +420,10 @@ const {
   }),
   showError: message => showAlert('Project Error', message)
 })
+
+function serializePanicProject() {
+  return serializeProjectData()
+}
 
 // Unsaved snapshots compare the canonical storage representation.
 const {
@@ -1210,6 +1261,15 @@ onUnmounted(() => {
       :title="alertModalTitle"
       :message="alertModalMessage"
       @close="closeAlertModal"
+    />
+
+    <PanicReportDialog
+      :show="Boolean(activePanic)"
+      :panic="activePanic || {}"
+      :serialize-project="serializePanicProject"
+      :project-name="currentProjectName || projectData.name"
+      :platform-info="panicPlatformInfo"
+      @close="activePanic = null"
     />
 
     <ConfirmModal

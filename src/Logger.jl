@@ -6,13 +6,145 @@ using Dates
 using QuantumSavory
 
 export make_logger, MIN_LEVEL, MAX_LEVEL, log_event, @log_event
+export event_timestamp, next_event_id, severity_name, json_safe, format_exception_stacktrace
 
 const MIN_LEVEL = Logging.Debug
-const MAX_LEVEL = Logging.Warn
+const MAX_LEVEL = Logging.Error
+const EVENT_SEQUENCE = Base.Threads.Atomic{UInt64}(0)
+const DEFAULT_SOURCE = "Simulator"
 
 ultimateparent(mod) = mod === parentmodule(mod) ? mod : ultimateparent(parentmodule(mod))
 
-# Custom logger that captures logs into state while also displaying them
+"""Return the UTC timestamp format used by all public log and panic records."""
+event_timestamp() = Dates.format(Dates.now(Dates.UTC), dateformat"yyyy-mm-ddTHH:MM:SS.sssZ")
+
+"""Return a unique ID that remains attached to a record for its lifetime."""
+function next_event_id(prefix::AbstractString="log")
+  sequence = Base.Threads.atomic_add!(EVENT_SEQUENCE, UInt64(1)) + UInt64(1)
+  "$(prefix)-$(string(Base.time_ns(), base=16))-$(string(sequence, base=16))"
+end
+
+"""Normalize Julia logging levels to the public severity vocabulary."""
+function severity_name(level)
+  level == Logging.Debug && return "debug"
+  level == Logging.Info && return "info"
+  level == Logging.Warn && return "warning"
+  level == Logging.Error && return "error"
+
+  normalized = lowercase(strip(string(level)))
+  normalized == "warn" && return "warning"
+  normalized in ("debug", "info", "success", "warning", "error", "panic") && return normalized
+  return "info"
+end
+
+"""Format an exception and its captured backtrace as one complete stacktrace."""
+function format_exception_stacktrace(exception::Exception, backtrace)
+  try
+    return sprint(io -> showerror(io, exception, backtrace))
+  catch
+    message = try
+      sprint(showerror, exception)
+    catch
+      string(exception)
+    end
+    frames = try
+      sprint(Base.show_backtrace, backtrace)
+    catch
+      ""
+    end
+    return isempty(frames) ? message : "$message\n$frames"
+  end
+end
+
+function _exception_json(exception::Exception, backtrace=nothing)
+  result = Dict{String,Any}(
+    "exception_type" => string(typeof(exception)),
+    "message" => sprint(showerror, exception),
+  )
+  backtrace === nothing || (result["stacktrace"] = format_exception_stacktrace(exception, backtrace))
+  return result
+end
+
+"""
+Convert arbitrary logger metadata into values that JSON encoders can safely
+serialize. Unknown runtime objects are represented by strings instead of being
+allowed to break the entire `/logs` response.
+"""
+function json_safe(value, depth::Int=0)
+  depth >= 12 && return "<$(typeof(value))>"
+
+  value === nothing && return nothing
+  value isa Bool && return value
+  value isa AbstractString && return String(value)
+  value isa Char && return string(value)
+  value isa Symbol && return string(value)
+  value isa Dates.TimeType && return string(value)
+  value isa Logging.LogLevel && return severity_name(value)
+  value isa Integer && return value
+  if value isa AbstractFloat
+    return isfinite(value) ? value : string(value)
+  end
+  if value isa Real
+    converted = try
+      Float64(value)
+    catch
+      nothing
+    end
+    return converted !== nothing && isfinite(converted) ? converted : string(value)
+  end
+  value isa Exception && return _exception_json(value)
+  value isa Type && return string(value)
+  value isa Module && return string(value)
+
+  if value isa Tuple && length(value) == 2 && value[1] isa Exception
+    return _exception_json(value[1], value[2])
+  elseif value isa NamedTuple
+    return Dict{String,Any}(
+      string(key) => json_safe(item, depth + 1) for (key, item) in pairs(value)
+    )
+  elseif value isa AbstractDict
+    return Dict{String,Any}(
+      string(key) => json_safe(item, depth + 1) for (key, item) in pairs(value)
+    )
+  elseif value isa Pair
+    return Dict{String,Any}(
+      "first" => json_safe(first(value), depth + 1),
+      "second" => json_safe(last(value), depth + 1),
+    )
+  elseif value isa AbstractArray || value isa Tuple || value isa AbstractSet
+    return Any[json_safe(item, depth + 1) for item in value]
+  end
+
+  return try
+    string(value)
+  catch
+    "<$(typeof(value))>"
+  end
+end
+
+function _base_event(level, message; source::AbstractString=DEFAULT_SOURCE, prefix::AbstractString="log")
+  Dict{String,Any}(
+    "id" => next_event_id(prefix),
+    "timestamp" => event_timestamp(),
+    "source" => String(source),
+    "severity" => severity_name(level),
+    "message" => string(message),
+  )
+end
+
+function _add_extra_fields!(event::Dict{String,Any}, fields)
+  for (raw_key, value) in fields
+    key = string(raw_key)
+    # Public record identity fields cannot be replaced by logger metadata.
+    if haskey(event, key)
+      key = "logging_$(key)"
+    end
+    event[key] = json_safe(value)
+  end
+  return event
+end
+
+# Custom logger that captures logs into state while also displaying them.
 struct CapturingLogger <: Logging.AbstractLogger
   console::Logging.ConsoleLogger
   state::Any
@@ -21,29 +153,28 @@ end
 Logging.min_enabled_level(logger::CapturingLogger) = MIN_LEVEL
 
 function Logging.shouldlog(logger::CapturingLogger, level, _module, group, id)
-  # Filter for QuantumSavory logs in the specified level range
+  # Only QuantumSavory internals are intercepted here. WebQuantumSavory emits
+  # its own records explicitly through `log_event`.
   return MIN_LEVEL <= level <= MAX_LEVEL && ultimateparent(_module) === QuantumSavory
 end
 
 Logging.catch_exceptions(logger::CapturingLogger) = false
 
 function Logging.handle_message(logger::CapturingLogger, level, message, _module, group, id, filepath, line; kwargs...)
-  # Capture the log event
   try
-    push!(logger.state.log_events, Dict(
-      :timestamp => Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS.sssZ"),
-      :level => level,
-      :message => string(message),
-      :module => string(_module),
-      :group => group,
-      :id => id,
-    ))
-  catch e
-    # best-effort collection; ignore failures
-    println(stderr, "❌ LOGGER ERROR: Failed to push log event: ", e)
+    event = _base_event(level, message)
+    event["module"] = string(_module)
+    event["group"] = json_safe(group)
+    event["logging_id"] = json_safe(id)
+    event["file"] = string(filepath)
+    event["line"] = line
+    _add_extra_fields!(event, kwargs)
+    push!(logger.state.log_events, event)
+  catch error
+    # Log capture is best effort and must never interrupt the simulation.
+    println(stderr, "LOGGER ERROR: Failed to capture log event: ", error)
   end
-  
-  # Also pass through to console logger for display
+
   Logging.handle_message(logger.console, level, message, _module, group, id, filepath, line; kwargs...)
 end
 
@@ -51,43 +182,29 @@ function make_logger(state)
   return CapturingLogger(Logging.ConsoleLogger(stderr, MIN_LEVEL), state)
 end
 
-"""Append a structured log event to the state's log_events with a timestamp.
-
-Parameters:
-- state: WebQuantumSavory.State holding the log_events array
-- level: a Logging level (e.g., Logging.Info)
-- message: a String describing the event
-- Keyword args are included as extra fields on the event
-""" 
-function log_event(state, level, message; module_name = nothing, kwargs...)
+"""Append one JSON-safe structured Simulator record to `state.log_events`."""
+function log_event(state, level, message; module_name=nothing, source=DEFAULT_SOURCE, kwargs...)
   try
-    event = Dict(
-      :timestamp => Dates.format(Dates.now(), dateformat"yyyy-mm-ddTHH:MM:SS.sssZ"),
-      :level => level,
-      :message => message,
-    )
-    if module_name !== nothing
-      event[:module] = String(module_name)
-    end
-    for (k, v) in kwargs
-      event[Symbol(k)] = v
-    end
+    event = _base_event(level, message; source=string(source))
+    module_name === nothing || (event["module"] = string(module_name))
+    _add_extra_fields!(event, kwargs)
     push!(state.log_events, event)
-  catch
-    # best-effort only
+  catch error
+    println(stderr, "LOGGER ERROR: Failed to append log event: ", error)
   end
   return state
 end
 
-"""Macro to log an event, capturing the caller's module name automatically.
-
-Usage: @log_event state Logging.Info "message" key1=value1 key2=value2
-"""
+"""Macro form of [`log_event`](@ref) that records the caller's module."""
 macro log_event(state, level, message, args...)
-  local _esc_args = map(arg -> esc(arg), Tuple(args))
-  return :(Logger.log_event($(esc(state)), $(esc(level)), $(esc(message)); module_name = string($__module__), $(_esc_args...)))
+  local escaped_args = map(arg -> esc(arg), Tuple(args))
+  return :(Logger.log_event(
+    $(esc(state)),
+    $(esc(level)),
+    $(esc(message));
+    module_name=string($__module__),
+    $(escaped_args...),
+  ))
 end
 
 end
-
-
