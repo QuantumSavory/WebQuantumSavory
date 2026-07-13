@@ -200,4 +200,73 @@
       )
     end
   end
+
+  @testset "diagnostic protocol reports a structured simulator panic" begin
+    simulation_name = "mock_broken_protocol_integration_$(getpid())"
+    payload = repeater_chain_payload(simulation_name)
+    payload["net"]["protocols"] = Any[
+      protocol("broken-diagnostic", WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE),
+    ]
+
+    try
+      catalog_response = make_request("GET", "/protocol_types")
+      @test catalog_response.status == 200
+      catalog = parse_response(catalog_response)["protocol_types"]
+      diagnostic = only(filter(
+        entry -> entry["type"] == WebQuantumSavory.MOCK_BROKEN_PROTOCOL_TYPE,
+        catalog,
+      ))
+      @test diagnostic["group"] == "floating"
+
+      parse_response_data = make_request("POST", "/parse_network_graph"; body=payload)
+      @test parse_response_data.status == 200
+
+      prepare_response = make_request(
+        "POST",
+        "/prepare_simulation";
+        body=Dict("name" => simulation_name),
+      )
+      @test prepare_response.status == 200
+      @test parse_response(prepare_response)["protocols_launched"]["floating"] == 1
+
+      run_response = make_request(
+        "POST",
+        "/run_simulation";
+        body=Dict("name" => simulation_name, "time_units" => 0.1),
+      )
+      @test run_response.status == 202
+
+      final_state = wait_for_completion(simulation_name)
+      @test occursin("BoundsError", final_state["simulation"]["simulation_error"])
+      panic = final_state["simulation"]["simulation_panic"]
+      @test panic !== nothing
+      @test panic["source"] == "Simulator"
+      @test panic["severity"] == "panic"
+      @test panic["exception_type"] == "BoundsError"
+      @test occursin("index [100]", panic["message"])
+      @test occursin("MockBrokenProtocol", panic["stacktrace"])
+
+      logs_response = make_request(
+        "GET",
+        "/logs/$(HTTP.escapeuri(simulation_name))?purge=false",
+      )
+      @test logs_response.status == 200
+      logs = parse_response(logs_response)["logs"]
+      panic_log = only(filter(log -> get(log, "severity", nothing) == "panic", logs))
+      @test panic_log["id"] == panic["id"]
+      @test !any(log -> get(log, "message", nothing) == "Error running simulation", logs)
+
+      export_response = make_request("POST", "/export_script"; body=payload)
+      @test export_response.status == 400
+      export_error = parse_response(export_response)
+      @test export_error["error_code"] == "VALIDATION_ERROR"
+      @test occursin("diagnostic-only", export_error["error"])
+    finally
+      make_request(
+        "POST",
+        "/destroy_simulation";
+        body=Dict("name" => simulation_name),
+      )
+    end
+  end
 end

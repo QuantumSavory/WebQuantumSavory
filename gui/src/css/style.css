@@ -18,6 +18,8 @@
   --app-color-focus: #7b7dcc;
   --app-color-danger: #d32f2f;
   --app-color-danger-soft: #ffebee;
+  --app-color-panic: #76002d;
+  --app-color-panic-soft: #ffe5ef;
   --app-color-warning: #f16938;
   --app-color-warning-hover: #fb835f;
   --app-color-disabled-surface: #e0e0e0;

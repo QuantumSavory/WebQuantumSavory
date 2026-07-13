@@ -20,7 +20,9 @@ export default defineConfig({
     viewport: { width: 1920, height: 1080 },
   },
   webServer: {
-    command: 'npm run dev',
+    // Never let Vite silently move to 5174 and make Playwright probe another
+    // worktree's server on 5173.
+    command: 'npm run dev -- --strictPort',
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

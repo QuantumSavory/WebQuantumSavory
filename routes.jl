@@ -1905,7 +1905,7 @@ end
 @swagger """
 /logs/{name}:
   get:
-    description: Get and optionally purge log events from a simulation
+    description: Get and optionally purge JSON-safe structured log events from a simulation. Panic records include complete exception and stacktrace details.
     parameters:
       - name: name
         in: path
@@ -1934,24 +1934,57 @@ end
                   type: array
                   items:
                     type: object
+                    required:
+                      - id
+                      - timestamp
+                      - source
+                      - severity
+                      - message
                     properties:
-                      level:
+                      id:
                         type: string
-                        description: Log level (Debug, Info, Warn, Error)
+                        description: Stable unique record identifier
+                      timestamp:
+                        type: string
+                        format: date-time
+                        description: UTC record timestamp
+                      source:
+                        type: string
+                        enum: [Simulator]
+                        description: Normalized record source
+                      severity:
+                        type: string
+                        enum: [debug, info, success, warning, error, panic]
+                        description: Normalized severity; terminating exceptions appear once as panic, while error represents ordinary emitted error logs
                       message:
                         type: string
-                        description: Log message
+                        description: Complete log or exception message
                       module:
                         type: string
+                        nullable: true
                         description: Module that generated the log
                       group:
                         type: string
                         nullable: true
                         description: Optional group identifier
-                      id:
+                      logging_id:
                         type: string
                         nullable: true
-                        description: Optional ID identifier
+                        description: Optional Julia logging call-site identifier
+                      summary:
+                        type: string
+                        nullable: true
+                        description: Concise panic summary, present on panic records
+                      exception_type:
+                        type: string
+                        nullable: true
+                        description: Julia exception type, present on panic records
+                      stacktrace:
+                        type: string
+                        nullable: true
+                        description: Complete formatted stacktrace, present on panic records
+                    additionalProperties: true
+                    description: Logger keyword arguments are retained as additional JSON-safe structured fields.
                 count:
                   type: integer
                   description: Number of log events returned

@@ -374,6 +374,16 @@ function get_protocol_types()
     push!(result, Dict("type" => string(pt.type), "doc" => string(pt.doc), "group" => group, "parameters" => pts |> parse_pt_type, "virtual" => virtual))
   end
 
+  if mock_broken_protocol_enabled()
+    push!(result, Dict(
+      "type" => MOCK_BROKEN_PROTOCOL_TYPE,
+      "doc" => "Diagnostic-only floating protocol that intentionally crashes during simulation stepping.",
+      "group" => "floating",
+      "parameters" => Any[],
+      "virtual" => nothing,
+    ))
+  end
+
   result
 end
 
@@ -630,6 +640,15 @@ end
 
 function _resolve_protocol_type_from_string(type_str::AbstractString)
   input_lower = lowercase(type_str)
+
+  if input_lower == lowercase(MOCK_BROKEN_PROTOCOL_TYPE)
+    if mock_broken_protocol_enabled()
+      return MockBrokenProtocol
+    end
+    @warn "Diagnostic protocol is disabled" type_str=type_str configuration_variable=MOCK_BROKEN_PROTOCOL_ENV_VAR
+    return nothing
+  end
+
   _ensure_protocol_types_cache!()
   T = get(_PROTOCOL_TYPES_CACHE[], input_lower, nothing)
   if T === nothing

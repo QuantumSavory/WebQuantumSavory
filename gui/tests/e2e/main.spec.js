@@ -300,5 +300,6 @@ test.describe.serial('Main Workflow', () => {
 
     // Early lifecycle entries can be evicted when a verbose run fills the bounded log buffer.
     await expect(page.locator('#logsPanel .logs-content .log-entry:has-text("Simulation completed")').first()).toBeVisible();
+    await expect(page.locator('#logsPanel .logs-content .log-entry:has-text("[Simulator]")').first()).toBeVisible();
   });
 });

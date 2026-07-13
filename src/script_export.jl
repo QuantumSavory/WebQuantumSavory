@@ -539,6 +539,7 @@ function generate_julia_script(payload)
   _is_object_like(payload) || throw(validation_error("Export payload must be an object"))
   validation = validate_payload(payload)
   data = validation["data"]
+  reject_mock_broken_protocol_export(data)
   nodes = validation["graph_info"]["nodes"]
   edges = validation["graph_info"]["edges"]
   isempty(nodes) && throw(validation_error(
