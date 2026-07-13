@@ -12,6 +12,22 @@ const SYMBOLIC_PROTOCOL_TYPE = {
   }],
 }
 
+const CUSTOM_FUNCTION_PROTOCOL_TYPE = {
+  type: 'TestProtocols.FunctionProt',
+  doc: 'Protocol used to exercise custom-function parameter editing.',
+  group: 'node',
+  virtual: null,
+  parameters: [{
+    field: 'callback',
+    type: 'Function',
+    doc: 'A custom callback.',
+  }],
+}
+
+const VALID_FUNCTION_SOURCE = `valid_callback = function (value)
+  return value + 1
+end`
+
 async function mockConfiguration(page) {
   await page.route('**/known_functions', route => route.fulfill({
     status: 200,
@@ -26,7 +42,7 @@ async function mockConfiguration(page) {
   await page.route('**/protocol_types', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    json: { protocol_types: [SYMBOLIC_PROTOCOL_TYPE] },
+    json: { protocol_types: [SYMBOLIC_PROTOCOL_TYPE, CUSTOM_FUNCTION_PROTOCOL_TYPE] },
   }))
   await page.route('**/platform_info', route => route.fulfill({
     status: 200,
@@ -71,6 +87,25 @@ async function mockConfiguration(page) {
       json: { success: false, error: 'Invalid symbolic expression' },
     })
   })
+  await page.route('**/test_code', route => {
+    const { code } = route.request().postDataJSON()
+    if (code.startsWith('valid')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        json: {
+          success: true,
+          results: { functions: ['valid_callback'], variables: {} },
+        },
+      })
+    }
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: { success: false, error: 'Invalid custom function' },
+    })
+  })
 }
 
 async function loadApp(page) {
@@ -85,10 +120,15 @@ async function loadApp(page) {
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
 }
 
-async function createProjectWithSymbolicProtocol(page) {
+async function createProjectWithProtocol(page, {
+  projectName,
+  protocolId,
+  protocolType,
+  parameters,
+}) {
   await page.locator('.hamburger-btn').click()
   await page.getByText('New', { exact: true }).click()
-  await page.getByPlaceholder('Project name').fill('Symbolic Editor Test')
+  await page.getByPlaceholder('Project name').fill(projectName)
   await page.locator('button.primary').click()
 
   await page.keyboard.down('Alt')
@@ -96,27 +136,52 @@ async function createProjectWithSymbolicProtocol(page) {
   await page.keyboard.up('Alt')
   await expect(page.locator('.node-marker')).toHaveCount(1)
 
-  await page.evaluate(() => {
+  await page.evaluate(protocol => {
     const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
     const node = setupState?.projectData?.net?.nodes?.[0]
     if (!node) throw new Error('Reactive node state is unavailable')
 
-    node.data.protocols.push({
-      id: 'protocol_symbolic_editor',
-      type: 'TestProtocols.SymbolicProt',
-      parameters: [{
-        name: 'observable',
-        type: 'Symbolic',
-        value: null,
-      }],
-    })
+    node.data.protocols.push(protocol)
+  }, {
+    id: protocolId,
+    type: protocolType,
+    parameters,
   })
 
   await page.locator('.node-marker').click()
-  const editor = page.locator('#nodePanel .protocol-editor', { hasText: 'SymbolicProt' })
+  const protocolName = protocolType.split('.').pop()
+  const editor = page.locator('#nodePanel .protocol-editor', { hasText: protocolName })
   await expect(editor).toBeVisible()
   await editor.locator('.protocol-list-type').click()
   await expect(editor.locator('.protocol-container')).toBeVisible()
+  return editor
+}
+
+function createProjectWithSymbolicProtocol(page) {
+  return createProjectWithProtocol(page, {
+    projectName: 'Symbolic Editor Test',
+    protocolId: 'protocol_symbolic_editor',
+    protocolType: SYMBOLIC_PROTOCOL_TYPE.type,
+    parameters: [{
+      name: 'observable',
+      type: 'Symbolic',
+      value: null,
+    }],
+  })
+}
+
+async function createProjectWithCustomFunctionProtocol(page) {
+  const editor = await createProjectWithProtocol(page, {
+    projectName: 'Custom Function Editor Test',
+    protocolId: 'protocol_custom_function_editor',
+    protocolType: CUSTOM_FUNCTION_PROTOCOL_TYPE.type,
+    parameters: [{
+      name: 'callback',
+      type: 'Function',
+      value: null,
+    }],
+  })
+  await editor.locator('.complexTypeSelector').selectOption('Lambda')
   return editor
 }
 
@@ -141,7 +206,36 @@ async function expectEditorLayersAligned(valueEditor) {
   expect(Math.abs(origins.caret.y - origins.highlightedText.y)).toBeLessThan(0.5)
 }
 
-test.describe('Symbolic editor lifecycle', () => {
+async function expectCustomFunctionValidationLifecycle(valueEditor) {
+  const input = valueEditor.locator('textarea')
+  await expect(input).toBeVisible()
+  await expect(valueEditor.getByTestId('code-collapsed-view')).toHaveCount(0)
+
+  await input.fill('invalid(')
+  await valueEditor.locator('.validate-button').click()
+
+  await expect(valueEditor.locator('.function-error-badge')).toContainText('Error!')
+  await expect(input).toBeVisible()
+  await expect(valueEditor.getByTestId('code-collapsed-view')).toHaveCount(0)
+
+  await input.fill(VALID_FUNCTION_SOURCE)
+  await valueEditor.locator('.validate-button').click()
+
+  const renderedResult = valueEditor.getByTestId('code-collapsed-view')
+  const renderedSource = renderedResult.locator('.code-rendered-value')
+  await expect(renderedResult).toBeVisible()
+  await expect(renderedResult).toHaveAttribute('aria-label', 'Edit custom function')
+  await expect.poll(() => renderedSource.textContent()).toBe(VALID_FUNCTION_SOURCE)
+  await expect(renderedSource).toHaveCSS('white-space', 'pre-wrap')
+  await expect(valueEditor.locator('textarea')).toHaveCount(0)
+  await expect(valueEditor.locator('.validate-button')).toHaveCount(0)
+
+  await renderedResult.click()
+  await expect(valueEditor.locator('textarea')).toBeVisible()
+  await expect(valueEditor.locator('textarea')).toHaveValue(VALID_FUNCTION_SOURCE)
+}
+
+test.describe('Code editor lifecycle', () => {
   test.beforeEach(async ({ page }) => {
     await mockConfiguration(page)
     await loadApp(page)
@@ -211,5 +305,31 @@ test.describe('Symbolic editor lifecycle', () => {
     await renderedResult.click()
     await expect(valueEditor.locator('textarea')).toBeVisible()
     await expect(valueEditor.locator('textarea')).toHaveValue('valid_variable_expression')
+  })
+
+  test('starts compact for a protocol custom function, stays open on failure, and renders source after success', async ({ page }) => {
+    const protocolEditor = await createProjectWithCustomFunctionProtocol(page)
+    const valueEditor = protocolEditor.locator('.code-editor-with-symbols')
+    const initialValue = valueEditor.getByTestId('code-collapsed-view')
+
+    await expect(initialValue).toBeVisible()
+    await expect(initialValue).toHaveText('default')
+    await expect(initialValue).toHaveAttribute('aria-label', 'Enter custom function')
+    await expect(valueEditor.locator('textarea')).toHaveCount(0)
+
+    await initialValue.click()
+    await expectCustomFunctionValidationLifecycle(valueEditor)
+  })
+
+  test('starts open for a new custom-function variable and collapses only after validation succeeds', async ({ page }) => {
+    await page.getByRole('tab', { name: 'Variables' }).click()
+    const variablesPanel = page.getByTestId('variables-panel')
+    await variablesPanel.getByRole('button', { name: 'Add Variable' }).click()
+
+    const variableRow = variablesPanel.locator('.variable-row')
+    await variableRow.locator('.variable-type-select').selectOption('Lambda')
+    const valueEditor = variableRow.locator('.code-editor-with-symbols')
+
+    await expectCustomFunctionValidationLifecycle(valueEditor)
   })
 })

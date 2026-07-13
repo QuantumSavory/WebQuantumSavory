@@ -118,6 +118,7 @@ test.describe('Unsafe evaluation capability', () => {
 
     const editor = page.locator('#edgePanel .code-editor-with-symbols').first()
     await expect(editor).toBeVisible()
+    await editor.getByTestId('code-collapsed-view').click()
     await expect(editor.getByTestId('evaluation-disabled-notice')).toHaveCount(0)
     await expect(editor.locator('.validate-button')).toBeEnabled()
   })
@@ -128,6 +129,7 @@ test.describe('Unsafe evaluation capability', () => {
     const functionTypeSelector = await openEntanglerEditor(page, 'Evaluation Disabled')
 
     const editor = page.locator('#edgePanel .code-editor-with-symbols').first()
+    await editor.getByTestId('code-collapsed-view').click()
     await expect(editor.getByTestId('evaluation-disabled-notice')).toContainText(
       'Server-side Julia evaluation is disabled',
     )

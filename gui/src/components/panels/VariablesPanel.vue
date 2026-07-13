@@ -72,7 +72,7 @@
               :disabled="disabled"
               category="node"
               placeholder="value"
-              symbolic-initially-open
+              initially-open
             />
           </div>
         </div>

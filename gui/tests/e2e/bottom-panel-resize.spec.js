@@ -21,6 +21,11 @@ async function mockBackend(page) {
         versions: { julia: 'test', quantumsavory: 'test', app: 'test' },
         capabilities: { unsafe_code_evaluation: false },
       },
+      '/export_script': {
+        success: true,
+        script: 'using QuantumSavory\nrun(Simulation(), 1.0)\n',
+        filename: 'resize-test.jl',
+      },
     }
 
     return route.fulfill({
@@ -298,5 +303,31 @@ test.describe('Resizable bottom Tools panel', () => {
     const logsTabPanel = await bounds(page.locator('#bottom-panel-logs-content'))
     expect(logsPanel.height).toBeGreaterThan(logsTabPanel.height - 12)
     expectNear(logsPanel.y + logsPanel.height, logsTabPanel.y + logsTabPanel.height)
+  })
+
+  test('lets the generated script field grow with the panel height', async ({ page }) => {
+    await page.addInitScript(({ storageKey }) => {
+      localStorage.setItem(storageKey, JSON.stringify({ width: 800, height: 400 }))
+    }, { storageKey: PANEL_SIZE_STORAGE_KEY })
+    await loadApp(page)
+
+    await page.getByRole('tab', { name: 'Export Script' }).click()
+    const code = page.getByLabel('Generated Julia script')
+    await expect(code).toContainText('using QuantumSavory')
+
+    const resizer = page.locator('#bottom-panel-resizer')
+    const initialPanel = await bounds(resizer)
+    const initialCode = await bounds(code)
+
+    await dragFrom(page, initialPanel.x + initialPanel.width / 2, initialPanel.y + 1, 0, -160)
+    await expect.poll(async () => (await bounds(resizer)).height)
+      .toBeGreaterThan(initialPanel.height + 140)
+
+    const tallerPanel = await bounds(resizer)
+    const tallerCode = await bounds(code)
+    const panelGrowth = tallerPanel.height - initialPanel.height
+    const codeGrowth = tallerCode.height - initialCode.height
+
+    expect(codeGrowth).toBeGreaterThan(panelGrowth - 12)
   })
 })

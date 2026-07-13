@@ -312,7 +312,6 @@ onBeforeUnmount(() => {
 .export-script-code {
   height: 100%;
   min-height: 140px;
-  max-height: 230px;
   margin: 0;
   overflow: auto;
   border: 1px solid #d9d9df;

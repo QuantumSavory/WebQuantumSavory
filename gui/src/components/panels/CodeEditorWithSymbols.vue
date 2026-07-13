@@ -3,18 +3,27 @@
     <button
       v-if="collapsible && collapsed"
       type="button"
-      class="symbolic-collapsed-view"
-      :class="{ 'symbolic-compact-value': !latexExpression }"
-      data-testid="symbolic-collapsed-view"
-      :aria-label="latexExpression ? 'Edit symbolic expression' : 'Enter symbolic expression'"
+      class="code-collapsed-view"
+      :class="{
+        'symbolic-compact-value': showLatex && !latexExpression,
+        'lambda-collapsed-value': !showLatex
+      }"
+      :data-testid="showLatex ? 'symbolic-collapsed-view' : 'code-collapsed-view'"
+      :aria-label="collapsedAriaLabel"
       @click="emit('edit')"
     >
       <span
-        v-if="latexExpression"
+        v-if="showLatex && latexExpression"
         class="latex-wrap"
         v-html="renderedLatex"
       />
-      <span v-else :class="{ 'symbolic-placeholder': !modelValue }">
+      <span
+        v-else
+        :class="{
+          'editor-placeholder': !modelValue,
+          'code-rendered-value': !showLatex
+        }"
+      >
         {{ modelValue || 'default' }}
       </span>
     </button>
@@ -164,6 +173,12 @@ function isSubscriptChar(symbol) {
 
 const hasError = computed(() => !!props.errorMessage)
 const interactionDisabled = computed(() => props.readOnly || !props.evaluationEnabled)
+const collapsedAriaLabel = computed(() => {
+  if (!props.showLatex) {
+    return props.modelValue ? 'Edit custom function' : 'Enter custom function'
+  }
+  return props.latexExpression ? 'Edit symbolic expression' : 'Enter symbolic expression'
+})
 const renderedLatex = computed(() => {
   if (!props.latexExpression) return ''
 
@@ -273,7 +288,7 @@ onMounted(() => {
   width: 100%;
 }
 
-.symbolic-collapsed-view {
+.code-collapsed-view {
   display: block;
   width: 100%;
   min-width: 0;
@@ -285,7 +300,7 @@ onMounted(() => {
   text-align: inherit;
 }
 
-.symbolic-collapsed-view:hover {
+.code-collapsed-view:hover {
   border-color: #c7c7df;
   background: #f8f8fd;
 }
@@ -301,7 +316,25 @@ onMounted(() => {
   text-align: right;
 }
 
-.symbolic-placeholder {
+.lambda-collapsed-value {
+  height: auto;
+  min-height: 32px;
+  padding: 7px 10px;
+  border-color: var(--app-color-border);
+  background: var(--app-color-surface-subtle);
+  text-align: left;
+}
+
+.code-rendered-value {
+  display: block;
+  width: 100%;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.editor-placeholder {
   color: #999;
 }
 
