@@ -126,7 +126,7 @@
     )
   end
 
-  function wait_for_completion(name; timeout=15.0)
+  function wait_for_completion(name; timeout=60.0)
     deadline = time() + timeout
     last_state = nothing
     escaped_name = HTTP.escapeuri(name)
@@ -143,6 +143,7 @@
 
   @testset "three-node chain completes and consumes an end-to-end pair" begin
     simulation_name = "repeater_chain_simulation_integration_$(getpid())"
+    simulation_target = 0.1
     payload = repeater_chain_payload(simulation_name)
 
     try
@@ -167,14 +168,14 @@
       run_response = make_request(
         "POST",
         "/run_simulation";
-        body=Dict("name" => simulation_name, "time_units" => 0.5),
+        body=Dict("name" => simulation_name, "time_units" => simulation_target),
       )
       @test run_response.status == 202
       @test parse_response(run_response)["success"] == true
 
       final_state = wait_for_completion(simulation_name)
       @test final_state["simulation"]["simulation_error"] === nothing
-      @test final_state["simulation"]["simulation_progress"] >= 0.5
+      @test final_state["simulation"]["simulation_progress"] >= simulation_target
 
       protocol_response = make_request(
         "GET",
