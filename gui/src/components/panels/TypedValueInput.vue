@@ -29,11 +29,11 @@
       :showLatex="isSymbolicType(type)"
       :latexExpression="parameter.latex"
       :paramType="type"
-      :collapsible="isSymbolicType(type)"
-      :collapsed="isSymbolicType(type) && !symbolicEditorOpen"
+      collapsible
+      :collapsed="!codeEditorOpen"
       @update:modelValue="onCodeEditorValueChanged"
       @validate="validateCode"
-      @edit="openSymbolicEditor"
+      @edit="openCodeEditor"
     />
   </div>
   <select
@@ -94,7 +94,7 @@ const props = defineProps({
     type: String,
     default: 'default'
   },
-  symbolicInitiallyOpen: {
+  initiallyOpen: {
     type: Boolean,
     default: false
   }
@@ -105,7 +105,7 @@ const valueInputLabel = computed(() => `${props.parameter.name || 'Parameter'} v
 const selectableFunctions = computed(() => api.getKnownFunctions().filter(func => (
   props.category === 'node' || !func.endsWith('(self)')
 )))
-const symbolicEditorOpen = ref(false)
+const codeEditorOpen = ref(false)
 
 watch(
   () => props.type,
@@ -123,8 +123,8 @@ watch(
       props.parameter.value = null
     }
 
-    symbolicEditorOpen.value = isSymbolicType(type)
-      ? props.symbolicInitiallyOpen && !props.parameter.latex
+    codeEditorOpen.value = isCodeType(type)
+      ? props.initiallyOpen && !(isSymbolicType(type) && props.parameter.latex)
       : false
   },
   { immediate: true }
@@ -135,8 +135,8 @@ function onCodeEditorValueChanged(value) {
   delete props.parameter.error
 }
 
-function openSymbolicEditor() {
-  if (isSymbolicType(props.type)) symbolicEditorOpen.value = true
+function openCodeEditor() {
+  if (isCodeType(props.type)) codeEditorOpen.value = true
 }
 
 async function validateCode() {
@@ -153,12 +153,12 @@ async function validateCode() {
     delete props.parameter.error
     if (isSymbolicType(props.type)) {
       props.parameter.latex = response.results.latex.replace(/^\$+|\$+$/g, '')
-      symbolicEditorOpen.value = false
     }
+    codeEditorOpen.value = false
     return
   }
 
-  if (isSymbolicType(props.type)) symbolicEditorOpen.value = true
+  codeEditorOpen.value = true
   delete props.parameter.latex
   const escaped = response.error
     .split('\\n').join('\n')

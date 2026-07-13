@@ -126,12 +126,17 @@ test.describe('Export Script panel', () => {
     await expect(code.locator('.hljs-keyword')).toContainText('using')
     await expect(panel).toContainText('Unsafe_Export-.jl')
 
+    const refreshButton = panel.getByRole('button', { name: 'Refresh' })
+    await refreshButton.hover()
+    await expect(refreshButton).toHaveCSS('background-color', 'rgb(67, 69, 172)')
+    await expect(refreshButton).toHaveCSS('color', 'rgb(255, 255, 255)')
+
     await page.locator('#bottom-panel-logs-tab').click()
     await updateProject(page, { time: 4 })
     await page.locator('#bottom-panel-export-script-tab').click()
     await expect.poll(() => requests.length).toBe(1)
 
-    await panel.getByRole('button', { name: 'Refresh' }).click()
+    await refreshButton.click()
     await expect.poll(() => requests.length).toBe(2)
     expect(requests[1].simulationConfig.time).toBe(4)
     await expect(code).toContainText('simulation_duration = 4')

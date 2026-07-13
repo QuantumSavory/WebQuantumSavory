@@ -18,6 +18,7 @@
 - Added JSON persistence and backend validation for variable definitions and protocol assignments, including legacy-project compatibility and simulation-state edit locking.
 - Filtered protocol variable pickers to field-compatible types, with explicit selection and availability guidance.
 - Made Symbolic value editors collapse to their rendered result after successful validation, with compact protocol defaults and click-to-edit reopening.
+- Made generated scripts follow Tools panel resizing, restored visible native-button hover text, and aligned custom-function validation with the Symbolic editor's compact result lifecycle.
 - Added a States Zoo tools tab for defining symbolic state variables from the five allowlisted QuantumSavory state types, with metadata-driven parameter controls and debounced rendered previews.
 - Added safe structured States Zoo recipes that persist with projects and remain available to compatible protocol parameters without enabling unsafe symbolic evaluation.
 - Added States Zoo catalog and PNG preview API endpoints with strict type, parameter, numeric, and range validation plus serialized CairoMakie rendering.
