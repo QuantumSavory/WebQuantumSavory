@@ -48,9 +48,6 @@ function (f::LambdaImpl)(args...)
   end
 end
 
-"""Names supplied lexically to evaluated custom protocol functions."""
-const CUSTOM_FUNCTION_CONTEXT_NAMES = (:nodeid, :self)
-
 """Protocol-conversion context key containing the shared node-name lookup."""
 const NODE_NAME_TO_INDEX_CONTEXT_KEY = :node_name_to_index
 
@@ -108,6 +105,12 @@ function create_lambda(
 
     try
         parsed = Meta.parse(lambda_string)
+        # `:toplevel` expressions bypass surrounding lexical scope during
+        # evaluation. Preserve multi-statement sources as a scoped block so
+        # every statement captures the contextual bindings below.
+        if parsed isa Expr && parsed.head === :toplevel
+            parsed = Expr(:block, parsed.args...)
+        end
         contextual_expression = _contextual_function_expression(
             parsed,
             node_name_to_index,
@@ -118,19 +121,6 @@ function create_lambda(
         # If expression evaluated directly to a function, use it
         if value isa Function
             return LambdaImpl(value)
-        end
-
-        # If the string defined a named function (e.g., `function foo(x) ... end`),
-        # try to extract its name and fetch it from the temporary module.
-        m = match(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", lambda_string)
-        if m !== nothing
-            fname = Symbol(m.captures[1])
-            if isdefined(temp_module, fname)
-                fval = getfield(temp_module, fname)
-                if fval isa Function
-                    return LambdaImpl(fval)
-                end
-            end
         end
 
         error("String does not evaluate to a function: '$lambda_string'")

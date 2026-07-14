@@ -158,6 +158,14 @@ function _script_function_expression(value, special_type::String, node_index, co
   return _script_custom_function_expression(source, node_index, context)
 end
 
+function _script_validate_deferred_lambda(value, context::String)
+  # `node_index = nothing` would reject node-only `self` before a deferred
+  # Lambda has an assignment; validate in a representative node context, then
+  # discard this expression and rebuild it with the actual assignment context.
+  _script_function_expression(value, "Lambda", 1, context)
+  return nothing
+end
+
 function _script_states_zoo_expression(recipe, context::String; return_trace::Bool=false)
   # Constructing the allowlisted symbolic value validates exact keys, ranges,
   # and the constructor without evaluating user-provided Julia source.
@@ -446,20 +454,10 @@ function _script_variable_bindings(payload, lines::Vector{String}, used::Set{Str
 
     if binding.per_assignment
       if _script_special_type(variable.type) == "Lambda"
-        variable.value isa AbstractString || _script_function_expression(
+        _script_validate_deferred_lambda(
           variable.value,
-          "Lambda",
-          nothing,
           "Variable '$(_script_comment(variable.name))'",
         )
-        source = strip(String(variable.value))
-        if resolve_function_reference(source) === nothing &&
-           !any(first(pair) == source for pair in SELF_COMPARISON_OPERATORS)
-          _script_raw_expression(
-            variable.value,
-            "Variable '$(_script_comment(variable.name))'",
-          )
-        end
       end
       push!(
         lines,

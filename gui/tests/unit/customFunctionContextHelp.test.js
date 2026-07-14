@@ -55,4 +55,16 @@ describe('custom-function contextual help', () => {
     expect(help.text()).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid.recommendation)
     expect(wrapper.get('.node-index').text()).toBe('#1')
   })
+
+  it('hides node-index help when the node list is empty', () => {
+    const wrapper = mount(NodeListPanel, {
+      props: { nodes: [] },
+      global: {
+        directives: { tooltip: () => {} }
+      }
+    })
+
+    expect(wrapper.get('.empty-list').text()).toBe('No nodes')
+    expect(wrapper.find('[data-testid="node-context-help"]').exists()).toBe(false)
+  })
 })

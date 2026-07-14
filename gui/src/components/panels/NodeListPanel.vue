@@ -7,7 +7,7 @@
     @update:collapsed="emit('update:collapsed', $event)"
   >
     <template #content>
-      <p class="node-context-help" data-testid="node-context-help">
+      <p v-if="nodes.length" class="node-context-help" data-testid="node-context-help">
         The <code>#</code> values are one-based simulator IDs.
         In custom functions, <code>{{ nodeIdKeyword.syntax }}</code>:
         {{ nodeIdKeyword.description }}

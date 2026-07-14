@@ -538,8 +538,6 @@
   end
 
   @testset "Custom Function Runtime Context" begin
-      @test WebQuantumSavory.CUSTOM_FUNCTION_CONTEXT_NAMES == (:nodeid, :self)
-
       nodes = [
         Dict("name" => "Amherst"),
         Dict("name" => "Cambridge"),
@@ -570,6 +568,34 @@
         )
         @test named(3)
         @test !named(1)
+
+        short_form_source =
+          "contextual_short(candidate) = " *
+          "self == nodeid(\"Cambridge\") && candidate == nodeid(\"Amherst\"); contextual_short"
+        @test Meta.parse(short_form_source).head === :toplevel
+        short_form = WebQuantumSavory.create_lambda(
+          short_form_source;
+          node_name_to_index=node_name_to_index,
+          self_node_index=2,
+        )
+        @test short_form(3)
+        @test !short_form(2)
+        @test !isdefined(parentmodule(short_form.func), :contextual_short)
+
+        long_form_source = """
+        function contextual_long(candidate)
+          return self == nodeid("Cambridge") && candidate == nodeid("Amherst")
+        end; contextual_long
+        """
+        @test Meta.parse(long_form_source).head === :toplevel
+        long_form = WebQuantumSavory.create_lambda(
+          long_form_source;
+          node_name_to_index=node_name_to_index,
+          self_node_index=2,
+        )
+        @test long_form(3)
+        @test !long_form(1)
+        @test !isdefined(parentmodule(long_form.func), :contextual_long)
 
         # Literal custom functions are instantiated with the node assignment's
         # context rather than a process-global value.
