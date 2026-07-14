@@ -44,6 +44,7 @@
       <div
         v-if="hasError"
         class="function-error-badge"
+        role="alert"
         v-tooltip.top="{
           value: errorMessage,
           escape: false,
@@ -52,7 +53,7 @@
         }"
       >
         <TriangleAlert :size="14" aria-hidden="true" />
-        Error!
+        Validation failed
       </div>
 
       <div

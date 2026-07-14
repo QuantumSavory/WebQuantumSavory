@@ -123,19 +123,25 @@ function _script_self_function(value, node_index, context::String)
 end
 
 function _script_custom_function_expression(source::AbstractString, node_index, context::String)
-  _script_raw_expression(source, context)
-
-  named_function = match(r"function\s+([A-Za-z_][A-Za-z0-9_!]*)\s*\(", source)
-  result = if named_function === nothing
-    "(" * source * ")"
-  else
-    function_name = only(named_function.captures)
-    source * "\n" * function_name
+  source = strip(String(source))
+  isempty(source) && throw(validation_error("$context must not be blank"))
+  try
+    _parse_function_source(source)
+  catch error
+    throw(validation_error(
+      "$context is not valid Julia syntax",
+      Dict{String,Any}("parse_error" => sprint(showerror, error)),
+    ))
   end
 
-  indented = replace(result, "\n" => "\n    ")
+  indented = replace(source, "\n" => "\n        ")
   self_binding = node_index === nothing ? "" : "    self = $node_index\n"
-  return "(let\n" * self_binding * "    $indented\nend)"
+  return "(let\n" * self_binding * "    function_value = let\n" *
+    "        $indented\n" *
+    "    end\n" *
+    "    function_value isa Core.Function || Base.throw(Base.ArgumentError(\"Custom function source must evaluate to a Julia Function\"))\n" *
+    "    function_value\n" *
+    "end)"
 end
 
 function _script_function_expression(value, special_type::String, node_index, context::String)

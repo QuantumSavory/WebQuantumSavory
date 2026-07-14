@@ -256,6 +256,52 @@
     @test Base.invokelatest(node_one_protocol.chooseH, [5]) == 1006
     @test Base.invokelatest(node_two_protocol.chooseH, [5]) == 2006
 
+    complete_source_expression = WebQuantumSavory._script_value_expression(
+      "Lambda",
+      "complete_choice(value) = self + value\ncomplete_choice\n# trailing comment",
+      "Complete-source custom function";
+      node_index=2,
+    )
+    complete_source_function = Core.eval(
+      contextual_module,
+      Meta.parse(complete_source_expression),
+    )
+    @test Base.invokelatest(complete_source_function, 3) == 5
+
+    nonfunction_source_expression = WebQuantumSavory._script_value_expression(
+      "Lambda",
+      "42",
+      "Non-function custom source";
+      node_index=2,
+    )
+    @test_throws ArgumentError Core.eval(
+      contextual_module,
+      Meta.parse(nonfunction_source_expression),
+    )
+
+    shadowed_nonfunction_expression = WebQuantumSavory._script_value_expression(
+      "Lambda",
+      "Function = Any\nthrow = identity\n42",
+      "Shadowed non-function custom source";
+      node_index=2,
+    )
+    @test_throws ArgumentError Core.eval(
+      contextual_module,
+      Meta.parse(shadowed_nonfunction_expression),
+    )
+
+    shadowed_function_expression = WebQuantumSavory._script_value_expression(
+      "Lambda",
+      "Function = Int\nvalue -> self + value",
+      "Shadowed valid custom source";
+      node_index=2,
+    )
+    shadowed_function = Core.eval(
+      contextual_module,
+      Meta.parse(shadowed_function_expression),
+    )
+    @test Base.invokelatest(shadowed_function, 3) == 5
+
     for context in ("Edge custom function", "Floating custom function")
       nodeid_expression = WebQuantumSavory._script_value_expression(
         "Lambda",
@@ -535,6 +581,98 @@
       if haskey(ordinary_kwargs, :filter)
         @test ordinary_kwargs[:filter] === identity
       end
+  end
+
+  @testset "Custom Function Source Evaluation" begin
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      accepted_sources = (
+        ("<(1)", 0, true),
+        (">(1)", 2, true),
+        ("in([1, 3])", 3, true),
+        ("increment(x) = x + 1", 2, 3),
+        ("increment(x) = x + 1\nincrement", 3, 4),
+        ("increment(x) = x + 1\n# trailing comment", 4, 5),
+        ("function double(x)\n  return 2x\nend", 5, 10),
+      )
+
+      for (source, input, expected) in accepted_sources
+        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(source)
+        @test success
+        @test results isa Dict
+        @test validation_error === nothing
+
+        custom_function = WebQuantumSavory.create_lambda(source)
+        @test custom_function(input) == expected
+      end
+
+      node_name_to_index = Dict("Amherst" => 1, "Cambridge" => 2)
+      contextual_sources = (
+        ("<(self)", 1, true),
+        ("==(nodeid(\"Cambridge\"))", 2, true),
+        ("let threshold = self\n  <(threshold)\nend", 1, true),
+      )
+      for (source, input, expected) in contextual_sources
+        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+          source;
+          placement="node",
+        )
+        @test success
+        @test results isa Dict
+        @test validation_error === nothing
+
+        custom_function = WebQuantumSavory.create_lambda(
+          source;
+          node_name_to_index=node_name_to_index,
+          self_node_index=2,
+        )
+        @test custom_function(input) == expected
+      end
+
+      success, _, validation_error = WebQuantumSavory.Sandbox.test_code(
+        "==(nodeid(\"Amherst\"))";
+        placement="edge",
+      )
+      @test success
+      @test validation_error === nothing
+
+      for placement in (nothing, "edge", "floating")
+        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+          "<(self)";
+          placement=placement,
+        )
+        @test !success
+        @test results === nothing
+        @test validation_error isa UndefVarError
+      end
+
+      success, results, validation_error = WebQuantumSavory.Sandbox.test_code("42")
+      @test !success
+      @test results === nothing
+      @test validation_error isa ArgumentError
+      @test occursin("got Int64", sprint(showerror, validation_error))
+      @test occursin("<(1)", sprint(showerror, validation_error))
+
+      success, results, parse_error = WebQuantumSavory.Sandbox.test_code("invalid(")
+      @test !success
+      @test results === nothing
+      @test parse_error isa Base.Meta.ParseError
+
+      development_response = WebQuantumSavory.evaluation_failure_response(
+        parse_error;
+        environment="dev",
+      )
+      @test startswith(development_response[:error], "ParseError:")
+      @test occursin("Expected `)` or `,`", development_response[:error])
+      @test !occursin("Base.Meta.ParseError(", development_response[:error])
+      @test development_response[:error_type] == "Base.Meta.ParseError"
+
+      production_response = WebQuantumSavory.evaluation_failure_response(
+        parse_error;
+        environment="prod",
+      )
+      @test production_response[:error] == "Evaluation failed"
+      @test !occursin("invalid(", string(production_response))
+    end
   end
 
   @testset "Custom Function Runtime Context" begin

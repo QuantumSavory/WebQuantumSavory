@@ -1637,6 +1637,10 @@ end
                 type: string
                 description: Julia code to execute
                 example: "function add(a, b)\nreturn a + b\nend"
+              placement:
+                type: string
+                enum: [node, edge, floating]
+                description: Optional protocol placement used to provide representative custom-function context during validation; defaults to floating context
             required:
               - code
     responses:
@@ -1710,10 +1714,22 @@ route("/test_code", method="POST") do
   end
 
   code_string = payload["code"]
+  placement = get(payload, "placement", nothing)
+  if placement !== nothing && !(
+    placement isa AbstractString && placement in ("node", "edge", "floating")
+  )
+    throw(validation_error(
+      "Field 'placement' must be 'node', 'edge', or 'floating'",
+      Dict("field" => "placement"),
+    ))
+  end
   require_unsafe_code_evaluation()
 
   # Evaluate in a fresh namespace; Sandbox also enforces the policy for direct callers.
-  success, results, error = Sandbox.test_code(code_string)
+  success, results, error = Sandbox.test_code(
+    code_string;
+    placement=placement === nothing ? nothing : String(placement),
+  )
 
   if success
     json(Dict(

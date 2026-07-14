@@ -6,41 +6,53 @@ using QuantumSavory
 using QuantumSavory.ProtocolZoo
 using ResumableFunctions
 using ConcurrentSim
-using ..WebQuantumSavory: require_unsafe_code_evaluation
+using ..WebQuantumSavory: _evaluate_function_source, _function_context_expression,
+                          require_unsafe_code_evaluation
 
 import Base: Meta
 
 """
-Test Julia code in a fresh module.
+Test Julia custom-function code in a fresh module.
 
 This executes code in the server process. A fresh module isolates names; it is
-not a security sandbox.
+not a security sandbox. `placement` supplies representative lexical context;
+omitting it uses the edge/floating context where `nodeid` is available and
+`self` is not.
 
 Returns a tuple of (success::Bool, results::Dict, error::Union{Nothing, Exception})
 """
-function test_code(code_string::String)
+function test_code(code_string::String; placement::Union{Nothing,String}=nothing)
     require_unsafe_code_evaluation()
 
     # Create isolated module
     sandbox = Module()
 
     try
-        # Parse and validate syntax first
-        parsed = Meta.parse(code_string)
-
         # Get names that exist before evaluation (default functions)
         default_names = @invokelatest names(sandbox, all=true)
 
-        # Evaluate in sandbox
-        evaluation_result = Base.eval(sandbox, parsed)
-
-        # For our purposes we only need to know whether the evaluation result
-        # is callable (i.e. a function). Avoid introspecting `methods` on the
-        # result, which can run into world-age related edge cases in newer
-        # Julia versions, and just validate the type directly.
-        if !(evaluation_result isa Function)
-            return (false, nothing, "Evaluation result is not a function")
+        # Use the same complete-source parser, lexical context wrapper, and
+        # Function contract as runtime Lambda creation. Validation has no
+        # concrete project assignment yet, so contextual names use stable
+        # representative values while preserving placement availability.
+        effective_placement = placement === nothing ? "floating" : placement
+        effective_placement in ("node", "edge", "floating") || throw(ArgumentError(
+            "Custom function placement must be 'node', 'edge', or 'floating'",
+        ))
+        function validation_nodeid(name::String)::Int
+            return 1
         end
+        self_node_index = effective_placement == "node" ? 1 : nothing
+        transform = parsed -> _function_context_expression(
+            parsed,
+            validation_nodeid,
+            self_node_index,
+        )
+        _evaluate_function_source(
+            code_string;
+            evaluation_module=sandbox,
+            transform=transform,
+        )
 
         # Get names that exist after evaluation
         all_names = @invokelatest names(sandbox, all=true)
@@ -66,7 +78,9 @@ function test_code(code_string::String)
             @info "Name" name=name name_str=name_str
             # Skip internal Julia names
             if !startswith(name_str, "#") && !startswith(name_str, "@")
-                value = getfield(sandbox, name)
+                # Julia 1.12 tightened world-age checks for bindings created by
+                # the immediately preceding eval.
+                value = Base.invokelatest(getfield, sandbox, name)
                 if value isa Function
                     push!(functions, name_str)
                 else

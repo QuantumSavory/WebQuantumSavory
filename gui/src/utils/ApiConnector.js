@@ -399,14 +399,16 @@ export class ApiConnector {
     return param
   }
 
-  async validateFunction( code ){
+  async validateFunction( code, placement ){
     if( code == undefined || code == null || code == '' ){
       return { success: false, error: 'Code is empty' }
     }
+    const body = { code: code || '' }
+    if (placement) body.placement = placement
     const res = await fetch(`${this.baseUrl}/test_code`, {
       headers: this.requestHeaders,
       method: 'POST',
-      body: JSON.stringify( { code: code || '' } )
+      body: JSON.stringify(body)
     })
     return res.json()
   }
