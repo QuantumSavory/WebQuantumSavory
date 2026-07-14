@@ -87,6 +87,19 @@
     @test occursin("variable_default_chooser = nothing", script)
     @test occursin("QuantumSavory.T2Dephasing(; t2 = 5.0)", script)
     @test occursin("# Registers", script)
+    @test occursin(
+      "push!(registers, QuantumSavory.Register(traits, representations, backgrounds))\n\n" *
+      "# Resolve GUI node names to their one-based register indices.",
+      script,
+    )
+    @test occursin(
+      "node_indices = Dict{String,Int}(\n" *
+      "    \"Amherst\" => 1,\n" *
+      "    \"Cambridge\" => 2,\n" *
+      ")\n" *
+      "nodeid(name::String)::Int = node_indices[name]",
+      script,
+    )
     @test occursin("# Register network and simulation clock", script)
     @test occursin(
       "QuantumSavory.RegisterNet(graph, registers; names = [\"Amherst\", \"Cambridge\"])",
@@ -127,6 +140,10 @@
     generated_network = getfield(generated_module, :network)
     @test generated_network.names == ["Amherst", "Cambridge"]
     @test QuantumSavory.name.(generated_network.registers) == ["Amherst", "Cambridge"]
+    generated_nodeid = getfield(generated_module, :nodeid)
+    @test generated_nodeid("Amherst") == 1
+    @test generated_nodeid("Cambridge") == 2
+    @test_throws KeyError generated_nodeid("Missing node")
     generated_weighted_state = getfield(generated_module, :variable_weighted_pair)
     @test abs(LinearAlgebra.tr(QuantumSavory.express(generated_weighted_state))) ≈ 1
     generated_weighted_trace = getfield(generated_module, :variable_weighted_pair_tr)
@@ -134,6 +151,136 @@
     generated_protocols = getfield(generated_module, :protocols)
     @test length(generated_protocols) == 1
     @test generated_protocols[1].second.success_prob ≈ generated_weighted_trace
+
+    duplicate_name_payload = deepcopy(payload)
+    duplicate_name_payload["net"]["nodes"][2]["name"] = "Amherst"
+    duplicate_name_script = WebQuantumSavory.generate_julia_script(duplicate_name_payload)
+    @test occursin(
+      "node_indices = Dict{String,Int}(\n" *
+      "    \"Amherst\" => 1,\n" *
+      "    \"Amherst\" => 2,\n" *
+      ")",
+      duplicate_name_script,
+    )
+    duplicate_name_module = Module(gensym(:DuplicateNameExport))
+    Core.eval(duplicate_name_module, :(using Base))
+    Base.include_string(duplicate_name_module, duplicate_name_script, "duplicate-name-export.jl")
+    @test getfield(duplicate_name_module, :nodeid)("Amherst") == 2
+
+    contextual_payload = JSON.parsefile(joinpath(
+      @__DIR__,
+      "..",
+      "gui",
+      "src",
+      "demos",
+      "1.Entangler.Example.json",
+    ))
+    contextual_payload["name"] = "Contextual Function Export"
+    contextual_payload["simulationConfig"] = Dict("time" => 0.001, "timeStep" => 0.001)
+    contextual_payload["variables"] = Any[
+      Dict{String,Any}(
+        "id" => "node-context-function",
+        "name" => "node context function",
+        "type" => "Lambda",
+        "value" => "candidates -> self * 100 + nodeid(\"Cambridge\") + first(candidates)",
+      ),
+    ]
+    contextual_payload["net"]["edges"][1]["data"]["protocols"] = Any[]
+    named_node_function = """function named_node_choice(candidates)
+        self * 1000 + nodeid("Amherst") + first(candidates)
+    end"""
+    for (node_index, node) in enumerate(contextual_payload["net"]["nodes"])
+      push!(node["data"]["protocols"], Dict(
+        "id" => "node-context-$node_index",
+        "type" => "QuantumSavory.ProtocolZoo.SwapperProt",
+        "parameters" => Any[
+          Dict(
+            "name" => "chooseL",
+            "type" => "Function",
+            "value" => Dict("kind" => "variable", "id" => "node-context-function"),
+          ),
+          Dict("name" => "chooseH", "type" => "Lambda", "value" => named_node_function),
+          Dict("name" => "rounds", "type" => "Int64", "value" => 0),
+        ],
+      ))
+    end
+
+    contextual_script = WebQuantumSavory.generate_julia_script(contextual_payload)
+    @test Meta.parseall(contextual_script) isa Expr
+    @test occursin(
+      "# GUI variable \"node context function\" is instantiated at each protocol assignment",
+      contextual_script,
+    )
+    @test !occursin("variable_node_context_function =", contextual_script)
+    @test occursin("let\n    self = 1", contextual_script)
+    @test occursin("let\n    self = 2", contextual_script)
+    @test length(findall("candidates -> self * 100 + nodeid", contextual_script)) == 2
+    @test length(findall("function named_node_choice", contextual_script)) == 2
+
+    lambda_default_payload = deepcopy(contextual_payload)
+    lambda_default_payload["variables"][1]["value"] = "default"
+    lambda_default_error = try
+      WebQuantumSavory.generate_julia_script(lambda_default_payload)
+      nothing
+    catch error
+      error
+    end
+    @test lambda_default_error isa WebQuantumSavory.APIError
+    @test occursin("cannot use a constructor default", lambda_default_error.message)
+
+    unused_nonstring_lambda_payload = deepcopy(contextual_payload)
+    unused_nonstring_lambda_payload["variables"][1]["value"] = 42
+    for node in unused_nonstring_lambda_payload["net"]["nodes"]
+      empty!(node["data"]["protocols"])
+    end
+    unused_nonstring_lambda_error = try
+      WebQuantumSavory.generate_julia_script(unused_nonstring_lambda_payload)
+      nothing
+    catch error
+      error
+    end
+    @test unused_nonstring_lambda_error isa WebQuantumSavory.APIError
+    @test occursin(
+      "must be a function name or Julia function expression",
+      unused_nonstring_lambda_error.message,
+    )
+
+    contextual_module = Module(gensym(:ContextualExport))
+    Core.eval(contextual_module, :(using Base))
+    Base.include_string(contextual_module, contextual_script, "contextual-export.jl")
+    contextual_protocols = Dict(getfield(contextual_module, :protocols))
+    node_one_protocol = contextual_protocols["node-context-1"]
+    node_two_protocol = contextual_protocols["node-context-2"]
+    @test Base.invokelatest(node_one_protocol.chooseL, [5]) == 107
+    @test Base.invokelatest(node_two_protocol.chooseL, [5]) == 207
+    @test Base.invokelatest(node_one_protocol.chooseH, [5]) == 1006
+    @test Base.invokelatest(node_two_protocol.chooseH, [5]) == 2006
+
+    for context in ("Edge custom function", "Floating custom function")
+      nodeid_expression = WebQuantumSavory._script_value_expression(
+        "Lambda",
+        "value -> nodeid(\"Cambridge\") + value",
+        context,
+      )
+      nodeid_function = Core.eval(contextual_module, Meta.parse(nodeid_expression))
+      @test Base.invokelatest(nodeid_function, 3) == 5
+
+      unknown_name_expression = WebQuantumSavory._script_value_expression(
+        "Lambda",
+        "value -> nodeid(\"Missing node\") + value",
+        context,
+      )
+      unknown_name_function = Core.eval(contextual_module, Meta.parse(unknown_name_expression))
+      @test_throws KeyError Base.invokelatest(unknown_name_function, 3)
+
+      self_expression = WebQuantumSavory._script_value_expression(
+        "Lambda",
+        "value -> self + value",
+        context,
+      )
+      self_function = Core.eval(contextual_module, Meta.parse(self_expression))
+      @test_throws UndefVarError Base.invokelatest(self_function, 3)
+    end
 
     weighted_variable = only(filter(
       variable -> variable["id"] == "weighted-state-variable",
@@ -387,6 +534,153 @@
       @test haskey(ordinary_kwargs, :filter)
       if haskey(ordinary_kwargs, :filter)
         @test ordinary_kwargs[:filter] === identity
+      end
+  end
+
+  @testset "Custom Function Runtime Context" begin
+      nodes = [
+        Dict("name" => "Amherst"),
+        Dict("name" => "Cambridge"),
+        Dict("name" => "Amherst"),
+      ]
+      node_name_to_index = WebQuantumSavory._node_name_to_index(nodes)
+      # Julia Dict construction intentionally preserves compatibility for
+      # duplicate names by retaining the last matching node.
+      @test node_name_to_index == Dict("Amherst" => 3, "Cambridge" => 2)
+
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+        anonymous = WebQuantumSavory.create_lambda(
+          "candidate -> self == nodeid(\"Cambridge\") && candidate == nodeid(\"Amherst\")";
+          node_name_to_index=node_name_to_index,
+          self_node_index=2,
+        )
+        @test anonymous(3)
+        @test !anonymous(2)
+
+        named = WebQuantumSavory.create_lambda(
+          """
+          function contextual_selector(candidate)
+            return self == nodeid("Cambridge") && candidate == nodeid("Amherst")
+          end
+          """;
+          node_name_to_index=node_name_to_index,
+          self_node_index=2,
+        )
+        @test named(3)
+        @test !named(1)
+
+        short_form_source =
+          "contextual_short(candidate) = " *
+          "self == nodeid(\"Cambridge\") && candidate == nodeid(\"Amherst\"); contextual_short"
+        @test Meta.parse(short_form_source).head === :toplevel
+        short_form = WebQuantumSavory.create_lambda(
+          short_form_source;
+          node_name_to_index=node_name_to_index,
+          self_node_index=2,
+        )
+        @test short_form(3)
+        @test !short_form(2)
+        @test !isdefined(parentmodule(short_form.func), :contextual_short)
+
+        long_form_source = """
+        function contextual_long(candidate)
+          return self == nodeid("Cambridge") && candidate == nodeid("Amherst")
+        end; contextual_long
+        """
+        @test Meta.parse(long_form_source).head === :toplevel
+        long_form = WebQuantumSavory.create_lambda(
+          long_form_source;
+          node_name_to_index=node_name_to_index,
+          self_node_index=2,
+        )
+        @test long_form(3)
+        @test !long_form(1)
+        @test !isdefined(parentmodule(long_form.func), :contextual_long)
+
+        # Literal custom functions are instantiated with the node assignment's
+        # context rather than a process-global value.
+        literal_kwargs = Dict{Symbol,Any}()
+        literal_ctx = Dict{Symbol,Any}(
+          :node => 2,
+          WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+        )
+        @test WebQuantumSavory._handle_typed_parameter!(
+          literal_kwargs,
+          :selector,
+          "Lambda",
+          "candidate -> candidate == self && nodeid(\"Cambridge\") == self",
+          literal_ctx,
+        )
+        @test literal_kwargs[:selector](2)
+        @test !literal_kwargs[:selector](1)
+
+        # Lambda variables retain raw source and receive a fresh lexical `self`
+        # for each assignment, while sharing the prepared node lookup.
+        lambda_variable = WebQuantumSavory.Variable(
+          "contextual-selector",
+          "contextual selector",
+          "Lambda",
+          "candidate -> candidate == self && nodeid(\"Cambridge\") == 2",
+        )
+        variable_functions = Dict{Int,Any}()
+        for node_index in 1:2
+          kwargs = Dict{Symbol,Any}()
+          ctx = Dict{Symbol,Any}(
+            :node => node_index,
+            WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+          )
+          @test WebQuantumSavory._handle_typed_parameter!(
+            kwargs,
+            :selector,
+            lambda_variable.type,
+            lambda_variable.value,
+            ctx,
+          )
+          variable_functions[node_index] = kwargs[:selector]
+        end
+        @test variable_functions[1](1)
+        @test !variable_functions[1](2)
+        @test variable_functions[2](2)
+        @test !variable_functions[2](1)
+
+        # Edge and floating functions receive `nodeid`, but no `self` binding.
+        for ctx in (
+          Dict{Symbol,Any}(
+            :nodeA => 1,
+            :nodeB => 2,
+            WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+          ),
+          Dict{Symbol,Any}(
+            WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+          ),
+        )
+          kwargs = Dict{Symbol,Any}()
+          @test WebQuantumSavory._handle_typed_parameter!(
+            kwargs,
+            :selector,
+            "Lambda",
+            "candidate -> candidate == nodeid(\"Cambridge\")",
+            ctx,
+          )
+          @test kwargs[:selector](2)
+
+          invalid_kwargs = Dict{Symbol,Any}()
+          @test WebQuantumSavory._handle_typed_parameter!(
+            invalid_kwargs,
+            :selector,
+            "Lambda",
+            "candidate -> candidate == self",
+            ctx,
+          )
+          @test_throws UndefVarError invalid_kwargs[:selector](2)
+        end
+
+        missing_name = WebQuantumSavory.create_lambda(
+          "candidate -> candidate == nodeid(\"Springfield\")";
+          node_name_to_index=node_name_to_index,
+          self_node_index=1,
+        )
+        @test_throws KeyError missing_name(1)
       end
   end
 
@@ -853,6 +1147,12 @@
         Dict("id" => "probability", "name" => "probability", "type" => "Float64", "value" => 0.25),
         Dict("id" => "no_retry", "name" => "no retry", "type" => "Nothing", "value" => nothing),
         Dict("id" => "protocol_default", "name" => "protocol default", "type" => "Function", "value" => "default"),
+        Dict(
+          "id" => "contextual_lambda",
+          "name" => "contextual lambda",
+          "type" => "Lambda",
+          "value" => "candidates -> self * 100 + nodeid(\"Cambridge\") + first(candidates)",
+        ),
       ]
 
       protocol_definition = runtime_payload["net"]["edges"][1]["data"]["protocols"][1]
@@ -861,6 +1161,28 @@
       parameter_by_name("retry_lock_time")["value"] = Dict("kind" => "variable", "id" => "no_retry")
       parameter_by_name("attempt_time")["value"] = Dict("kind" => "variable", "id" => "protocol_default")
 
+      contextual_protocol_definition = Dict(
+        "id" => "runtime-contextual-swapper",
+        "type" => string(QuantumSavory.ProtocolZoo.SwapperProt),
+        "parameters" => Any[
+          Dict(
+            "name" => "chooseL",
+            "type" => "Function",
+            "value" => Dict("kind" => "variable", "id" => "contextual_lambda"),
+          ),
+          Dict(
+            "name" => "chooseH",
+            "type" => "Lambda",
+            "value" => "candidates -> self * 1000 + nodeid(\"Amherst\") + first(candidates)",
+          ),
+          Dict("name" => "rounds", "type" => "Int64", "value" => 0),
+        ],
+      )
+      push!(
+        runtime_payload["net"]["nodes"][1]["data"]["protocols"],
+        contextual_protocol_definition,
+      )
+
       try
         state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(runtime_payload))
         WebQuantumSavory.prepare_simulation(state, simulation_name)
@@ -868,6 +1190,10 @@
         @test protocol.success_prob == 0.25
         @test protocol.retry_lock_time === nothing
         @test protocol.attempt_time == 0.001
+
+        contextual_protocol = state.protocol_mapping[contextual_protocol_definition["id"]]
+        @test contextual_protocol.chooseL([5]) == 107
+        @test contextual_protocol.chooseH([5]) == 1006
 
         invalid_protocol_definition = Dict(
           "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),

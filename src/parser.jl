@@ -785,7 +785,15 @@ Handle Function or Lambda parameter conversion.
 The optional `self_node_index` enables node-relative comparison functions for
 node protocols. Leave it as `nothing` for edge and floating protocols.
 """
-function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, special_type::String, value, state=nothing; self_node_index=nothing)
+function _handle_function_lambda_parameter!(
+  kwargs::Dict{Symbol,Any},
+  name::Symbol,
+  special_type::String,
+  value,
+  state=nothing;
+  self_node_index::Union{Nothing,Int}=nothing,
+  node_name_to_index::Dict{String,Int}=Dict{String,Int}(),
+)
   if isa(value, Function)
     kwargs[name] = value
     return true
@@ -797,7 +805,11 @@ function _handle_function_lambda_parameter!(kwargs::Dict{Symbol,Any}, name::Symb
     if resolved === nothing && special_type == "Lambda"
       require_unsafe_code_evaluation()
       try
-        resolved = create_lambda(value)
+        resolved = create_lambda(
+          value;
+          node_name_to_index=node_name_to_index,
+          self_node_index=self_node_index,
+        )
         # Validate the lambda - try calling it with a test value if it's a filter
         if name == :filter || name == :chooseA || name == :chooseB
           msg = "Created lambda for parameter: $name"
@@ -940,6 +952,11 @@ function _handle_typed_parameter!(kwargs, name, p_raw_type, value, ctx, state=no
         value,
         state;
         self_node_index=get(ctx, :node, nothing),
+        node_name_to_index=get(
+          ctx,
+          NODE_NAME_TO_INDEX_CONTEXT_KEY,
+          Dict{String,Int}(),
+        ),
       )
     elseif special_type == "Symbolic"
       return _handle_symbolic_parameter!(kwargs, name, value)

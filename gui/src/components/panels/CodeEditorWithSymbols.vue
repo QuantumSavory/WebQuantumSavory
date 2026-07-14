@@ -29,6 +29,8 @@
     </button>
 
     <template v-else>
+      <CustomFunctionContextHelp v-if="!showLatex" />
+
       <div
         v-if="!evaluationEnabled"
         class="evaluation-disabled-notice"
@@ -117,6 +119,7 @@ import 'vue-highlight-code/dist/style.css';
 import { api } from '../../utils/ApiConnector'
 import { SAFE_KATEX_OPTIONS } from '../../utils/katexOptions'
 import { TriangleAlert } from '@lucide/vue'
+import CustomFunctionContextHelp from './CustomFunctionContextHelp.vue'
 
 const props = defineProps({
   modelValue: {

@@ -33,7 +33,10 @@ end
 # Make LambdaImpl callable
 function (f::LambdaImpl)(args...)
   try
-    result = f.func(args...)
+    # The wrapped function is created with `Base.eval`, so invoke it in the
+    # latest world. This matters when a freshly converted protocol parameter is
+    # called before the surrounding task yields back to top-level evaluation.
+    result = Base.invokelatest(f.func, args...)
     # If the lambda returns nothing and we're expecting something, warn
     if result === nothing
       @warn "Lambda function returned nothing" args=args
@@ -45,13 +48,56 @@ function (f::LambdaImpl)(args...)
   end
 end
 
+"""Protocol-conversion context key containing the shared node-name lookup."""
+const NODE_NAME_TO_INDEX_CONTEXT_KEY = :node_name_to_index
+
+"""Build the shared one-based node-name lookup from validated node order."""
+function _node_name_to_index(nodes)::Dict{String,Int}
+    return Dict{String,Int}(
+        string(node["name"]) => index for (index, node) in enumerate(nodes)
+    )
+end
+
+"""Create the strictly typed `nodeid` lookup captured by a custom function."""
+function _nodeid_resolver(node_name_to_index::Dict{String,Int})
+    function nodeid(name::String)::Int
+        return node_name_to_index[name]
+    end
+
+    return nodeid
+end
+
+"""Wrap parsed function code in its supported lexical runtime context."""
+function _contextual_function_expression(
+    parsed,
+    node_name_to_index::Dict{String,Int},
+    self_node_index::Union{Nothing,Int},
+)
+    nodeid = _nodeid_resolver(node_name_to_index)
+
+    if self_node_index === nothing
+        return :(let nodeid = $(QuoteNode(nodeid))
+            $parsed
+        end)
+    end
+
+    return :(let nodeid = $(QuoteNode(nodeid)), self = $self_node_index
+        $parsed
+    end)
+end
+
 """
 Create a Lambda from a string representation in a temporary module.
 
 This evaluates code in the server process; the temporary module is not a
-security boundary.
+security boundary. `nodeid` is always bound lexically from the supplied map;
+`self` is bound only when `self_node_index` identifies a node protocol.
 """
-function create_lambda(lambda_string::String)
+function create_lambda(
+    lambda_string::String;
+    node_name_to_index::Dict{String,Int}=Dict{String,Int}(),
+    self_node_index::Union{Nothing,Int}=nothing,
+)
     require_unsafe_code_evaluation()
 
     # Create a temporary namespace for evaluation
@@ -59,24 +105,22 @@ function create_lambda(lambda_string::String)
 
     try
         parsed = Meta.parse(lambda_string)
-        value = Base.eval(temp_module, parsed)
+        # `:toplevel` expressions bypass surrounding lexical scope during
+        # evaluation. Preserve multi-statement sources as a scoped block so
+        # every statement captures the contextual bindings below.
+        if parsed isa Expr && parsed.head === :toplevel
+            parsed = Expr(:block, parsed.args...)
+        end
+        contextual_expression = _contextual_function_expression(
+            parsed,
+            node_name_to_index,
+            self_node_index,
+        )
+        value = Base.eval(temp_module, contextual_expression)
 
         # If expression evaluated directly to a function, use it
         if value isa Function
             return LambdaImpl(value)
-        end
-
-        # If the string defined a named function (e.g., `function foo(x) ... end`),
-        # try to extract its name and fetch it from the temporary module.
-        m = match(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", lambda_string)
-        if m !== nothing
-            fname = Symbol(m.captures[1])
-            if isdefined(temp_module, fname)
-                fval = getfield(temp_module, fname)
-                if fval isa Function
-                    return LambdaImpl(fval)
-                end
-            end
         end
 
         error("String does not evaluate to a function: '$lambda_string'")
