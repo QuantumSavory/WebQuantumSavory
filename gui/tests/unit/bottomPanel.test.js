@@ -52,6 +52,7 @@ function mountPanel(availableBounds, extraProps = {}) {
         LayoutToolsPanel: true,
         LogsPanel: true,
         StatesZooPanel: true,
+        TagsQueriesPanel: true,
         VariablesPanel: true
       }
     }
@@ -116,5 +117,27 @@ describe('BottomPanel bounds contract', () => {
     expect(panicBadge.attributes('aria-label')).toBe('2 panic logs')
     expect(panicBadge.attributes('title')).toBe('2 panic logs')
     expect(wrapper.get('#bottom-panel-logs-tab .badge-error').text()).toBe('1')
+  })
+
+  it('enables the explorer from lifecycle capabilities and resets its active tab when disabled', async () => {
+    const wrapper = mountPanel(
+      { left: 0, right: 1000, top: 0, bottom: 800 },
+      { tagsExplorerEnabled: true, projectName: 'Tags Test' }
+    )
+    const explorerTab = wrapper.get('#bottom-panel-tags-queries-tab')
+    expect(explorerTab.attributes('aria-disabled')).toBe('false')
+    expect(explorerTab.attributes()).not.toHaveProperty('disabled')
+
+    await wrapper.get('#bottom-panel-logs-tab').trigger('keydown', { key: 'End' })
+    expect(explorerTab.attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#bottom-panel-tags-queries-content').isVisible()).toBe(true)
+
+    await wrapper.setProps({ tagsExplorerEnabled: false })
+    await nextTick()
+    expect(explorerTab.attributes()).toHaveProperty('disabled')
+    expect(wrapper.get('#bottom-panel-logs-tab').attributes('aria-selected')).toBe('true')
+
+    await wrapper.get('#bottom-panel-logs-tab').trigger('keydown', { key: 'ArrowLeft' })
+    expect(wrapper.get('#bottom-panel-export-script-tab').attributes('aria-selected')).toBe('true')
   })
 })

@@ -75,7 +75,8 @@ describe('simulation lifecycle reducer', () => {
       canPause: false,
       canResume: false,
       canPrepare: true,
-      editingDisabled: true
+      editingDisabled: true,
+      canExploreTags: true
     })
     expect(simulationCapabilities(SimulationPhase.RUNNING, false)).toMatchObject({
       canRun: false,
@@ -84,5 +85,9 @@ describe('simulation lifecycle reducer', () => {
       editingDisabled: true
     })
     expect(simulationCapabilities(SimulationPhase.PAUSED, false).canResume).toBe(true)
+    expect(simulationCapabilities(SimulationPhase.ERROR, false, true).canExploreTags).toBe(true)
+    expect(simulationCapabilities(SimulationPhase.ERROR, false, false).canExploreTags).toBe(false)
+    expect(simulationCapabilities(SimulationPhase.BLOCKED, false, true).canExploreTags).toBe(false)
+    expect(simulationCapabilities(SimulationPhase.PARSED, true, true).canExploreTags).toBe(false)
   })
 })

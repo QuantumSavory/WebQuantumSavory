@@ -64,7 +64,19 @@ export function useSimulationController({
     const net = projectData.value?.net
     return !net || ((net.nodes?.length || 0) === 0 && (net.edges?.length || 0) === 0)
   })
-  const capabilities = computed(() => simulationCapabilities(state.value.phase, graphEmpty.value))
+  const liveNetwork = computed(() => {
+    const simulation = state.value.backendState?.simulation || {}
+    return state.value.isParsed
+      && state.value.phase !== SimulationPhase.EMPTY
+      && state.value.phase !== SimulationPhase.BLOCKED
+      && simulation.simulation_auto_purged !== true
+      && simulation.simulation_execution_time_exceeded !== true
+  })
+  const capabilities = computed(() => simulationCapabilities(
+    state.value.phase,
+    graphEmpty.value,
+    liveNetwork.value
+  ))
   const isSimulationRunning = computed(() => state.value.phase === SimulationPhase.RUNNING)
   const isSimulationPaused = computed(() => state.value.phase === SimulationPhase.PAUSED)
   const isSimulationComplete = computed(() => state.value.phase === SimulationPhase.COMPLETED)

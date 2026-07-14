@@ -205,6 +205,211 @@ end
 ########################################################
 
 @swagger """
+/tag_types:
+  get:
+    summary: List runtime-discovered tag definitions and signatures
+    description: Returns named Tag converters, general Symbol/DataType signatures, allowlisted DataType heads, field documentation, and the unsafe-evaluation capability.
+    responses:
+      '200':
+        description: Tag metadata catalog
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [named_tags, general_signatures, allowed_data_types, unsafe_evaluation]
+              properties:
+                named_tags:
+                  type: array
+                  items:
+                    type: object
+                    required: [type_id, display_name, fields]
+                general_signatures:
+                  type: array
+                  items:
+                    type: object
+                    required: [signature_id, head_type, fields, allowed_data_type_ids]
+                    properties:
+                      signature_id:
+                        type: string
+                      head_type:
+                        type: string
+                        enum: [Symbol, DataType]
+                      fields:
+                        type: array
+                        items:
+                          type: object
+                      allowed_data_type_ids:
+                        type: array
+                        description: Fully qualified type IDs that are valid heads for this DataType signature; empty for Symbol signatures.
+                        items:
+                          type: string
+                allowed_data_types:
+                  type: array
+                  items:
+                    type: object
+                    required: [type_id, display_name]
+                unsafe_evaluation:
+                  type: boolean
+"""
+route("/tag_types", method="GET") do
+  json(tag_type_catalog())
+end
+
+########################################################
+
+@swagger """
+/tag_preview:
+  post:
+    summary: Validate, construct, and render a typed tag
+    description: Constructs only a catalog-advertised named tag or general signature. Arbitrary Julia type lookup is not supported.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [tag]
+            properties:
+              tag:
+                type: object
+                required: [kind]
+    responses:
+      '200':
+        description: Structured tag preview
+      '400':
+        description: Malformed or incomplete tag specification
+"""
+route("/tag_preview", method="POST") do
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  preview = preview_tag_payload(payload)
+  json(Dict(:success => true, preview...))
+end
+
+########################################################
+
+function _tag_target_query_payload()
+  target = Dict{String,Any}()
+  for key in ("target", "node_id", "slot_id", "destination_slot_id")
+    value = Genie.Requests.getpayload(Symbol(key), nothing)
+    value === nothing || (target[key] = string(value))
+  end
+  target
+end
+
+@swagger """
+/tags/{name}:
+  get:
+    summary: List tags for a live register, slot, or message buffer
+    parameters:
+      - {name: name, in: path, required: true, schema: {type: string}}
+      - {name: target, in: query, required: true, schema: {type: string, enum: [register, slot, message_buffer]}}
+      - {name: node_id, in: query, schema: {type: string}}
+      - {name: slot_id, in: query, schema: {type: string}}
+    responses:
+      '200': {description: Structured tag entries}
+      '404': {description: Simulation or target not found}
+  post:
+    summary: Attach a slot tag or insert a message-buffer tag
+    description: Register targets require destination_slot_id because QuantumSavory attaches metadata to a concrete slot.
+    parameters:
+      - {name: name, in: path, required: true, schema: {type: string}}
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [target, tag]
+            properties:
+              target: {type: string, enum: [register, slot, message_buffer]}
+              node_id: {type: string}
+              slot_id: {type: string}
+              destination_slot_id: {type: string}
+              tag: {type: object}
+    responses:
+      '200': {description: Attached tag entry}
+      '400': {description: Malformed tag or target}
+      '404': {description: Simulation or target not found}
+"""
+route("/tags/:name", method="GET") do
+  simulation_name = string(params(:name))
+  state = require_live_tag_state(simulation_name)
+  entries = list_tags(state, _tag_target_query_payload())
+  json(Dict(:success => true, :entries => entries))
+end
+
+route("/tags/:name", method="POST") do
+  simulation_name = string(params(:name))
+  state = require_live_tag_state(simulation_name)
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  entry = attach_tag!(state, payload)
+  json(Dict(:success => true, :entry => entry))
+end
+
+########################################################
+
+@swagger """
+/tags/{name}/{tag_id}:
+  delete:
+    summary: Remove a slot/register tag by its string ID
+    description: Message-buffer deletion is intentionally unsupported.
+    parameters:
+      - {name: name, in: path, required: true, schema: {type: string}}
+      - {name: tag_id, in: path, required: true, schema: {type: string}}
+      - {name: target, in: query, required: true, schema: {type: string, enum: [register, slot, message_buffer]}}
+      - {name: node_id, in: query, schema: {type: string}}
+      - {name: slot_id, in: query, schema: {type: string}}
+    responses:
+      '200': {description: Removed tag entry}
+      '400': {description: Message deletion or malformed ID}
+      '404': {description: "Simulation, target, or tag not found"}
+"""
+route("/tags/:name/:tag_id", method="DELETE") do
+  simulation_name = string(params(:name))
+  tag_id = string(params(:tag_id))
+  state = require_live_tag_state(simulation_name)
+  entry = delete_tag!(state, tag_id, _tag_target_query_payload())
+  json(Dict(:success => true, :entry => entry))
+end
+
+########################################################
+
+@swagger """
+/tag_queries/{name}:
+  post:
+    summary: Execute a non-consuming FILO tag query
+    description: Queries a live register or slot with exact, wildcard, preset-predicate, or policy-gated custom Julia predicate terms. Message-buffer queries are not supported in v1.
+    parameters:
+      - {name: name, in: path, required: true, schema: {type: string}}
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [target, query]
+            properties:
+              target: {type: string, enum: [register, slot]}
+              node_id: {type: string}
+              slot_id: {type: string}
+              query: {type: object}
+    responses:
+      '200': {description: All matching entries in FILO order}
+      '400': {description: Malformed query or unsupported target}
+      '403': {description: Custom predicates are disabled by server policy}
+      '404': {description: Simulation or target not found}
+"""
+route("/tag_queries/:name", method="POST") do
+  simulation_name = string(params(:name))
+  state = require_live_tag_state(simulation_name)
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  entries = query_tags(state, payload)
+  json(Dict(:success => true, :entries => entries))
+end
+
+########################################################
+
+@swagger """
 /states_zoo_types:
   get:
     summary: List allowlisted States Zoo types
@@ -2077,6 +2282,10 @@ end
               simulation_last_active_time:
                 type: string
                 description: Set last active time
+              block_reason:
+                type: string
+                enum: [timeout, autopurge]
+                description: Run the real blocked-state cleanup path for lifecycle tests
     responses:
       '200':
         description: State updated successfully
@@ -2146,6 +2355,20 @@ route("/dev/manipulate_state", method="POST") do
 
   if haskey(payload, "simulation_last_active_time")
     state.simulation_last_active_time = payload["simulation_last_active_time"]
+  end
+
+  if haskey(payload, "block_reason")
+    block_reason = string(payload["block_reason"])
+    block_reason in ("timeout", "autopurge") || throw(validation_error(
+      "block_reason must be 'timeout' or 'autopurge'",
+    ))
+    reason = Symbol(block_reason)
+    WebQuantumSavory.block_simulation(
+      state;
+      reason,
+      max_minutes=reason == :timeout ? WebQuantumSavory.MAX_SIM_RUNTIME_MINUTES : 30,
+      auto_purged=reason == :autopurge,
+    )
   end
 
   json(Dict(:success => true, :message => "State updated", :name => simulation_name))

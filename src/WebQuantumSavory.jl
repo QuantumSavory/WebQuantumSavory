@@ -76,6 +76,8 @@ end
 
 const STATE = Dict{String, State}()
 
+include("tag_metadata.jl")
+
 function main()
   # Validate an explicit override before Genie starts and handles route-loading
   # errors internally. Environment-specific defaults are resolved at use time.

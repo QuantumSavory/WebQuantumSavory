@@ -160,9 +160,19 @@ export function reduceSimulationState(previous, event) {
   }
 }
 
-export function simulationCapabilities(phase, graphEmpty) {
+export function simulationCapabilities(phase, graphEmpty, liveNetwork = undefined) {
   const running = phase === SimulationPhase.RUNNING
   const paused = phase === SimulationPhase.PAUSED
+  const networkPhase = [
+    SimulationPhase.PARSED,
+    SimulationPhase.PREPARED,
+    SimulationPhase.RUNNING,
+    SimulationPhase.PAUSED,
+    SimulationPhase.COMPLETED
+  ].includes(phase)
+  const canExploreTags = !graphEmpty && (
+    networkPhase || (phase === SimulationPhase.ERROR && liveNetwork === true)
+  )
   return {
     canRun: !graphEmpty && !running && !paused,
     canPause: running,
@@ -171,7 +181,8 @@ export function simulationCapabilities(phase, graphEmpty) {
     canPrepare: !graphEmpty && !running && !paused,
     // Once a backend graph exists, edits must wait for Reset/Stop so Run can
     // never reuse a parsed snapshot that differs from the visible project.
-    editingDisabled: phase !== SimulationPhase.EMPTY
+    editingDisabled: phase !== SimulationPhase.EMPTY,
+    canExploreTags
   }
 }
 

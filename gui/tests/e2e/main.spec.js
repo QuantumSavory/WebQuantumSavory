@@ -272,6 +272,83 @@ test.describe.serial('Main Workflow', () => {
     await expect(page.locator('#runnerPanel .main-buttons .stop-btn')).toBeVisible();
     await expect(page.locator('#runnerPanel .main-buttons .stop-btn')).toBeEnabled(); 
 
+    // Explore the live RegisterNet before Stop destroys it.
+    const tagsQueriesTab = page.getByRole('tab', { name: 'Tags & Queries' });
+    await expect(tagsQueriesTab).toBeEnabled();
+    await tagsQueriesTab.click();
+
+    const tagsPanel = page.locator('#tag-explorer-tags-panel');
+    await expect(tagsPanel.getByRole('button', { name: 'Refresh' }).locator('.lucide-refresh-cw')).toBeVisible();
+    const tagCombobox = tagsPanel.getByRole('combobox', { name: 'Tag type' });
+    await expect(tagCombobox).toBeEnabled({ timeout: 10000 });
+    await tagCombobox.focus();
+
+    const generalOptions = tagsPanel.locator('.tag-option');
+    const optionCount = await generalOptions.count();
+    let headOnlySymbolOption = null;
+    for (let index = 0; index < optionCount; index += 1) {
+      const option = generalOptions.nth(index);
+      const label = await option.locator('span').innerText();
+      if (label.endsWith('(Symbol)')) {
+        headOnlySymbolOption = option;
+        break;
+      }
+    }
+    expect(headOnlySymbolOption).not.toBeNull();
+    await headOnlySymbolOption.click();
+
+    const uniqueTagHead = 'webquantumsavory_e2e_tag';
+    await tagsPanel.getByLabel('General tag Symbol head').fill(uniqueTagHead);
+    await expect(tagsPanel.locator('.tag-preview code')).toContainText(uniqueTagHead, {
+      timeout: 10000,
+    });
+    await expect(tagsPanel.getByRole('button', { name: 'Add tag' }).locator('.lucide-plus')).toBeVisible();
+    await tagsPanel.getByRole('button', { name: 'Add tag' }).click();
+
+    const attachedTag = tagsPanel.locator('.tag-result-item').filter({ hasText: uniqueTagHead });
+    await expect(attachedTag).toHaveCount(1, { timeout: 10000 });
+    await expect(attachedTag.getByRole('button', { name: 'Show rendered tag details' }).locator('.lucide-chevron-right')).toBeVisible();
+    await expect(attachedTag.getByRole('button', { name: /Delete tag/ }).locator('.lucide-trash-2')).toBeVisible();
+    await attachedTag.getByRole('button', { name: 'Show rendered tag details' }).click();
+    await expect(attachedTag).toContainText('Tag ID');
+    await expect(attachedTag).toContainText(uniqueTagHead);
+
+    const tagsInnerTab = page.getByRole('tab', { name: 'Tags', exact: true });
+    await tagsInnerTab.focus();
+    await page.keyboard.press('ArrowRight');
+    const queriesInnerTab = page.getByRole('tab', { name: 'Queries', exact: true });
+    await expect(queriesInnerTab).toBeFocused();
+    await expect(queriesInnerTab).toHaveAttribute('aria-selected', 'true');
+
+    const queriesPanel = page.locator('#tag-explorer-queries-panel');
+    const queryCombobox = queriesPanel.getByRole('combobox', { name: 'Tag type' });
+    await queryCombobox.focus();
+    const queryOptions = queriesPanel.locator('.tag-option');
+    const queryOptionCount = await queryOptions.count();
+    let queryHeadOnlySymbolOption = null;
+    for (let index = 0; index < queryOptionCount; index += 1) {
+      const option = queryOptions.nth(index);
+      const label = await option.locator('span').innerText();
+      if (label.endsWith('(Symbol)')) {
+        queryHeadOnlySymbolOption = option;
+        break;
+      }
+    }
+    expect(queryHeadOnlySymbolOption).not.toBeNull();
+    await queryHeadOnlySymbolOption.click();
+    await queriesPanel.getByLabel('General tag Symbol head').fill(uniqueTagHead);
+    await queriesPanel.getByRole('button', { name: 'Run query' }).click();
+
+    const queryResult = queriesPanel.locator('.tag-result-item').filter({ hasText: uniqueTagHead });
+    await expect(queryResult).toHaveCount(1, { timeout: 10000 });
+    await expect(queriesPanel).toContainText('Queries return all matches without consuming them');
+
+    await queriesInnerTab.focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(tagsInnerTab).toBeFocused();
+    await attachedTag.getByRole('button', { name: /Delete tag/ }).click();
+    await expect(attachedTag).toHaveCount(0, { timeout: 10000 });
+
     // Stop the simulation
     await page.click('#runnerPanel .main-buttons .stop-btn');
     await expect(page.locator('#runnerPanel .main-buttons .stop-btn')).toBeDisabled();

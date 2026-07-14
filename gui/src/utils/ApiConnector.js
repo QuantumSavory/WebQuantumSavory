@@ -34,6 +34,26 @@ function pathSegment(value) {
   return encodeURIComponent(String(value))
 }
 
+function tagTargetPayload(target = {}, { includeDestination = false } = {}) {
+  const kind = target.kind || target.target || 'register'
+  const payload = { target: kind }
+  if (kind === 'slot' && target.slot_id != null && target.slot_id !== '') {
+    payload.slot_id = String(target.slot_id)
+  }
+  if (kind !== 'slot' && target.node_id != null && target.node_id !== '') {
+    payload.node_id = String(target.node_id)
+  }
+  if (
+    includeDestination
+    && kind === 'register'
+    && target.destination_slot_id != null
+    && target.destination_slot_id !== ''
+  ) {
+    payload.destination_slot_id = String(target.destination_slot_id)
+  }
+  return payload
+}
+
 async function readJsonResponse(response, fallbackMessage) {
   const body = await response.json().catch(() => null)
   if (!response.ok) {
@@ -111,6 +131,82 @@ export class ApiConnector {
       signal,
     })
     return readJsonResponse(res, 'Julia script export failed')
+  }
+
+  async fetchTagTypes({ signal, force = false } = {}) {
+    const cachedCatalog = this._config.value.tagTypes
+    if (!force && cachedCatalog) return cachedCatalog
+
+    const res = await fetch(`${this.baseUrl}/tag_types`, {
+      headers: this.requestHeaders,
+      signal,
+    })
+    const catalog = await readJsonResponse(res, 'Tag types fetch failed')
+    this._config.value = {
+      ...this._config.value,
+      tagTypes: catalog,
+    }
+    return catalog
+  }
+
+  async previewTag(tag, { signal } = {}) {
+    const res = await fetch(`${this.baseUrl}/tag_preview`, {
+      headers: this.requestHeaders,
+      method: 'POST',
+      body: JSON.stringify({ tag }),
+      signal,
+    })
+    return readJsonResponse(res, 'Tag preview failed')
+  }
+
+  async listTags(projectName, target, { signal } = {}) {
+    const uuid = this.getUserUuid()
+    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const query = new URLSearchParams(tagTargetPayload(target))
+    const res = await fetch(`${this.baseUrl}/tags/${namespace}?${query}`, {
+      headers: this.requestHeaders,
+      signal,
+    })
+    return readJsonResponse(res, 'Tags fetch failed')
+  }
+
+  async attachTag(projectName, target, tag, { signal } = {}) {
+    const uuid = this.getUserUuid()
+    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const res = await fetch(`${this.baseUrl}/tags/${namespace}`, {
+      headers: this.requestHeaders,
+      method: 'POST',
+      body: JSON.stringify({ ...tagTargetPayload(target, { includeDestination: true }), tag }),
+      signal,
+    })
+    return readJsonResponse(res, 'Tag attachment failed')
+  }
+
+  async deleteTag(projectName, target, tagId, { signal } = {}) {
+    const uuid = this.getUserUuid()
+    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const query = new URLSearchParams(tagTargetPayload(target))
+    const res = await fetch(
+      `${this.baseUrl}/tags/${namespace}/${pathSegment(tagId)}?${query}`,
+      {
+        headers: this.requestHeaders,
+        method: 'DELETE',
+        signal,
+      },
+    )
+    return readJsonResponse(res, 'Tag deletion failed')
+  }
+
+  async queryTags(projectName, target, querySpec, { signal } = {}) {
+    const uuid = this.getUserUuid()
+    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const res = await fetch(`${this.baseUrl}/tag_queries/${namespace}`, {
+      headers: this.requestHeaders,
+      method: 'POST',
+      body: JSON.stringify({ ...tagTargetPayload(target), query: querySpec }),
+      signal,
+    })
+    return readJsonResponse(res, 'Tag query failed')
   }
 
   getKnownFunctions(){

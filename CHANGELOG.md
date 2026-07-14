@@ -2,6 +2,7 @@
 
 ## 1.7.1
 
+- Added a metadata-driven Tags & Queries explorer for live simulations, with safe typed tag construction, previews, register/slot/message-buffer inspection and mutation, and non-consuming FILO register/slot queries with exact, wildcard, preset, and policy-gated custom predicates.
 - Synchronized the frontend package and API documentation metadata with the application release version so release bumps remain consistent across shared CI checks and public version surfaces.
 - Made CI server ownership checks tolerate hosts whose socket tools cannot report process metadata, while still requiring the launched Genie server to confirm that it is listening.
 

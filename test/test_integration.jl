@@ -37,11 +37,12 @@
     url = "$TEST_BASE_URL$endpoint"
     headers = ["Content-Type" => "application/json"]
 
+    if query !== nothing
+      query_str = HTTP.escapeuri(query)
+      url = "$url?$query_str"
+    end
+
     if method == "GET"
-      if query !== nothing
-        query_str = HTTP.escapeuri(query)
-        url = "$url?$query_str"
-      end
       response = HTTP.get(url, headers; status_exception=false)
     elseif method == "POST"
       if body !== nothing
@@ -49,6 +50,10 @@
       else
         response = HTTP.post(url, headers; status_exception=false)
       end
+    elseif method == "DELETE"
+      response = HTTP.delete(url, headers; status_exception=false)
+    else
+      error("Unsupported HTTP method: $method")
     end
 
     return response
@@ -973,6 +978,365 @@
       # Verify cleanup
       verify_response = make_request("GET", "/get_state", query=Dict("name" => workflow_pause_name))
       @test verify_response.status == 404
+  end
+
+  @testset "Tags and Queries Explorer" begin
+      catalog_response = make_request("GET", "/tag_types")
+      @test catalog_response.status == 200
+      catalog = parse_response(catalog_response)
+      @test Set(keys(catalog)) == Set([
+        "named_tags",
+        "general_signatures",
+        "allowed_data_types",
+        "unsafe_evaluation",
+      ])
+      @test !isempty(catalog["named_tags"])
+      @test !isempty(catalog["general_signatures"])
+      @test !isempty(catalog["allowed_data_types"])
+      @test catalog["unsafe_evaluation"] == unsafe_evaluation_enabled
+
+      symbol_int_signature = only(filter(catalog["general_signatures"]) do signature
+        signature["head_type"] == "Symbol" &&
+          [field["type"] for field in signature["fields"]] == ["Int64"]
+      end)
+
+      function tag_spec(head, value)
+        Dict(
+          "kind" => "general",
+          "signature_id" => symbol_int_signature["signature_id"],
+          "head" => Dict("type" => "Symbol", "value" => head),
+          "fields" => [Dict("type" => "Int64", "value" => value)],
+        )
+      end
+
+      function query_spec(head, term)
+        Dict(
+          "kind" => "general",
+          "signature_id" => symbol_int_signature["signature_id"],
+          "head" => Dict("type" => "Symbol", "value" => head),
+          "fields" => [Dict("type" => "Int64", "value" => term)],
+        )
+      end
+
+      preview_response = make_request(
+        "POST",
+        "/tag_preview";
+        body=Dict("tag" => tag_spec("integration_preview", 9)),
+      )
+      @test preview_response.status == 200
+      preview = parse_response(preview_response)
+      @test preview["success"] == true
+      @test preview["tag"]["kind"] == "general"
+      @test preview["tag"]["signature_id"] == symbol_int_signature["signature_id"]
+      @test preview["tag"]["head"]["value"] == "integration_preview"
+      @test preview["tag"]["fields"][1]["value"] == 9
+      @test preview["rendered"] == "SymbolInt(:integration_preview, 9)::Tag"
+
+      malformed_preview = make_request(
+        "POST",
+        "/tag_preview";
+        body=Dict("tag" => Dict("kind" => "general")),
+      )
+      @test malformed_preview.status == 400
+      malformed_preview_data = parse_response(malformed_preview)
+      @test malformed_preview_data["success"] == false
+      @test malformed_preview_data["error_code"] == "VALIDATION_ERROR"
+
+      malformed_discriminator_preview = make_request(
+        "POST",
+        "/tag_preview";
+        body=Dict("tag" => Dict("kind" => 1)),
+      )
+      @test malformed_discriminator_preview.status == 400
+      @test parse_response(malformed_discriminator_preview)["error_code"] == "VALIDATION_ERROR"
+
+      simulation_name = "tags_queries_integration_$(time_ns())"
+      payload = deepcopy(test_payload)
+      payload["name"] = simulation_name
+      node_id = "node_FVAmt8"
+      slot_one_id = "slot_MglsMO"
+      slot_two_id = "slot_VSOCk6"
+      slot_one = Dict("target" => "slot", "node_id" => node_id, "slot_id" => slot_one_id)
+      slot_two = Dict("target" => "slot", "node_id" => node_id, "slot_id" => slot_two_id)
+      register_target = Dict("target" => "register", "node_id" => node_id)
+      register_destination = merge(
+        register_target,
+        Dict("destination_slot_id" => slot_two_id),
+      )
+      message_target = Dict("target" => "message_buffer", "node_id" => node_id)
+
+      try
+        create_response = make_request("POST", "/parse_network_graph"; body=payload)
+        @test create_response.status == 200
+
+        empty_list_response = make_request(
+          "GET",
+          "/tags/$simulation_name";
+          query=slot_one,
+        )
+        @test empty_list_response.status == 200
+        @test parse_response(empty_list_response)["entries"] == []
+
+        slot_add_response = make_request(
+          "POST",
+          "/tags/$simulation_name";
+          body=merge(slot_one, Dict("tag" => tag_spec("integration_attach", 1))),
+        )
+        @test slot_add_response.status == 200
+        slot_add = parse_response(slot_add_response)
+        @test slot_add["success"] == true
+        @test slot_add["entry"]["tag_id"] isa String
+        @test slot_add["entry"]["slot_id"] == slot_one_id
+        @test slot_add["entry"]["node_id"] == node_id
+        slot_tag_id = slot_add["entry"]["tag_id"]
+
+        register_add_response = make_request(
+          "POST",
+          "/tags/$simulation_name";
+          body=merge(
+            register_destination,
+            Dict("tag" => tag_spec("integration_attach", 2)),
+          ),
+        )
+        @test register_add_response.status == 200
+        register_add = parse_response(register_add_response)
+        @test register_add["entry"]["tag_id"] isa String
+        @test register_add["entry"]["slot_id"] == slot_two_id
+        register_tag_id = register_add["entry"]["tag_id"]
+
+        slot_list_response = make_request(
+          "GET",
+          "/tags/$simulation_name";
+          query=slot_one,
+        )
+        @test slot_list_response.status == 200
+        @test [entry["tag_id"] for entry in parse_response(slot_list_response)["entries"]] ==
+          [slot_tag_id]
+
+        register_list_response = make_request(
+          "GET",
+          "/tags/$simulation_name";
+          query=register_target,
+        )
+        @test register_list_response.status == 200
+        @test [entry["tag_id"] for entry in parse_response(register_list_response)["entries"]] ==
+          [register_tag_id, slot_tag_id]
+
+        delete_response = make_request(
+          "DELETE",
+          "/tags/$simulation_name/$slot_tag_id";
+          query=slot_one,
+        )
+        @test delete_response.status == 200
+        delete_data = parse_response(delete_response)
+        @test delete_data["success"] == true
+        @test delete_data["entry"]["tag_id"] == slot_tag_id
+
+        stale_response = make_request(
+          "DELETE",
+          "/tags/$simulation_name/$slot_tag_id";
+          query=register_target,
+        )
+        @test stale_response.status == 404
+        stale_data = parse_response(stale_response)
+        @test stale_data["success"] == false
+        @test stale_data["error_code"] == "NOT_FOUND"
+
+        message_add_response = make_request(
+          "POST",
+          "/tags/$simulation_name";
+          body=merge(message_target, Dict("tag" => tag_spec("integration_message", 3))),
+        )
+        @test message_add_response.status == 200
+        message_add = parse_response(message_add_response)
+        @test message_add["entry"]["tag_id"] isa String
+        @test message_add["entry"]["depth"] == 1
+        message_tag_id = message_add["entry"]["tag_id"]
+
+        message_list_response = make_request(
+          "GET",
+          "/tags/$simulation_name";
+          query=message_target,
+        )
+        @test message_list_response.status == 200
+        message_entries = parse_response(message_list_response)["entries"]
+        @test length(message_entries) == 1
+        @test message_entries[1]["tag_id"] == message_tag_id
+        @test message_entries[1]["depth"] == 1
+        @test message_entries[1]["node_id"] == node_id
+
+        message_delete_response = make_request(
+          "DELETE",
+          "/tags/$simulation_name/$message_tag_id";
+          query=message_target,
+        )
+        @test message_delete_response.status == 400
+        @test occursin("not supported", parse_response(message_delete_response)["error"])
+
+        query_entry_one_response = make_request(
+          "POST",
+          "/tags/$simulation_name";
+          body=merge(slot_one, Dict("tag" => tag_spec("integration_query", 1))),
+        )
+        @test query_entry_one_response.status == 200
+        query_entry_one = parse_response(query_entry_one_response)["entry"]
+
+        query_entry_two_response = make_request(
+          "POST",
+          "/tags/$simulation_name";
+          body=merge(
+            register_destination,
+            Dict("tag" => tag_spec("integration_query", 2)),
+          ),
+        )
+        @test query_entry_two_response.status == 200
+        query_entry_two = parse_response(query_entry_two_response)["entry"]
+
+        exact_query_response = make_request(
+          "POST",
+          "/tag_queries/$simulation_name";
+          body=merge(register_target, Dict("query" => query_spec(
+            "integration_query",
+            Dict("kind" => "exact", "value" => 2),
+          ))),
+        )
+        @test exact_query_response.status == 200
+        exact_entries = parse_response(exact_query_response)["entries"]
+        @test [entry["tag_id"] for entry in exact_entries] == [query_entry_two["tag_id"]]
+
+        slot_query_response = make_request(
+          "POST",
+          "/tag_queries/$simulation_name";
+          body=merge(slot_one, Dict("query" => query_spec(
+            "integration_query",
+            Dict("kind" => "exact", "value" => 1),
+          ))),
+        )
+        @test slot_query_response.status == 200
+        @test [entry["tag_id"] for entry in parse_response(slot_query_response)["entries"]] ==
+          [query_entry_one["tag_id"]]
+
+        wildcard_query_response = make_request(
+          "POST",
+          "/tag_queries/$simulation_name";
+          body=merge(register_target, Dict("query" => query_spec(
+            "integration_query",
+            Dict("kind" => "wildcard"),
+          ))),
+        )
+        @test wildcard_query_response.status == 200
+        wildcard_entries = parse_response(wildcard_query_response)["entries"]
+        @test [entry["tag_id"] for entry in wildcard_entries] ==
+          [query_entry_two["tag_id"], query_entry_one["tag_id"]]
+
+        predicate_query_response = make_request(
+          "POST",
+          "/tag_queries/$simulation_name";
+          body=merge(register_target, Dict("query" => query_spec(
+            "integration_query",
+            Dict(
+              "kind" => "predicate",
+              "predicate" => "preset",
+              "operator" => ">",
+              "operand" => 1,
+            ),
+          ))),
+        )
+        @test predicate_query_response.status == 200
+        @test [
+          entry["tag_id"] for entry in parse_response(predicate_query_response)["entries"]
+        ] == [query_entry_two["tag_id"]]
+
+        custom_query_response = make_request(
+          "POST",
+          "/tag_queries/$simulation_name";
+          body=merge(register_target, Dict("query" => query_spec(
+            "integration_query",
+            Dict(
+              "kind" => "predicate",
+              "predicate" => "custom",
+              "source" => "candidate -> candidate == 2",
+            ),
+          ))),
+        )
+        if unsafe_evaluation_enabled
+          @test custom_query_response.status == 200
+          @test [
+            entry["tag_id"] for entry in parse_response(custom_query_response)["entries"]
+          ] == [query_entry_two["tag_id"]]
+        else
+          @test custom_query_response.status == 403
+          @test parse_response(custom_query_response)["error_code"] ==
+            WebQuantumSavory.UNSAFE_EVALUATION_DISABLED_CODE
+        end
+
+        nonconsuming_list = parse_response(make_request(
+          "GET",
+          "/tags/$simulation_name";
+          query=register_target,
+        ))["entries"]
+        @test Set(entry["tag_id"] for entry in nonconsuming_list) == Set([
+          register_tag_id,
+          query_entry_one["tag_id"],
+          query_entry_two["tag_id"],
+        ])
+
+        missing_target_response = make_request("GET", "/tags/$simulation_name")
+        @test missing_target_response.status == 400
+        @test parse_response(missing_target_response)["error_code"] == "VALIDATION_ERROR"
+
+        missing_slot_response = make_request(
+          "GET",
+          "/tags/$simulation_name";
+          query=Dict("target" => "slot", "slot_id" => "slot_missing"),
+        )
+        @test missing_slot_response.status == 404
+
+        malformed_attachment = make_request(
+          "POST",
+          "/tags/$simulation_name";
+          body=slot_two,
+        )
+        @test malformed_attachment.status == 400
+        @test parse_response(malformed_attachment)["error_code"] == "VALIDATION_ERROR"
+
+        missing_simulation = make_request(
+          "GET",
+          "/tags/tags_queries_missing_simulation";
+          query=register_target,
+        )
+        @test missing_simulation.status == 404
+
+        block_response = make_request(
+          "POST",
+          "/dev/manipulate_state";
+          body=Dict("name" => simulation_name, "block_reason" => "timeout"),
+        )
+        @test block_response.status == 200
+
+        blocked_response = make_request(
+          "GET",
+          "/tags/$simulation_name";
+          query=register_target,
+        )
+        @test blocked_response.status == 400
+        blocked_data = parse_response(blocked_response)
+        @test blocked_data["success"] == false
+        @test occursin("expired", blocked_data["error"])
+      finally
+        make_request(
+          "POST",
+          "/destroy_simulation";
+          body=Dict("name" => simulation_name),
+        )
+      end
+
+      destroyed_response = make_request(
+        "GET",
+        "/tags/$simulation_name";
+        query=register_target,
+      )
+      @test destroyed_response.status == 404
   end
 
   # Cleanup after all tests

@@ -134,6 +134,7 @@ test.describe('Bottom panel log counters', () => {
     const statesZooTab = page.locator('#bottom-panel-states-zoo-tab')
     const layoutToolsTab = page.locator('#bottom-panel-layout-tools-tab')
     const exportScriptTab = page.locator('#bottom-panel-export-script-tab')
+    const tagsQueriesTab = page.locator('#bottom-panel-tags-queries-tab')
 
     await expect(page.locator('#logsPanel .bottom-tabs').getByRole('tab')).toHaveText([
       /Logs/,
@@ -142,6 +143,7 @@ test.describe('Bottom panel log counters', () => {
       'States Zoo',
       'Layout Tools',
       'Export Script',
+      'Tags & Queries',
     ])
     await expect(logsTab).toHaveAttribute('aria-selected', 'true')
     await expect(logsTab).toHaveAttribute('tabindex', '0')
@@ -150,6 +152,8 @@ test.describe('Bottom panel log counters', () => {
     await expect(statesZooTab).toHaveAttribute('tabindex', '-1')
     await expect(layoutToolsTab).toHaveAttribute('tabindex', '-1')
     await expect(exportScriptTab).toHaveAttribute('tabindex', '-1')
+    await expect(tagsQueriesTab).toBeDisabled()
+    await expect(tagsQueriesTab).toHaveAttribute('aria-disabled', 'true')
 
     await logsTab.focus()
     await page.keyboard.press('ArrowRight')

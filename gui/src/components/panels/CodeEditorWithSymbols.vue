@@ -29,7 +29,7 @@
     </button>
 
     <template v-else>
-      <CustomFunctionContextHelp v-if="!showLatex" />
+      <CustomFunctionContextHelp v-if="!showLatex && showContextHelp" />
 
       <div
         v-if="!evaluationEnabled"
@@ -150,6 +150,10 @@ const props = defineProps({
   paramType: {
     type: String,
     default: ''
+  },
+  showContextHelp: {
+    type: Boolean,
+    default: true
   },
   collapsible: {
     type: Boolean,
