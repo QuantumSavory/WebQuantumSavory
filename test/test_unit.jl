@@ -1709,6 +1709,18 @@
     registers, slot_mapping, slot_reverse_mapping = WebQuantumSavory.create_registers_from_nodes(validation_result)
     state = WebQuantumSavory.State(name="test", slot_mapping=slot_mapping)
 
+    reverse_mapping = WebQuantumSavory.ensure_slot_reverse_mapping!(state)
+    @test reverse_mapping === state.slot_reverse_mapping
+    @test length(reverse_mapping) == length(slot_mapping)
+    @test all(reverse_mapping[slot] == slot_id for (slot_id, slot) in slot_mapping)
+    @test WebQuantumSavory.ensure_slot_reverse_mapping!(state) === reverse_mapping
+
+    if !isempty(slot_mapping)
+      missing_slot_id, missing_slot = first(slot_mapping)
+      delete!(reverse_mapping, missing_slot)
+      @test WebQuantumSavory.ensure_slot_reverse_mapping!(state)[missing_slot] == missing_slot_id
+    end
+
     # Test get_slot_state with existing slot
     if !isempty(slot_mapping)
       slot_id = first(keys(slot_mapping))
@@ -2655,6 +2667,24 @@
   end
 
   @testset "Tag Metadata Catalog and Codec" begin
+    WebQuantumSavory._invalidate_tag_catalog_cache!()
+    cached_snapshot = WebQuantumSavory._tag_catalog_snapshot()
+    @test WebQuantumSavory._tag_catalog_snapshot() === cached_snapshot
+
+    @eval begin
+      struct TagCatalogCacheProbe
+        value::Int
+      end
+      QuantumSavory.Tag(probe::TagCatalogCacheProbe) =
+        QuantumSavory.Tag(:catalog_cache_probe, probe.value)
+    end
+    method_invalidated_snapshot = WebQuantumSavory._tag_catalog_snapshot()
+    @test method_invalidated_snapshot !== cached_snapshot
+    @test any(definition -> definition.type === TagCatalogCacheProbe, method_invalidated_snapshot.named)
+
+    WebQuantumSavory._invalidate_tag_catalog_cache!()
+    @test WebQuantumSavory._tag_catalog_snapshot() !== method_invalidated_snapshot
+
     catalog = WebQuantumSavory.tag_type_catalog()
     @test Set(keys(catalog)) == Set([
       "named_tags",
@@ -2871,6 +2901,10 @@
       signature["head_type"] == "Symbol" &&
         [field["type"] for field in signature["fields"]] == ["Int64"]
     end)
+    symbol_float_signature = only(filter(catalog["general_signatures"]) do signature
+      signature["head_type"] == "Symbol" &&
+        [field["type"] for field in signature["fields"]] == ["Float64"]
+    end)
     symbol_tag(head, value) = Dict(
       "kind" => "general",
       "signature_id" => symbol_int_signature["signature_id"],
@@ -2882,6 +2916,18 @@
       "signature_id" => symbol_int_signature["signature_id"],
       "head" => Dict("type" => "Symbol", "value" => head),
       "fields" => [Dict("type" => "Int64", "value" => term)],
+    )
+    symbol_float_tag(head, value) = Dict(
+      "kind" => "general",
+      "signature_id" => symbol_float_signature["signature_id"],
+      "head" => Dict("type" => "Symbol", "value" => head),
+      "fields" => [Dict("type" => "Float64", "value" => value)],
+    )
+    float_query_spec(head, term) = Dict(
+      "kind" => "general",
+      "signature_id" => symbol_float_signature["signature_id"],
+      "head" => Dict("type" => "Symbol", "value" => head),
+      "fields" => [Dict("type" => "Float64", "value" => term)],
     )
 
     slot_one = Dict("target" => "slot", "slot_id" => "slot_MglsMO")
@@ -2929,6 +2975,11 @@
       @test [entry["tag_id"] for entry in slot_entries] == [slot_entry["tag_id"]]
       @test [entry["tag_id"] for entry in register_entries] ==
         [register_entry["tag_id"], slot_entry["tag_id"]]
+
+      inactive_since = Dates.now() - Dates.Hour(1)
+      state.simulation_last_active_time = inactive_since
+      WebQuantumSavory.list_tags(state, register_target)
+      @test state.simulation_last_active_time > inactive_since
 
       removed_slot = WebQuantumSavory.delete_tag!(state, slot_entry["tag_id"], slot_one)
       @test removed_slot["tag_id"] == slot_entry["tag_id"]
@@ -3056,6 +3107,22 @@
       ))
       @test message_query_error isa WebQuantumSavory.APIError
       @test message_query_error.status_code == 400
+
+      integer_collision = WebQuantumSavory.attach_tag!(
+        state,
+        merge(slot_one, Dict("tag" => symbol_tag("unit_float_exact", 1))),
+      )
+      float_entry = WebQuantumSavory.attach_tag!(
+        state,
+        merge(register_destination, Dict("tag" => symbol_float_tag("unit_float_exact", 1.0))),
+      )
+      float_exact_query = merge(register_target, Dict("query" => float_query_spec(
+        "unit_float_exact",
+        Dict("kind" => "exact", "value" => 1.0),
+      )))
+      @test [entry["tag_id"] for entry in WebQuantumSavory.query_tags(state, float_exact_query)] ==
+        [float_entry["tag_id"]]
+      @test integer_collision["tag_id"] != float_entry["tag_id"]
     finally
       haskey(WebQuantumSavory.STATE, simulation_name) &&
         WebQuantumSavory.destroy_simulation(simulation_name)

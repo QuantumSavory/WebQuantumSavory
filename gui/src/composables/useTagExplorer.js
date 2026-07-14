@@ -1,6 +1,10 @@
 import { onScopeDispose, ref, unref, watch } from 'vue'
 import { api as sharedApi } from '../utils/ApiConnector.js'
-import { normalizeTagCatalog, normalizeTagEntries } from '../utils/tagExplorer.js'
+import {
+  emptyTagCatalog,
+  normalizeTagCatalog,
+  normalizeTagEntries
+} from '../utils/tagExplorer.js'
 
 function resolved(value) {
   return typeof value === 'function' ? value() : unref(value)
@@ -12,7 +16,7 @@ export function useTagExplorer({
   enabled,
   api = sharedApi
 }) {
-  const catalog = ref(normalizeTagCatalog({}))
+  const catalog = ref(emptyTagCatalog())
   const catalogLoaded = ref(false)
   const catalogLoading = ref(false)
   const tags = ref([])
@@ -90,11 +94,12 @@ export function useTagExplorer({
     // Do not leave a previous target's entries visible (and deletable) while a
     // replacement request is pending or after that request fails.
     tags.value = []
-    const response = await runOperation((name, signal) => (
-      api.listTags(name, target, { signal })
-    ))
-    if (response) tags.value = normalizeTagEntries(response)
-    return response
+    const result = await runOperation(async (name, signal) => {
+      const response = await api.listTags(name, target, { signal })
+      return { response, entries: normalizeTagEntries(response) }
+    })
+    if (result) tags.value = result.entries
+    return result?.response ?? null
   }
 
   async function attach(target, tag) {
@@ -115,11 +120,12 @@ export function useTagExplorer({
 
   async function query(target, querySpec) {
     queryResults.value = []
-    const response = await runOperation((name, signal) => (
-      api.queryTags(name, target, querySpec, { signal })
-    ))
-    if (response) queryResults.value = normalizeTagEntries(response)
-    return response
+    const result = await runOperation(async (name, signal) => {
+      const response = await api.queryTags(name, target, querySpec, { signal })
+      return { response, entries: normalizeTagEntries(response) }
+    })
+    if (result) queryResults.value = result.entries
+    return result?.response ?? null
   }
 
   watch(

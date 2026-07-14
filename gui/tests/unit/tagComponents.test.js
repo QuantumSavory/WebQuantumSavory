@@ -5,6 +5,7 @@ import TagConstructor from '../../src/components/tags/TagConstructor.vue'
 import TagResultsList from '../../src/components/tags/TagResultsList.vue'
 import TagTargetSelector from '../../src/components/tags/TagTargetSelector.vue'
 import { normalizeTagCatalog } from '../../src/utils/tagExplorer.js'
+import { api } from '../../src/utils/ApiConnector.js'
 
 const catalog = normalizeTagCatalog({
   named_tags: [{
@@ -12,23 +13,34 @@ const catalog = normalizeTagCatalog({
     display_name: 'PriorityTag',
     doc: 'Documents the priority.',
     fields: [
-      { name: 'priority', type: 'Int64', doc: 'Priority value' },
-      { name: 'owner', type: 'Symbol', doc: 'Owner symbol' }
+      { name: 'priority', type: 'Int64', doc: 'Priority value', position: 1 },
+      { name: 'owner', type: 'Symbol', doc: 'Owner symbol', position: 2 }
     ]
   }],
   general_signatures: [
-    { signature_id: 'symbol-empty', head_type: 'Symbol', display_name: 'Symbol tag', fields: [] },
+    {
+      signature_id: 'symbol-empty',
+      head_type: 'Symbol',
+      display_name: 'Symbol tag',
+      fields: [],
+      allowed_data_type_ids: [],
+      variadic: false
+    },
     {
       signature_id: 'symbol-int',
       head_type: 'Symbol',
       display_name: 'Symbol tag',
-      fields: [{ name: 'field_1', type: 'Int64' }]
+      fields: [{ name: 'field_1', type: 'Int64', doc: '', position: 1 }],
+      allowed_data_type_ids: [],
+      variadic: false
     },
     {
       signature_id: 'symbol-float',
       head_type: 'Symbol',
       display_name: 'Symbol tag',
-      fields: [{ name: 'field_1', type: 'Float64' }]
+      fields: [{ name: 'field_1', type: 'Float64', doc: '', position: 1 }],
+      allowed_data_type_ids: [],
+      variadic: false
     }
   ],
   allowed_data_types: [{ type_id: 'Core.Int64', display_name: 'Int64' }],
@@ -41,16 +53,32 @@ const OptionHelpStub = defineComponent({
 })
 
 const CodeEditorStub = defineComponent({
-  props: ['modelValue', 'readOnly'],
+  props: ['modelValue', 'readOnly', 'errorMessage'],
   emits: ['update:modelValue', 'validate'],
   template: '<textarea :value="modelValue" :readonly="readOnly" @input="$emit(\'update:modelValue\', $event.target.value)" />'
 })
+
+function previewResponse(rendered = 'Tag(PriorityTag(2, :alice))') {
+  return {
+    success: true,
+    rendered,
+    tag: {
+      kind: 'named',
+      type_id: 'QuantumSavory.PriorityTag',
+      display_name: 'PriorityTag',
+      fields: [
+        { name: 'priority', type: 'Int64', value: 2, position: 1 },
+        { name: 'owner', type: 'Symbol', value: 'alice', position: 2 }
+      ]
+    }
+  }
+}
 
 function mountConstructor(props = {}) {
   return mount(TagConstructor, {
     props: {
       catalog,
-      previewer: vi.fn(async () => ({ rendered: 'Tag(PriorityTag(2, :alice))' })),
+      previewer: vi.fn(async () => previewResponse()),
       ...props
     },
     global: {
@@ -70,11 +98,14 @@ async function chooseOption(wrapper, text) {
 }
 
 describe('tag constructor components', () => {
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
 
   it('filters grouped metadata, styles named choices, shows docs, and previews complete tags', async () => {
     vi.useFakeTimers()
-    const previewer = vi.fn(async () => ({ rendered: 'Tag(PriorityTag(2, :alice))' }))
+    const previewer = vi.fn(async () => previewResponse())
     const wrapper = mountConstructor({ previewer })
 
     await wrapper.get('[role="combobox"]').setValue('Priority')
@@ -122,6 +153,10 @@ describe('tag constructor components', () => {
 
     expect(wrapper.get('.tag-field-label small').text()).toBe('Float64')
     expect(wrapper.get('[aria-label="field_1 value"]').attributes('type')).toBe('number')
+    expect(wrapper.get('[role="combobox"]').element.value).toBe('Symbol tag (Symbol, Float64)')
+
+    await wrapper.get('[aria-label="Remove field_1"]').trigger('click')
+    expect(wrapper.get('[role="combobox"]').element.value).toBe('Symbol tag (Symbol)')
   })
 
   it('restricts DataType heads to the selected signature metadata', async () => {
@@ -130,13 +165,16 @@ describe('tag constructor components', () => {
       general_signatures: [{
         signature_id: 'datatype-empty',
         head_type: 'DataType',
+        display_name: 'DataType tag',
         fields: [],
-        allowed_data_type_ids: ['Core.Int64']
+        allowed_data_type_ids: ['Core.Int64'],
+        variadic: false
       }],
       allowed_data_types: [
         { type_id: 'Core.Float64', display_name: 'Float64' },
         { type_id: 'Core.Int64', display_name: 'Int64' }
-      ]
+      ],
+      unsafe_evaluation: false
     })
     const wrapper = mountConstructor({ catalog: dataTypeCatalog })
     await chooseOption(wrapper, 'DataType tag')
@@ -161,6 +199,7 @@ describe('tag constructor components', () => {
   })
 
   it('renders wildcard/predicate controls and disables custom predicates from catalog policy', async () => {
+    const globalPolicy = vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
     const wrapper = mountConstructor({ query: true, actionLabel: 'Run query' })
     await chooseOption(wrapper, 'PriorityTag')
 
@@ -174,6 +213,38 @@ describe('tag constructor components', () => {
     expect(wrapper.get('.evaluation-guidance').text()).toContain('unsafe evaluation is disabled')
     expect(wrapper.get('[aria-label="Predicate operator for owner"]').findAll('option').map(option => option.text()))
       .toEqual(['<', '>', '≤', '≥', '==', '!='])
+    expect(globalPolicy).not.toHaveBeenCalled()
+  })
+
+  it('escapes validation and transport errors before passing them to the HTML tooltip', async () => {
+    const validate = vi.spyOn(api, 'validateFunction').mockResolvedValue({
+      success: false,
+      error: 'bad <tag> & "double" \'single\'\\nnext'
+    })
+    const wrapper = mountConstructor({
+      query: true,
+      actionLabel: 'Run query',
+      unsafeEvaluationEnabled: true
+    })
+    await chooseOption(wrapper, 'PriorityTag')
+    await wrapper.findAll('.query-term-kind')[0].setValue('predicate')
+    await wrapper.get('[aria-label="Predicate kind for priority"]').setValue('custom')
+
+    let editor = wrapper.findComponent(CodeEditorStub)
+    editor.vm.$emit('update:modelValue', 'x -> true')
+    await flushPromises()
+    editor.vm.$emit('validate')
+    await flushPromises()
+    editor = wrapper.findComponent(CodeEditorStub)
+    expect(editor.props('errorMessage')).toBe(
+      '<pre>bad &lt;tag&gt; &amp; &quot;double&quot; &#039;single&#039;\nnext</pre>'
+    )
+
+    validate.mockRejectedValueOnce(new Error('<transport> & "down"'))
+    editor.vm.$emit('validate')
+    await flushPromises()
+    expect(wrapper.findComponent(CodeEditorStub).props('errorMessage'))
+      .toBe('<pre>&lt;transport&gt; &amp; &quot;down&quot;</pre>')
   })
 })
 
@@ -217,8 +288,10 @@ describe('tag target and results components', () => {
   it('discloses hidden rendered IDs and only emits deletion when enabled', async () => {
     const entry = {
       id: 'tag-1',
+      kind: 'named',
       type_id: 'QuantumSavory.PriorityTag',
-      fields: [{ name: 'priority', type: 'Int64', value: 2 }],
+      display_name: 'PriorityTag',
+      fields: [{ name: 'priority', type: 'Int64', value: 2, position: 1 }],
       rendered: 'Tag(PriorityTag(2))',
       slotId: 'slot-external'
     }

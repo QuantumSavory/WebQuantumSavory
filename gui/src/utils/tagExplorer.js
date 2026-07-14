@@ -7,130 +7,188 @@ const FLOAT_TYPES = new Set([
   'Float16', 'Float32', 'Float64', 'AbstractFloat', 'Real', 'Number'
 ])
 
-function arrayValue(value) {
-  return Array.isArray(value) ? value : []
-}
-
 function shortTypeName(typeId) {
-  const value = String(typeId || '')
+  const value = String(typeId)
   return value.split('.').pop() || value
 }
 
-function normalizeField(field, index) {
-  const source = typeof field === 'string' ? { type: field } : (field || {})
-  const name = source.name ?? source.field ?? source.field_name ?? `arg${index + 1}`
-  const type = source.type ?? source.field_type ?? source.value_type ?? 'Any'
+function requireObject(value, context) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${context} must be an object`)
+  }
+  return value
+}
+
+function requireArray(source, key, context) {
+  if (!Array.isArray(source[key])) {
+    throw new TypeError(`${context}.${key} must be an array`)
+  }
+  return source[key]
+}
+
+function requireString(source, key, context) {
+  if (typeof source[key] !== 'string') {
+    throw new TypeError(`${context}.${key} must be a string`)
+  }
+  return source[key]
+}
+
+function requireBoolean(source, key, context) {
+  if (typeof source[key] !== 'boolean') {
+    throw new TypeError(`${context}.${key} must be a boolean`)
+  }
+  return source[key]
+}
+
+function requirePositiveInteger(source, key, context) {
+  if (!Number.isInteger(source[key]) || source[key] < 1) {
+    throw new TypeError(`${context}.${key} must be a positive integer`)
+  }
+  return source[key]
+}
+
+function requireSuccessfulResponse(source, context) {
+  if (source.success !== true) {
+    throw new TypeError(`${context}.success must be true`)
+  }
+}
+
+function normalizeStructuredTag(rawTag, context) {
+  const tag = requireObject(rawTag, context)
+  const kind = requireString(tag, 'kind', context)
+  const fields = requireArray(tag, 'fields', context)
+  fields.forEach((field, index) => {
+    const fieldContext = `${context}.fields[${index}]`
+    const source = requireObject(field, fieldContext)
+    requireString(source, 'name', fieldContext)
+    requireString(source, 'type', fieldContext)
+    requirePositiveInteger(source, 'position', fieldContext)
+    if (!Object.hasOwn(source, 'value')) {
+      throw new TypeError(`${fieldContext}.value is required`)
+    }
+  })
+
+  if (kind === 'named') {
+    requireString(tag, 'type_id', context)
+    requireString(tag, 'display_name', context)
+  } else if (kind === 'general') {
+    const head = requireObject(tag.head, `${context}.head`)
+    requireString(head, 'type', `${context}.head`)
+    requireString(head, 'value', `${context}.head`)
+  } else if (kind !== 'unknown') {
+    throw new TypeError(`${context}.kind must be named, general, or unknown`)
+  }
+
+  return { ...tag, fields }
+}
+
+function normalizeField(field, index, context) {
+  const source = requireObject(field, `${context}[${index}]`)
   return {
     ...source,
-    name: String(name),
-    type: String(type),
-    doc: String(source.doc ?? source.documentation ?? ''),
-    position: source.position ?? index
+    name: requireString(source, 'name', `${context}[${index}]`),
+    type: requireString(source, 'type', `${context}[${index}]`),
+    doc: requireString(source, 'doc', `${context}[${index}]`),
+    position: requirePositiveInteger(source, 'position', `${context}[${index}]`)
   }
 }
 
 function normalizeNamedDefinition(definition, index) {
-  const typeId = definition?.type_id
-    ?? definition?.qualified_type
-    ?? definition?.id
-    ?? definition?.type
-    ?? definition?.name
-    ?? `named-${index}`
-  const label = definition?.display_name
-    ?? definition?.label
-    ?? definition?.name
-    ?? shortTypeName(typeId)
-  const fields = arrayValue(
-    definition?.fields ?? definition?.parameters ?? definition?.arguments
-  ).map(normalizeField)
+  const source = requireObject(definition, `tag catalog named_tags[${index}]`)
+  const context = `tag catalog named_tags[${index}]`
+  const typeId = requireString(source, 'type_id', context)
+  const label = requireString(source, 'display_name', context)
+  const fields = requireArray(source, 'fields', context)
+    .map((field, fieldIndex) => normalizeField(field, fieldIndex, `${context}.fields`))
 
   return {
-    ...definition,
+    ...source,
     kind: 'named',
-    id: String(typeId),
-    typeId: String(typeId),
-    label: String(label),
-    doc: String(definition?.doc ?? definition?.documentation ?? ''),
+    id: typeId,
+    typeId,
+    label,
+    doc: requireString(source, 'doc', context),
     fields
   }
 }
 
 function signatureHeadKind(signature) {
-  const explicit = signature?.head_kind
-    ?? signature?.head_type
-    ?? signature?.kind
-    ?? signature?.head?.kind
-    ?? signature?.head?.type
-  const normalized = String(explicit || '')
-  if (normalized.toLowerCase().includes('datatype') || normalized.toLowerCase().includes('type')) {
-    return 'DataType'
+  const headKind = requireString(signature, 'head_type', 'tag catalog general signature')
+  if (headKind !== 'Symbol' && headKind !== 'DataType') {
+    throw new TypeError('tag catalog general signature.head_type must be Symbol or DataType')
   }
-  return 'Symbol'
+  return headKind
 }
 
 function normalizeSignature(signature, index) {
-  const headKind = signatureHeadKind(signature)
-  const rawArguments = signature?.arguments
-    ?? signature?.fields
-    ?? signature?.parameters
-    ?? signature?.argument_types
-    ?? signature?.types
-    ?? []
-  let fields = arrayValue(rawArguments).map(normalizeField)
-  if (fields[0]?.type === headKind && fields[0]?.name === 'arg1') fields = fields.slice(1)
-  const id = signature?.id
-    ?? signature?.signature_id
-    ?? `${headKind}-${fields.map(field => field.type).join('-') || index}`
-  const baseLabel = String(signature?.display_name ?? signature?.label ?? `${headKind} tag`)
+  const source = requireObject(signature, `tag catalog general_signatures[${index}]`)
+  const context = `tag catalog general_signatures[${index}]`
+  const headKind = signatureHeadKind(source)
+  const fields = requireArray(source, 'fields', context)
+    .map((field, fieldIndex) => normalizeField(field, fieldIndex, `${context}.fields`))
+  const id = requireString(source, 'signature_id', context)
+  const baseLabel = requireString(source, 'display_name', context)
   const shape = [headKind, ...fields.map(field => field.type)].join(', ')
   const label = baseLabel.includes(`(${shape})`) ? baseLabel : `${baseLabel} (${shape})`
 
   return {
-    ...signature,
+    ...source,
     kind: 'general',
-    id: String(id),
+    id,
     headKind,
     label,
-    doc: String(signature?.doc ?? signature?.documentation ?? ''),
+    doc: '',
     fields,
-    allowedDataTypeIds: arrayValue(
-      signature?.allowed_data_type_ids ?? signature?.allowedDataTypeIds
-    ).map(String),
-    variadic: signature?.variadic === true || signature?.vararg === true
+    allowedDataTypeIds: requireArray(source, 'allowed_data_type_ids', context)
+      .map((typeId, typeIndex) => {
+        if (typeof typeId !== 'string') {
+          throw new TypeError(`${context}.allowed_data_type_ids[${typeIndex}] must be a string`)
+        }
+        return typeId
+      }),
+    variadic: requireBoolean(source, 'variadic', context)
   }
 }
 
-function normalizeDataType(dataType) {
-  const source = typeof dataType === 'string' ? { id: dataType } : (dataType || {})
-  const id = source.type_id ?? source.qualified_type ?? source.id ?? source.type ?? source.name
+function normalizeDataType(dataType, index) {
+  const source = requireObject(dataType, `tag catalog allowed_data_types[${index}]`)
+  const context = `tag catalog allowed_data_types[${index}]`
+  const id = requireString(source, 'type_id', context)
   return {
     ...source,
-    id: String(id),
-    label: String(source.display_name ?? source.label ?? source.name ?? shortTypeName(id))
+    id,
+    label: requireString(source, 'display_name', context)
   }
 }
 
-/**
- * Normalize the metadata endpoint at one boundary. This intentionally accepts
- * the snake_case wire contract and compact fixtures used by component tests.
- */
+export function emptyTagCatalog() {
+  return {
+    named: [],
+    general: [],
+    dataTypes: [],
+    unsafeEvaluation: false,
+    groups: [
+      { id: 'named', label: 'Named tags', options: [] },
+      { id: 'general', label: 'General tags', options: [] }
+    ]
+  }
+}
+
+/** Normalize the exact GET /tag_types wire contract for component use. */
 export function normalizeTagCatalog(response) {
-  const source = response?.tag_types ?? response?.catalog ?? response ?? {}
-  const named = arrayValue(
-    source.named ?? source.named_tags ?? source.named_definitions ?? source.named_types
-  ).map(normalizeNamedDefinition)
-  const general = arrayValue(
-    source.general ?? source.general_signatures ?? source.signatures
-  ).map(normalizeSignature)
-  const dataTypes = arrayValue(
-    source.allowed_data_types ?? source.data_types ?? source.datatypes
-  ).map(normalizeDataType)
+  const source = requireObject(response, 'tag catalog')
+  const named = requireArray(source, 'named_tags', 'tag catalog').map(normalizeNamedDefinition)
+  const general = requireArray(source, 'general_signatures', 'tag catalog').map(normalizeSignature)
+  const dataTypes = requireArray(source, 'allowed_data_types', 'tag catalog').map(normalizeDataType)
+  if (typeof source.unsafe_evaluation !== 'boolean') {
+    throw new TypeError('tag catalog.unsafe_evaluation must be a boolean')
+  }
 
   return {
     named,
     general,
     dataTypes,
-    unsafeEvaluation: source.unsafe_evaluation === true,
+    unsafeEvaluation: source.unsafe_evaluation,
     groups: [
       { id: 'named', label: 'Named tags', options: named },
       { id: 'general', label: 'General tags', options: general }
@@ -243,18 +301,37 @@ export function isTagDraftComplete(draft, { query = false } = {}) {
 }
 
 export function normalizeTagEntries(response) {
-  const entries = response?.entries ?? response?.tags ?? response?.results ?? []
-  return arrayValue(entries).map((entry, index) => ({
-    ...entry,
-    id: String(entry?.tag_id ?? entry?.id ?? index),
-    rendered: String(entry?.rendered ?? entry?.show ?? entry?.display ?? ''),
-    fields: entry?.fields ?? entry?.structured_fields ?? {},
-    source: entry?.source ?? entry?.message_source ?? null,
-    depth: entry?.depth ?? entry?.message_depth ?? null,
-    slotId: entry?.slot_id ?? entry?.slotId ?? null,
-    nodeId: entry?.node_id ?? entry?.nodeId ?? null,
-    time: entry?.time ?? entry?.slot_time ?? null
-  }))
+  const source = requireObject(response, 'tag entries response')
+  requireSuccessfulResponse(source, 'tag entries response')
+  return requireArray(source, 'entries', 'tag entries response').map((rawEntry, index) => {
+    const context = `tag entries response.entries[${index}]`
+    const entry = normalizeStructuredTag(rawEntry, context)
+    return {
+      ...entry,
+      id: requireString(entry, 'tag_id', context),
+      rendered: requireString(entry, 'rendered', context),
+      fields: requireArray(entry, 'fields', context),
+      source: entry.source ?? null,
+      depth: entry.depth ?? null,
+      slotId: entry.slot_id ?? null,
+      nodeId: entry.node_id ?? null,
+      time: entry.time ?? null
+    }
+  })
+}
+
+export function normalizeTagPreview(response) {
+  const source = requireObject(response, 'tag preview response')
+  requireSuccessfulResponse(source, 'tag preview response')
+  const tag = normalizeStructuredTag(source.tag, 'tag preview response.tag')
+  const rendered = requireString(source, 'rendered', 'tag preview response')
+  if (!rendered) throw new TypeError('tag preview response.rendered must not be empty')
+  // Preview wraps the structured tag under `tag`; list/query entries put the
+  // same structure at the entry root alongside identity and target metadata.
+  return {
+    ...tag,
+    rendered
+  }
 }
 
 export function targetKey(target) {

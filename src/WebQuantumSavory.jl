@@ -76,6 +76,24 @@ end
 
 const STATE = Dict{String, State}()
 
+"""Build and retain the slot-object-to-external-ID mapping when it is available."""
+function ensure_slot_reverse_mapping!(state::State)
+  reverse_mapping = if state.slot_reverse_mapping === nothing
+    IdDict{Any,String}()
+  else
+    state.slot_reverse_mapping
+  end
+
+  if state.slot_mapping !== nothing && length(reverse_mapping) != length(state.slot_mapping)
+    empty!(reverse_mapping)
+    for (slot_id, slot) in state.slot_mapping
+      reverse_mapping[slot] = slot_id
+    end
+  end
+  state.slot_reverse_mapping = reverse_mapping
+  return reverse_mapping
+end
+
 include("tag_metadata.jl")
 
 function main()
@@ -162,14 +180,7 @@ function get_slot_state(slot_id::String, state::State)
 
   if !isnothing(slot_state)
     entangled_slot_refs = QuantumSavory.slots(slot_state)
-    # Ensure reverse mapping exists locally
-    local_reverse = state.slot_reverse_mapping === nothing ? IdDict{Any,String}() : state.slot_reverse_mapping
-    if state.slot_reverse_mapping === nothing && state.slot_mapping !== nothing
-      for (id, mapped_slot) in state.slot_mapping
-        local_reverse[mapped_slot] = id
-      end
-      state.slot_reverse_mapping = local_reverse
-    end
+    local_reverse = ensure_slot_reverse_mapping!(state)
 
     for slot_ref in entangled_slot_refs
       # Find the slot ID via reverse mapping
@@ -277,14 +288,7 @@ function _serialize_slots(state::State)
   slots_info = []
   entanglements = []
 
-  # Build or reuse reverse mapping for O(1) lookups
-  local_reverse = state.slot_reverse_mapping === nothing ? IdDict{Any,String}() : state.slot_reverse_mapping
-  if state.slot_reverse_mapping === nothing
-    for (sid, s) in state.slot_mapping
-      local_reverse[s] = sid
-    end
-    state.slot_reverse_mapping = local_reverse
-  end
+  local_reverse = ensure_slot_reverse_mapping!(state)
 
   for (slot_id, slot) in state.slot_mapping
     # Get slot state and entangled slots

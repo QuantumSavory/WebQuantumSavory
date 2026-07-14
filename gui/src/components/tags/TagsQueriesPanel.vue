@@ -300,15 +300,16 @@ async function refreshQuery() {
 }
 
 function handleInnerTabKeydown(event, index) {
+  const tabNames = ['tags', 'queries']
   let nextIndex = index
-  if (event.key === 'ArrowRight') nextIndex = (index + 1) % 2
-  else if (event.key === 'ArrowLeft') nextIndex = (index + 1) % 2
+  if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabNames.length
+  else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabNames.length) % tabNames.length
   else if (event.key === 'Home') nextIndex = 0
-  else if (event.key === 'End') nextIndex = 1
+  else if (event.key === 'End') nextIndex = tabNames.length - 1
   else return
 
   event.preventDefault()
-  innerTab.value = nextIndex === 0 ? 'tags' : 'queries'
+  innerTab.value = tabNames[nextIndex]
   event.currentTarget.parentElement?.querySelectorAll('[role="tab"]')?.[nextIndex]?.focus()
 }
 </script>

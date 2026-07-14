@@ -285,8 +285,10 @@ import { api } from '../../utils/ApiConnector.js'
 import {
   createTagDraft,
   isTagDraftComplete,
+  normalizeTagPreview,
   serializeTagDraft
 } from '../../utils/tagExplorer.js'
+import { escapeErrorHtml } from '../../utils/errorHtml.js'
 import OptionHelpTooltip from '../ui/OptionHelpTooltip.vue'
 
 const CodeEditorWithSymbols = defineAsyncComponent(() => import('../panels/CodeEditorWithSymbols.vue'))
@@ -314,7 +316,7 @@ const props = defineProps({
   },
   unsafeEvaluationEnabled: {
     type: Boolean,
-    default: undefined
+    default: false
   },
   previewer: {
     type: Function,
@@ -341,11 +343,7 @@ let previewController = null
 let previewGeneration = 0
 
 const predicateOperators = ['<', '>', '≤', '≥', '==', '!=']
-const evaluationEnabled = computed(() => (
-  props.unsafeEvaluationEnabled === undefined
-    ? api.isUnsafeCodeEvaluationEnabled()
-    : props.unsafeEvaluationEnabled
-))
+const evaluationEnabled = computed(() => props.unsafeEvaluationEnabled)
 const filteredGroups = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return props.catalog.groups.map(group => ({
@@ -520,12 +518,9 @@ async function validateCustomPredicate(field) {
       delete field.error
       return
     }
-    field.error = `<pre>${String(response?.error || 'Validation failed')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')}</pre>`
+    field.error = `<pre>${escapeErrorHtml(response?.error || 'Validation failed')}</pre>`
   } catch (error) {
-    field.error = `<pre>${String(error?.message || 'Validation failed')}</pre>`
+    field.error = `<pre>${escapeErrorHtml(error?.message || 'Validation failed')}</pre>`
   }
 }
 
@@ -559,6 +554,7 @@ function addGeneralField() {
   if (signature.id !== selectedDefinition.value.id) {
     selectedDefinition.value = signature
     draft.value.signatureId = signature.id
+    search.value = signature.label
   }
 }
 
@@ -573,6 +569,7 @@ function removeGeneralField() {
   if (signature) {
     selectedDefinition.value = signature
     draft.value.signatureId = signature.id
+    search.value = signature.label
   }
 }
 
@@ -598,10 +595,7 @@ function schedulePreview() {
     try {
       const response = await props.previewer(serialized.value, { signal: controller.signal })
       if (controller.signal.aborted || generation !== previewGeneration) return
-      previewRendered.value = String(
-        response?.rendered ?? response?.show ?? response?.tag?.rendered ?? ''
-      )
-      if (!previewRendered.value) throw new Error('Tag preview response is invalid')
+      previewRendered.value = normalizeTagPreview(response).rendered
     } catch (error) {
       if (error?.name !== 'AbortError' && generation === previewGeneration) {
         previewError.value = error?.message || 'Tag preview failed'

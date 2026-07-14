@@ -26,6 +26,9 @@ const _TAG_PRESET_OPERATORS = Dict{String,Function}(
   "!=" => (!=),
 )
 
+const _TAG_CATALOG_CACHE = Ref{Any}(nothing)
+const _TAG_CATALOG_CACHE_LOCK = ReentrantLock()
+
 _tag_object(value) = value isa AbstractDict || value isa NamedTuple
 
 function _tag_get(object, key::AbstractString, default=_MISSING_TAG_VALUE)
@@ -195,7 +198,7 @@ function _general_tag_signatures()
   return signatures
 end
 
-function _tag_catalog_snapshot()
+function _build_tag_catalog_snapshot()
   named = _named_tag_definitions()
   general = _general_tag_signatures()
   named_by_id = Dict(definition.type_id => definition for definition in named)
@@ -217,6 +220,45 @@ function _tag_catalog_snapshot()
     general_by_id,
     allowed_by_id,
   )
+end
+
+_tag_catalog_fingerprint() = Tuple(sort!(
+  UInt[objectid(method) for method in methods(QuantumSavory.Tag)],
+))
+
+"""
+Return the process-local tag catalog, reflecting QuantumSavory only when needed.
+
+WebQuantumSavory loads its tag-providing packages before serving requests, so the
+relevant `Tag` method table is normally stable. We still fingerprint its `Method`
+objects so a package or extension loaded after first use automatically invalidates
+the cached reflection without repeating field/documentation discovery on every
+request. `_invalidate_tag_catalog_cache!()` remains the deterministic test hook.
+"""
+function _tag_catalog_snapshot()
+  return lock(_TAG_CATALOG_CACHE_LOCK) do
+    while true
+      fingerprint = _tag_catalog_fingerprint()
+      cached = _TAG_CATALOG_CACHE[]
+      if cached !== nothing && cached.fingerprint == fingerprint
+        return cached.snapshot
+      end
+
+      snapshot = _build_tag_catalog_snapshot()
+      # A package can add a Tag method while its extension is loading. Do not
+      # publish a snapshot assembled across two method-table generations.
+      fingerprint == _tag_catalog_fingerprint() || continue
+      _TAG_CATALOG_CACHE[] = (; fingerprint, snapshot)
+      return snapshot
+    end
+  end
+end
+
+function _invalidate_tag_catalog_cache!()
+  lock(_TAG_CATALOG_CACHE_LOCK) do
+    _TAG_CATALOG_CACHE[] = nothing
+  end
+  return nothing
 end
 
 function _compatible_data_type_ids(signature::_GeneralTagSignature, catalog)
@@ -352,10 +394,15 @@ function _convert_tag_value(expected, value, catalog; context::AbstractString)
   _conversion_error(context, expected, value)
 end
 
-function _validate_general_field_annotations(raw_fields, signature::_GeneralTagSignature)
-  raw_fields isa AbstractVector || throw(validation_error("General tag fields must be an array"))
+function _validate_general_field_annotations(
+  raw_fields,
+  signature::_GeneralTagSignature;
+  query::Bool=false,
+)
+  operation = query ? "query" : "tag"
+  raw_fields isa AbstractVector || throw(validation_error("General $operation fields must be an array"))
   length(raw_fields) == length(signature.fields) || throw(validation_error(
-    "General tag field count does not match the selected signature",
+    "General $operation field count does not match the selected signature",
     Dict{String,Any}(
       "signature_id" => signature.id,
       "expected" => length(signature.fields),
@@ -363,11 +410,12 @@ function _validate_general_field_annotations(raw_fields, signature::_GeneralTagS
     ),
   ))
   for (position, (raw_field, expected)) in enumerate(zip(raw_fields, signature.fields))
-    _require_tag_object(raw_field, "general tag field $position")
-    supplied_type = _require_tag_string(raw_field, "type"; context="general tag field $position")
+    field_context = "general $operation field $position"
+    _require_tag_object(raw_field, field_context)
+    supplied_type = _require_tag_string(raw_field, "type"; context=field_context)
     supplied_type in (_tag_type_name(expected), _qualified_tag_type_id(expected)) ||
       throw(validation_error(
-        "General tag field $position does not match the selected signature",
+        "General $operation field $position does not match the selected signature",
         Dict{String,Any}(
           "signature_id" => signature.id,
           "expected_type" => _tag_type_name(expected),
@@ -377,19 +425,25 @@ function _validate_general_field_annotations(raw_fields, signature::_GeneralTagS
   end
 end
 
-function _named_tag_values(spec, definition::_NamedTagDefinition, catalog)
+_tag_value_term(raw_value, expected, catalog; context::AbstractString) =
+  _convert_tag_value(expected, raw_value, catalog; context)
+
+function _named_field_arguments(
+  spec,
+  definition::_NamedTagDefinition,
+  catalog,
+  convert_term;
+  query::Bool=false,
+)
+  operation = query ? "query" : "tag"
   raw_fields = _require_tag_object(
-    _require_tag_value(spec, "fields"; context="named tag"),
-    "Named tag fields",
+    _require_tag_value(spec, "fields"; context="named $operation"),
+    "Named $operation fields",
   )
   expected_names = Set(field.name for field in definition.fields)
-  received_names = if raw_fields isa AbstractDict
-    Set(string(key) for key in keys(raw_fields))
-  else
-    Set(string(key) for key in keys(raw_fields))
-  end
+  received_names = Set(string(key) for key in keys(raw_fields))
   expected_names == received_names || throw(validation_error(
-    "Named tag fields are incomplete or do not match the selected type",
+    "Named $operation fields are incomplete or do not match the selected type",
     Dict{String,Any}(
       "type_id" => definition.type_id,
       "expected_fields" => sort!(collect(expected_names)),
@@ -397,17 +451,17 @@ function _named_tag_values(spec, definition::_NamedTagDefinition, catalog)
     ),
   ))
   return Any[
-    _convert_tag_value(
+    convert_term(
+      _require_tag_value(raw_fields, field.name; context="named $operation fields"),
       field.type,
-      _require_tag_value(raw_fields, field.name; context="named tag fields"),
       catalog;
-      context="field '$(field.name)'",
+      context="$(query ? "query " : "")field '$(field.name)'",
     ) for field in definition.fields
   ]
 end
 
 function _construct_named_tag(spec, definition::_NamedTagDefinition, catalog)
-  values = _named_tag_values(spec, definition, catalog)
+  values = _named_field_arguments(spec, definition, catalog, _tag_value_term)
   keyword_pairs = [Symbol(field.name) => value for (field, value) in zip(definition.fields, values)]
   instance = try
     Base.invokelatest(definition.type; keyword_pairs...)
@@ -482,20 +536,32 @@ function _general_head(spec, signature::_GeneralTagSignature, catalog)
   return value
 end
 
-function _construct_general_tag(spec, signature::_GeneralTagSignature, catalog)
+function _general_arguments(
+  spec,
+  signature::_GeneralTagSignature,
+  catalog,
+  convert_term;
+  query::Bool=false,
+)
+  operation = query ? "query" : "tag"
   head = _general_head(spec, signature, catalog)
-  raw_fields = _require_tag_value(spec, "fields"; context="general tag")
-  _validate_general_field_annotations(raw_fields, signature)
+  raw_fields = _require_tag_value(spec, "fields"; context="general $operation")
+  _validate_general_field_annotations(raw_fields, signature; query)
   values = Any[
-    _convert_tag_value(
+    convert_term(
+      _require_tag_value(raw_field, "value"; context="general $operation field $position"),
       expected,
-      _require_tag_value(raw_field, "value"; context="general tag field $position"),
       catalog;
-      context="field $position",
+      context="$(query ? "query " : "")field $position",
     ) for (position, (raw_field, expected)) in enumerate(zip(raw_fields, signature.fields))
   ]
+  return Any[head, values...]
+end
+
+function _construct_general_tag(spec, signature::_GeneralTagSignature, catalog)
+  arguments = _general_arguments(spec, signature, catalog, _tag_value_term)
   try
-    return Base.invokelatest(QuantumSavory.Tag, head, values...)
+    return Base.invokelatest(QuantumSavory.Tag, arguments...)
   catch error
     throw(validation_error(
       "Unable to construct general tag",
@@ -680,15 +746,9 @@ function _resolve_node_index(state::State, value)
 end
 
 function _slot_external_id(state::State, slot)
-  if state.slot_reverse_mapping !== nothing
-    slot_id = get(state.slot_reverse_mapping, slot, nothing)
-    slot_id === nothing || return slot_id
-  end
-  state.slot_mapping === nothing && return nothing
-  for (slot_id, candidate) in state.slot_mapping
-    candidate === slot && return String(slot_id)
-  end
-  return nothing
+  reverse_mapping = ensure_slot_reverse_mapping!(state)
+  reverse_mapping === nothing && return nothing
+  return get(reverse_mapping, slot, nothing)
 end
 
 function _resolve_slot(state::State, value; node_index::Union{Nothing,Int}=nothing)
@@ -852,6 +912,7 @@ function list_tags(state::State, payload)
   entries = target.kind == "message_buffer" ?
     _list_message_entries(state, target, catalog) :
     _list_register_entries(state, target, catalog)
+  state.simulation_last_active_time = Dates.now()
   return entries
 end
 
@@ -927,6 +988,9 @@ function delete_tag!(state::State, tag_id, payload)
   try
     QuantumSavory.untag!(register, id)
   catch error
+    error isa QuantumSavory.QueryError || rethrow()
+    # The pre-check above handles an ordinary stale ID. `untag!` can still
+    # observe the ID disappear if another task consumes it before deletion.
     throw(not_found_error("Tag", string(tag_id)))
   end
   state.simulation_last_active_time = Dates.now()
@@ -937,12 +1001,18 @@ function _query_term(raw_term, expected, catalog; context::AbstractString)
   _require_tag_object(raw_term, context)
   kind = _require_tag_string(raw_term, "kind"; context)
   if kind == "exact"
-    return _convert_tag_value(
+    operand = _convert_tag_value(
       expected,
       _require_tag_value(raw_term, "value"; context),
       catalog;
       context,
     )
+    # QuantumSavory query arguments exclude floating-point literals. Preserve
+    # exact typed semantics with a predicate; `1 == 1.0` alone is too broad.
+    if expected isa DataType && expected <: AbstractFloat
+      return candidate -> candidate isa expected && candidate == operand
+    end
+    return operand
   elseif kind == "wildcard"
     return QuantumSavory.W
   elseif kind != "predicate"
@@ -987,47 +1057,6 @@ function _query_term(raw_term, expected, catalog; context::AbstractString)
   ))
 end
 
-function _named_query_arguments(spec, definition::_NamedTagDefinition, catalog)
-  raw_fields = _require_tag_object(
-    _require_tag_value(spec, "fields"; context="named query"),
-    "Named query fields",
-  )
-  expected_names = Set(field.name for field in definition.fields)
-  received_names = Set(string(key) for key in keys(raw_fields))
-  expected_names == received_names || throw(validation_error(
-    "Named query fields are incomplete or do not match the selected type",
-    Dict{String,Any}(
-      "type_id" => definition.type_id,
-      "expected_fields" => sort!(collect(expected_names)),
-      "received_fields" => sort!(collect(received_names)),
-    ),
-  ))
-  terms = Any[
-    _query_term(
-      _require_tag_value(raw_fields, field.name; context="named query fields"),
-      field.type,
-      catalog;
-      context="query field '$(field.name)'",
-    ) for field in definition.fields
-  ]
-  return Any[definition.type, terms...]
-end
-
-function _general_query_arguments(spec, signature::_GeneralTagSignature, catalog)
-  head = _general_head(spec, signature, catalog)
-  raw_fields = _require_tag_value(spec, "fields"; context="general query")
-  _validate_general_field_annotations(raw_fields, signature)
-  terms = Any[
-    _query_term(
-      _require_tag_value(raw_field, "value"; context="general query field $position"),
-      expected,
-      catalog;
-      context="query field $position",
-    ) for (position, (raw_field, expected)) in enumerate(zip(raw_fields, signature.fields))
-  ]
-  return Any[head, terms...]
-end
-
 function _query_arguments(payload, catalog)
   spec = _require_tag_object(
     _require_tag_value(payload, "query"; context="tag query"),
@@ -1041,7 +1070,8 @@ function _query_arguments(payload, catalog)
       "Unknown named tag type",
       Dict{String,Any}("type_id" => type_id),
     ))
-    return _named_query_arguments(spec, definition, catalog)
+    terms = _named_field_arguments(spec, definition, catalog, _query_term; query=true)
+    return Any[definition.type, terms...]
   elseif kind == "general"
     signature_id = _require_tag_string(spec, "signature_id"; context="general query")
     signature = get(catalog.general_by_id, signature_id, nothing)
@@ -1049,7 +1079,7 @@ function _query_arguments(payload, catalog)
       "Unknown general tag signature",
       Dict{String,Any}("signature_id" => signature_id),
     ))
-    return _general_query_arguments(spec, signature, catalog)
+    return _general_arguments(spec, signature, catalog, _query_term; query=true)
   end
   throw(validation_error(
     "Query kind must be 'named' or 'general'",

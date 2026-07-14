@@ -999,6 +999,10 @@
         signature["head_type"] == "Symbol" &&
           [field["type"] for field in signature["fields"]] == ["Int64"]
       end)
+      symbol_float_signature = only(filter(catalog["general_signatures"]) do signature
+        signature["head_type"] == "Symbol" &&
+          [field["type"] for field in signature["fields"]] == ["Float64"]
+      end)
 
       function tag_spec(head, value)
         Dict(
@@ -1015,6 +1019,24 @@
           "signature_id" => symbol_int_signature["signature_id"],
           "head" => Dict("type" => "Symbol", "value" => head),
           "fields" => [Dict("type" => "Int64", "value" => term)],
+        )
+      end
+
+      function float_tag_spec(head, value)
+        Dict(
+          "kind" => "general",
+          "signature_id" => symbol_float_signature["signature_id"],
+          "head" => Dict("type" => "Symbol", "value" => head),
+          "fields" => [Dict("type" => "Float64", "value" => value)],
+        )
+      end
+
+      function float_query_spec(head, term)
+        Dict(
+          "kind" => "general",
+          "signature_id" => symbol_float_signature["signature_id"],
+          "head" => Dict("type" => "Symbol", "value" => head),
+          "fields" => [Dict("type" => "Float64", "value" => term)],
         )
       end
 
@@ -1280,6 +1302,38 @@
           query_entry_one["tag_id"],
           query_entry_two["tag_id"],
         ])
+
+        integer_collision_response = make_request(
+          "POST",
+          "/tags/$simulation_name";
+          body=merge(slot_one, Dict("tag" => tag_spec("integration_float_exact", 1))),
+        )
+        @test integer_collision_response.status == 200
+        integer_collision = parse_response(integer_collision_response)["entry"]
+
+        float_add_response = make_request(
+          "POST",
+          "/tags/$simulation_name";
+          body=merge(
+            register_destination,
+            Dict("tag" => float_tag_spec("integration_float_exact", 1.0)),
+          ),
+        )
+        @test float_add_response.status == 200
+        float_entry = parse_response(float_add_response)["entry"]
+
+        float_query_response = make_request(
+          "POST",
+          "/tag_queries/$simulation_name";
+          body=merge(register_target, Dict("query" => float_query_spec(
+            "integration_float_exact",
+            Dict("kind" => "exact", "value" => 1.0),
+          ))),
+        )
+        @test float_query_response.status == 200
+        @test [entry["tag_id"] for entry in parse_response(float_query_response)["entries"]] ==
+          [float_entry["tag_id"]]
+        @test integer_collision["tag_id"] != float_entry["tag_id"]
 
         missing_target_response = make_request("GET", "/tags/$simulation_name")
         @test missing_target_response.status == 400

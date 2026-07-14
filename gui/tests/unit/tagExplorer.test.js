@@ -4,6 +4,7 @@ import {
   isTagDraftComplete,
   normalizeTagCatalog,
   normalizeTagEntries,
+  normalizeTagPreview,
   serializeTagDraft
 } from '../../src/utils/tagExplorer.js'
 
@@ -22,13 +23,17 @@ const wireCatalog = {
       signature_id: 'symbol-empty',
       head_type: 'Symbol',
       display_name: 'Symbol tag',
-      fields: []
+      fields: [],
+      allowed_data_type_ids: [],
+      variadic: false
     },
     {
       signature_id: 'symbol-int',
       head_type: 'Symbol',
       display_name: 'Symbol tag',
-      fields: [{ name: 'field_1', type: 'Int64', position: 1 }]
+      fields: [{ name: 'field_1', type: 'Int64', doc: '', position: 1 }],
+      allowed_data_type_ids: [],
+      variadic: false
     }
   ],
   allowed_data_types: [
@@ -94,7 +99,9 @@ describe('tag explorer wire metadata', () => {
         signature_id: 'datatype-empty',
         head_type: 'DataType',
         fields: [],
-        allowed_data_type_ids: ['Core.Float64']
+        display_name: 'DataType tag',
+        allowed_data_type_ids: ['Core.Float64'],
+        variadic: false
       }]
     })
 
@@ -130,12 +137,15 @@ describe('tag explorer wire metadata', () => {
     })
   })
 
-  it('normalizes string tag IDs and entry context metadata', () => {
+  it('normalizes the exact list and preview response shapes', () => {
     expect(normalizeTagEntries({
+      success: true,
       entries: [{
-        tag_id: 42,
+        tag_id: '42',
+        kind: 'named',
         type_id: 'QuantumSavory.TestTag',
-        fields: [{ name: 'count', type: 'Int64', value: 2 }],
+        display_name: 'TestTag',
+        fields: [{ name: 'count', type: 'Int64', value: 2, position: 1 }],
         rendered: 'Tag(TestTag(2))',
         slot_id: 'slot-1',
         time: 1.5
@@ -146,5 +156,33 @@ describe('tag explorer wire metadata', () => {
       slotId: 'slot-1',
       time: 1.5
     })
+
+    expect(normalizeTagPreview({
+      success: true,
+      rendered: 'Tag(TestTag(2))',
+      tag: {
+        kind: 'named',
+        type_id: 'QuantumSavory.TestTag',
+        display_name: 'TestTag',
+        fields: [{ name: 'count', type: 'Int64', value: 2, position: 1 }]
+      }
+    })).toMatchObject({
+      kind: 'named',
+      rendered: 'Tag(TestTag(2))'
+    })
+  })
+
+  it('rejects undocumented aliases instead of masking wire-contract drift', () => {
+    expect(() => normalizeTagCatalog({
+      named: [],
+      signatures: [],
+      data_types: [],
+      unsafe_evaluation: false
+    })).toThrow('tag catalog.named_tags must be an array')
+
+    expect(() => normalizeTagEntries({ success: true, tags: [] }))
+      .toThrow('tag entries response.entries must be an array')
+    expect(() => normalizeTagPreview({ success: true, show: 'Tag(:old)', structured: {} }))
+      .toThrow('tag preview response.tag must be an object')
   })
 })

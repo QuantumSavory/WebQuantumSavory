@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import ProtocolConstructorForm from '../../src/components/panels/ProtocolConstructorForm.vue'
 import ProtocolEditor from '../../src/components/panels/ProtocolEditor.vue'
@@ -283,6 +283,38 @@ describe('TypedValueInput disabled code values', () => {
 
     await editor.trigger('dblclick')
     expect(parameter.value).toBe('x -> x < self')
+  })
+
+  it('escapes validator responses and thrown transport errors for HTML tooltips', async () => {
+    vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
+    const validate = vi.spyOn(api, 'validateFunction').mockResolvedValue({
+      success: false,
+      error: 'bad <lambda> & "quote" \'single\'\\nnext'
+    })
+    const parameter = { name: 'nodeL', value: 'x -> true' }
+    const wrapper = mount(TypedValueInput, {
+      props: { parameter, type: 'Lambda', category: 'node' },
+      global: {
+        stubs: {
+          CodeEditorWithSymbols: {
+            props: ['errorMessage'],
+            emits: ['validate'],
+            template: '<button class="validate-code-stub" @click="$emit(\'validate\')">Validate</button>'
+          }
+        }
+      }
+    })
+
+    await wrapper.get('.validate-code-stub').trigger('click')
+    await flushPromises()
+    expect(parameter.error).toBe(
+      '<pre>bad &lt;lambda&gt; &amp; &quot;quote&quot; &#039;single&#039;\nnext</pre>'
+    )
+
+    validate.mockRejectedValueOnce(new Error('<transport> & "down"'))
+    await wrapper.get('.validate-code-stub').trigger('click')
+    await flushPromises()
+    expect(parameter.error).toBe('<pre>&lt;transport&gt; &amp; &quot;down&quot;</pre>')
   })
 })
 

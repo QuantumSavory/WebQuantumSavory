@@ -9,7 +9,7 @@ const wireCatalog = {
     type_id: 'QuantumSavory.PriorityTag',
     display_name: 'PriorityTag',
     doc: 'Priority tag',
-    fields: [{ name: 'priority', type: 'Int64', doc: '' }]
+    fields: [{ name: 'priority', type: 'Int64', doc: '', position: 1 }]
   }],
   general_signatures: [],
   allowed_data_types: [],
@@ -67,8 +67,10 @@ describe('TagsQueriesPanel orchestration', () => {
       success: true,
       entries: [{
         tag_id: 'tag-1',
+        kind: 'named',
         type_id: 'QuantumSavory.PriorityTag',
-        fields: [{ name: 'priority', type: 'Int64', value: 2 }],
+        display_name: 'PriorityTag',
+        fields: [{ name: 'priority', type: 'Int64', value: 2, position: 1 }],
         rendered: 'Tag(PriorityTag(2))',
         slot_id: 'slot-external'
       }]
@@ -146,8 +148,10 @@ describe('TagsQueriesPanel orchestration', () => {
       success: true,
       entries: [{
         tag_id: 'query-result',
+        kind: 'named',
         type_id: 'QuantumSavory.PriorityTag',
-        fields: [{ name: 'priority', type: 'Int64', value: 3 }],
+        display_name: 'PriorityTag',
+        fields: [{ name: 'priority', type: 'Int64', value: 3, position: 1 }],
         rendered: 'Tag(PriorityTag(3))'
       }]
     })

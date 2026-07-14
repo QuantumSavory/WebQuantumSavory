@@ -92,61 +92,27 @@ defineProps({
 const emit = defineEmits(['delete'])
 const expandedIds = ref(new Set())
 
-function structuredEntry(entry) {
-  return entry?.tag ?? entry?.structured ?? entry ?? {}
-}
-
 function entryLabel(entry) {
-  const structured = structuredEntry(entry)
-  const type = structured.display_name
-    ?? structured.type_name
-    ?? structured.type_id
-    ?? structured.type
-    ?? structured.head?.value
-    ?? 'Tag'
-  return String(type).split('.').pop()
+  if (entry.kind === 'named') return entry.display_name
+  if (entry.kind === 'general') return String(entry.head.value).split('.').pop()
+  return 'Tag'
 }
 
 function formattedValue(value) {
-  if (value?.kind === 'wildcard') return 'Wildcard'
-  if (value?.kind === 'predicate') {
-    if (value.predicate === 'custom') return 'Custom predicate'
-    return `${value.operator || ''} ${value.operand ?? ''}`.trim()
-  }
-  if (value && typeof value === 'object' && 'value' in value) return formattedValue(value.value)
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
-  }
+  return String(value)
 }
 
 function entryFields(entry) {
-  const structured = structuredEntry(entry)
-  const fields = structured.fields ?? entry.fields ?? {}
-  if (Array.isArray(fields)) {
-    return fields.map((field, index) => ({
-      key: field.name ?? field.field ?? index,
-      name: field.name ?? field.field ?? '',
-      type: String(field.type ?? field.field_type ?? ''),
-      value: field.value ?? field,
-      label: formattedValue(field.value ?? field)
-    }))
-  }
-  return Object.entries(fields).map(([name, raw]) => ({
-    key: name,
-    name,
-    type: String(raw?.type ?? raw?.field_type ?? ''),
-    value: raw,
-    label: formattedValue(raw)
+  return entry.fields.map(field => ({
+    key: `${field.position}:${field.name}`,
+    name: field.name,
+    type: field.type,
+    value: field.value,
+    label: formattedValue(field.value)
   }))
 }
 
 function chipClass(field) {
-  const kind = String(field.value?.kind || '').toLowerCase()
-  if (kind === 'wildcard') return 'tag-chip-wildcard'
-  if (kind === 'predicate') return 'tag-chip-predicate'
   const type = field.type.toLowerCase()
   if (type.includes('symbol')) return 'tag-chip-symbol'
   if (type.includes('datatype') || type.includes('type{')) return 'tag-chip-datatype'
@@ -237,16 +203,6 @@ function toggle(entry) {
 .tag-chip-float {
   background: var(--app-color-tag-number-soft);
   color: var(--app-color-tag-number);
-}
-
-.tag-chip-wildcard {
-  background: var(--app-color-tag-wildcard-soft);
-  color: var(--app-color-tag-wildcard);
-}
-
-.tag-chip-predicate {
-  background: var(--app-color-tag-predicate-soft);
-  color: var(--app-color-tag-predicate);
 }
 
 .tag-result-context {

@@ -76,6 +76,7 @@ import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import Checkbox from 'primevue/checkbox'
 import { Check } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
+import { escapeErrorHtml } from '../../utils/errorHtml.js'
 import {
   isCodeType,
   isSymbolicType,
@@ -167,9 +168,17 @@ async function validateCode() {
     return
   }
 
-  const response = isSymbolicType(props.type)
-    ? await api.validateSymbolicFunction(props.parameter.value)
-    : await api.validateFunction(props.parameter.value, props.category)
+  let response
+  try {
+    response = isSymbolicType(props.type)
+      ? await api.validateSymbolicFunction(props.parameter.value)
+      : await api.validateFunction(props.parameter.value, props.category)
+  } catch (error) {
+    codeEditorOpen.value = true
+    delete props.parameter.latex
+    props.parameter.error = `<pre>${escapeErrorHtml(error?.message || 'Validation failed')}</pre>`
+    return
+  }
 
   if (response.success) {
     delete props.parameter.error
@@ -182,15 +191,7 @@ async function validateCode() {
 
   codeEditorOpen.value = true
   delete props.parameter.latex
-  const escaped = response.error
-    .split('\\n').join('\n')
-    .split('\\"').join('"')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-  props.parameter.error = `<pre>${escaped}</pre>`
+  props.parameter.error = `<pre>${escapeErrorHtml(response.error)}</pre>`
 }
 </script>
 
