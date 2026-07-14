@@ -257,10 +257,12 @@
 import { computed, reactive, ref, watch } from 'vue'
 import {
   buildSwapperPredicateSources,
+  repeaterName,
   SWAPPER_PREDICATE_STRATEGIES,
   validateRepeaterChain
 } from '../utils/repeaterChain.js'
 import {
+  deepClone,
   protocolSimpleName,
   seedProtocolConstructor
 } from '../utils/protocolConstructors.js'
@@ -279,7 +281,7 @@ const props = defineProps({
 
 const emit = defineEmits(['confirm', 'cancel'])
 
-const templateStrategy = SWAPPER_PREDICATE_STRATEGIES.TEMPLATE || 'template'
+const templateStrategy = SWAPPER_PREDICATE_STRATEGIES.TEMPLATE
 
 const form = reactive({
   startNodeId: '',
@@ -323,7 +325,9 @@ const entanglerDefinition = computed(() => findProtocolDefinition('edge', 'Entan
 const swapperDefinition = computed(() => findProtocolDefinition('node', 'SwapperProt'))
 const trackerDefinition = computed(() => findProtocolDefinition('node', 'EntanglementTracker'))
 const entanglerAvailable = computed(() => (
-  !!entanglerDefinition.value && selectedTemplateEdge.value?.isLogic !== true
+  !!entanglerDefinition.value
+    && (selectedTemplateEdge.value?.isLogic !== true
+      || entanglerDefinition.value.virtual === true)
 ))
 const swapperAvailable = computed(() => !!swapperDefinition.value)
 const trackerAvailable = computed(() => !!trackerDefinition.value)
@@ -339,10 +343,11 @@ const entanglerDescription = computed(() => {
   if (!entanglerDefinition.value) {
     return 'EntanglerProt is unavailable in runtime protocol metadata, so automatic replacement is disabled.'
   }
-  if (selectedTemplateEdge.value?.isLogic === true) {
-    return 'EntanglerProt cannot be assigned to a virtual template edge. Select a physical edge or leave replacement off.'
+  if (selectedTemplateEdge.value?.isLogic === true
+    && entanglerDefinition.value.virtual !== true) {
+    return 'Runtime protocol metadata does not permit EntanglerProt on a virtual template edge. Select a physical edge or leave replacement off.'
   }
-  return 'Remove copied EntanglerProt instances, preserve other edge protocols, and add one fresh constructor to every physical chain edge.'
+  return 'Remove copied EntanglerProt instances, preserve other edge protocols, and add one fresh constructor to every generated chain edge.'
 })
 const swapperDescription = computed(() => (
   swapperDefinition.value
@@ -362,22 +367,22 @@ const predicateStrategies = [
     description: 'Keep nodeL and nodeH exactly as configured in the seeded constructor.'
   },
   {
-    value: SWAPPER_PREDICATE_STRATEGIES.EAGER || 'eager',
+    value: SWAPPER_PREDICATE_STRATEGIES.EAGER,
     label: 'Eager swaps',
     description: 'Accept any generated repeater on the appropriate side plus the named endpoint.'
   },
   {
-    value: SWAPPER_PREDICATE_STRATEGIES.SEQUENTIAL_FORWARD || 'sequential-forward',
+    value: SWAPPER_PREDICATE_STRATEGIES.SEQUENTIAL_FORWARD,
     label: 'Sequential forward',
     description: 'Use the eager low-side predicate, but accept only the next repeater toward the end node.'
   },
   {
-    value: SWAPPER_PREDICATE_STRATEGIES.SEQUENTIAL_BACKWARD || 'sequential-backward',
+    value: SWAPPER_PREDICATE_STRATEGIES.SEQUENTIAL_BACKWARD,
     label: 'Sequential backwards',
     description: 'Use the eager high-side predicate, but accept only the previous repeater toward the start node.'
   },
   {
-    value: SWAPPER_PREDICATE_STRATEGIES.BINARY_TREE || 'binary-tree',
+    value: SWAPPER_PREDICATE_STRATEGIES.BINARY_TREE,
     label: 'Binary tree',
     description: 'Recursively swap each subchain midpoint between its two named boundary nodes.'
   }
@@ -552,21 +557,13 @@ function resetTrackerConstructor() {
     : null
 }
 
-function copyValue(value) {
-  if (Array.isArray(value)) return value.map(copyValue)
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, copyValue(nested)]))
-  }
-  return value
-}
-
 function predicateParameter(name) {
   return swapperProtocol.value?.parameters?.find(parameter => parameter.name === name) || null
 }
 
 function captureTemplatePredicates() {
   templatePredicateValues.value = Object.fromEntries(
-    ['nodeL', 'nodeH'].map(name => [name, copyValue(predicateParameter(name))])
+    ['nodeL', 'nodeH'].map(name => [name, deepClone(predicateParameter(name))])
   )
 }
 
@@ -575,7 +572,18 @@ function restoreTemplatePredicates() {
   for (const name of ['nodeL', 'nodeH']) {
     const saved = templatePredicateValues.value[name]
     const index = swapperProtocol.value.parameters?.findIndex(parameter => parameter.name === name)
-    if (saved && index >= 0) swapperProtocol.value.parameters.splice(index, 1, copyValue(saved))
+    if (saved && index >= 0) swapperProtocol.value.parameters.splice(index, 1, deepClone(saved))
+  }
+}
+
+function setGeneratedPredicatePreview(preview = null) {
+  for (const name of ['nodeL', 'nodeH']) {
+    const parameter = predicateParameter(name)
+    if (!parameter) continue
+    parameter.selectedType = 'Lambda'
+    parameter.value = preview?.[name] ?? ''
+    delete parameter.error
+    delete parameter.latex
   }
 }
 
@@ -584,7 +592,10 @@ function applyGeneratedPredicatePreview() {
   const startNode = props.nodes.find(node => node.id === form.startNodeId)
   const endNode = props.nodes.find(node => node.id === form.endNodeId)
   const templateNode = selectedTemplateNode.value
-  if (!startNode || !endNode || !templateNode || !Number.isInteger(form.repeaterCount)) return
+  if (!startNode || !endNode || !templateNode || !Number.isInteger(form.repeaterCount)) {
+    setGeneratedPredicatePreview()
+    return
+  }
 
   let sources
   try {
@@ -593,26 +604,14 @@ function applyGeneratedPredicatePreview() {
       repeaterCount: form.repeaterCount,
       startNodeName: startNode.name,
       endNodeName: endNode.name,
-      repeaterNameAt: index => `${templateNode.name}-${index + 1}`
+      repeaterNameAt: index => repeaterName(templateNode.name, index + 1)
     })
   } catch {
+    setGeneratedPredicatePreview()
     return
   }
   const preview = sources[0]
-  if (!preview) return
-
-  for (const name of ['nodeL', 'nodeH']) {
-    const parameter = predicateParameter(name)
-    if (!parameter) continue
-    parameter.selectedType = 'Lambda'
-    parameter.value = preview[name]
-    delete parameter.error
-    delete parameter.latex
-  }
-}
-
-function snapshot(value) {
-  return copyValue(value)
+  setGeneratedPredicatePreview(preview)
 }
 
 function edgeLabel(edge) {
@@ -621,7 +620,7 @@ function edgeLabel(edge) {
 
 function handleConfirm() {
   if (!validation.value.valid) return
-  emit('confirm', snapshot(currentOptions()))
+  emit('confirm', deepClone(currentOptions()))
 }
 
 function handleCancel() {

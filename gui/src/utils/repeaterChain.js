@@ -34,6 +34,12 @@ export const SWAPPER_PREDICATE_STRATEGIES = Object.freeze({
 const SWAPPER_PREDICATE_STRATEGY_VALUES = new Set(
   Object.values(SWAPPER_PREDICATE_STRATEGIES)
 )
+const GENERATED_SWAPPER_PREDICATE_STRATEGY_VALUES = new Set([
+  SWAPPER_PREDICATE_STRATEGIES.EAGER,
+  SWAPPER_PREDICATE_STRATEGIES.SEQUENTIAL_FORWARD,
+  SWAPPER_PREDICATE_STRATEGIES.SEQUENTIAL_BACKWARD,
+  SWAPPER_PREDICATE_STRATEGIES.BINARY_TREE
+])
 
 function invalid(error) {
   return { valid: false, error }
@@ -65,6 +71,11 @@ export function juliaStringLiteral(value) {
   return `${literal}"`
 }
 
+/** Name a generated repeater using the chain's one-based logical position. */
+export function repeaterName(templateName, index) {
+  return `${templateName}-${index}`
+}
+
 function isBinaryTreeRepeaterCount(repeaterCount) {
   return Number.isInteger(repeaterCount)
     && repeaterCount > 0
@@ -94,8 +105,8 @@ export function buildSwapperPredicateSources({
   endNodeName,
   repeaterNameAt
 }) {
-  if (!SWAPPER_PREDICATE_STRATEGY_VALUES.has(strategy)) {
-    throw new Error('Select a valid Swapper predicate strategy.')
+  if (!GENERATED_SWAPPER_PREDICATE_STRATEGY_VALUES.has(strategy)) {
+    throw new Error('Select a valid automatic Swapper predicate strategy.')
   }
   if (!Number.isInteger(repeaterCount) || repeaterCount < 1) {
     throw new Error('Swapper predicates require at least one repeater.')
@@ -107,9 +118,6 @@ export function buildSwapperPredicateSources({
     throw new Error('Swapper predicates require generated repeater names.')
   }
 
-  if (strategy === SWAPPER_PREDICATE_STRATEGIES.TEMPLATE) {
-    return Array.from({ length: repeaterCount }, () => ({ nodeL: null, nodeH: null }))
-  }
   if (strategy === SWAPPER_PREDICATE_STRATEGIES.BINARY_TREE
     && !isBinaryTreeRepeaterCount(repeaterCount)) {
     throw new Error('Binary-tree swapping requires a repeater count of 2^n - 1.')
@@ -168,9 +176,6 @@ function resolveAutomationSetting(rawSetting, targetName) {
     return { enabled: false, definition: null, protocol: null }
   }
   if (!isRecord(rawSetting)) throw new Error(`The ${targetName} automation setting is invalid.`)
-  if (rawSetting.enabled != null && typeof rawSetting.enabled !== 'boolean') {
-    throw new Error(`The ${targetName} automation option must be enabled or disabled.`)
-  }
 
   return {
     ...rawSetting,
@@ -243,10 +248,12 @@ function resolveAutomation(rawAutomation, selection) {
   }
 
   if (entangler.enabled) {
-    if (selection.templateEdge.isLogic === true) {
-      throw new Error('EntanglerProt cannot be assigned to virtual chain edges.')
-    }
     entangler.protocol = normalizeEnabledConstructor(entangler, TARGET_PROTOCOLS.entangler)
+    if (selection.templateEdge.isLogic === true && entangler.definition.virtual !== true) {
+      throw new Error(
+        'EntanglerProt runtime metadata does not permit assignment to virtual chain edges.'
+      )
+    }
   }
 
   if (swapper.enabled) {
@@ -258,7 +265,7 @@ function resolveAutomation(rawAutomation, selection) {
         repeaterCount: selection.repeaterCount,
         startNodeName: selection.startNode.name,
         endNodeName: selection.endNode.name,
-        repeaterNameAt: index => `${selection.templateNode.name}-${index + 1}`
+        repeaterNameAt: index => repeaterName(selection.templateNode.name, index + 1)
       })
     }
   }
@@ -468,7 +475,7 @@ export function generateRepeaterChain(net, options) {
 
     generatedNodes.push(new Node({
       id: nextId('node'),
-      name: `${templateNode.name}-${index}`,
+      name: repeaterName(templateNode.name, index),
       position,
       data: cloneNodeData(templateNode.data, nextId)
     }))
@@ -514,7 +521,7 @@ export function generateRepeaterChain(net, options) {
       data: cloneEdgeData(templateEdge.data, nextId),
       isLogic: templateEdge.isLogic
     })
-    if (automation.entangler.enabled && edge.isLogic !== true) {
+    if (automation.entangler.enabled) {
       edge.data.protocols = replaceTargetProtocols(
         edge.data.protocols,
         TARGET_PROTOCOLS.entangler.simpleName,

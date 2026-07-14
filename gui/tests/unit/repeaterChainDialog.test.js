@@ -299,7 +299,7 @@ describe('RepeaterChainDialog protocol automation', () => {
       const help = card.querySelector('.option-help-trigger')
       expect(help).not.toBeNull()
       expect(help.getAttribute('aria-label')).toMatch(/^About /)
-      expect(help.getAttribute('title')).toBe(description.text())
+      expect(help.hasAttribute('title')).toBe(false)
       expect(help.dataset.tooltip).toBe(description.text())
     }
   })
@@ -412,7 +412,7 @@ describe('RepeaterChainDialog protocol automation', () => {
       expect(description).not.toBeNull()
       expect(description.textContent.trim()).not.toBe('')
       expect(help.getAttribute('aria-label')).toBe(`About the ${expectedLabels[index]} strategy`)
-      expect(help.getAttribute('title')).toBe(description.textContent.trim())
+      expect(help.hasAttribute('title')).toBe(false)
       expect(help.dataset.tooltip).toBe(description.textContent.trim())
     })
   })
@@ -479,15 +479,25 @@ describe('RepeaterChainDialog protocol automation', () => {
     const wrapper = mountDialog()
     await selectValidTemplate(wrapper, { count: 2 })
     await wrapper.get('#chain-replace-swapper').setValue(true)
+    await wrapper.get('#chain-swapper-strategy-eager').setValue()
+
+    const constructor = constructorFor(wrapper, SWAPPER_TYPE)
+    expect(valuesByName(constructor.props('protocol')).nodeL.value).not.toBe('')
+    expect(valuesByName(constructor.props('protocol')).nodeH.value).not.toBe('')
+
     await wrapper.get('#chain-swapper-strategy-binary-tree').setValue()
 
     expect(wrapper.get('[role="alert"]').text()).toContain('2^n - 1')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect(valuesByName(constructor.props('protocol')).nodeL.value).toBe('')
+    expect(valuesByName(constructor.props('protocol')).nodeH.value).toBe('')
 
     await wrapper.get('#chain-repeater-count').setValue('3')
     await nextTick()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    expect(valuesByName(constructor.props('protocol')).nodeL.value).not.toBe('')
+    expect(valuesByName(constructor.props('protocol')).nodeH.value).not.toBe('')
   })
 
   it('disables EntanglerProt replacement for a virtual template edge', async () => {
@@ -500,8 +510,31 @@ describe('RepeaterChainDialog protocol automation', () => {
 
     expect(checkbox.element.disabled).toBe(true)
     expect(checkbox.element.checked).toBe(false)
-    expect(description.text()).toContain('cannot be assigned to a virtual template edge')
-    expect(help.getAttribute('title')).toBe(description.text())
+    expect(description.text()).toContain('does not permit EntanglerProt on a virtual template edge')
+    expect(help.hasAttribute('title')).toBe(false)
+    expect(help.dataset.tooltip).toBe(description.text())
+  })
+
+  it('enables EntanglerProt replacement on virtual edges when runtime metadata permits it', async () => {
+    const virtualEntanglerDefinition = { ...ENTANGLER_DEFINITION, virtual: true }
+    const protocolTypes = {
+      ...FULL_PROTOCOL_TYPES,
+      edge: [virtualEntanglerDefinition]
+    }
+    const wrapper = mountDialog({
+      fixture: makeFixture({ virtualTemplate: true }),
+      protocolTypes
+    })
+    await selectValidTemplate(wrapper)
+
+    const checkbox = wrapper.get('#chain-replace-entangler')
+    const description = wrapper.get(`#${checkbox.attributes('aria-describedby')}`)
+    expect(checkbox.element.disabled).toBe(false)
+    expect(description.text()).toContain('every generated chain edge')
+
+    await checkbox.setValue(true)
+    expect(constructorFor(wrapper, ENTANGLER_TYPE).props('protocol').type).toBe(ENTANGLER_TYPE)
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
   })
 
   it('blocks confirmation while an enabled constructor has a validation error', async () => {

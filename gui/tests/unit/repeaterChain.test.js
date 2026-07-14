@@ -8,6 +8,7 @@ import Edge from '../../src/models/Edge'
 import Node from '../../src/models/Node'
 import {
   createProtocolFromDefinition,
+  deepClone,
   protocolSimpleName,
   seedProtocolConstructor
 } from '../../src/utils/protocolConstructors'
@@ -16,6 +17,7 @@ import {
   buildSwapperPredicateSources,
   generateRepeaterChain,
   juliaStringLiteral,
+  repeaterName,
   validateRepeaterChain
 } from '../../src/utils/repeaterChain'
 
@@ -188,6 +190,24 @@ function protocolsNamed(protocols, simpleName) {
 }
 
 describe('protocol constructor helpers', () => {
+  it('deeply clones values while preserving prototypes and cycles', () => {
+    class ConstructorValue {
+      constructor() {
+        this.settings = { nested: { value: 1 } }
+        this.self = this
+      }
+    }
+
+    const source = new ConstructorValue()
+    const clone = deepClone(source)
+
+    expect(clone).toBeInstanceOf(ConstructorValue)
+    expect(clone).not.toBe(source)
+    expect(clone.self).toBe(clone)
+    clone.settings.nested.value = 2
+    expect(source.settings.nested.value).toBe(1)
+  })
+
   it('uses runtime defaults and deeply seeds configured template values without carrying an ID', () => {
     const fallback = createProtocolFromDefinition(ENTANGLER_DEFINITION)
     expect(parametersByName(fallback).success_prob.value).toBe(0.001)
@@ -226,6 +246,15 @@ describe('Swapper predicate source generation', () => {
     startNodeName: 'Start',
     endNodeName: 'End',
     repeaterNameAt: index => names[index]
+  })
+
+  it('uses one shared one-based repeater naming convention', () => {
+    expect(repeaterName('Repeater', 2)).toBe('Repeater-2')
+  })
+
+  it('only generates sources for automatic strategies', () => {
+    expect(() => sources(SWAPPER_PREDICATE_STRATEGIES.TEMPLATE))
+      .toThrow('automatic Swapper predicate strategy')
   })
 
   it('encodes Julia strings without interpolation or source termination', () => {
@@ -496,13 +525,6 @@ describe('repeater-chain protocol automation', () => {
     ])
     expect(result.generatedNodes.map(node => net.nodes.indexOf(node))).toEqual([2, 3, 4])
 
-    const expectedSources = buildSwapperPredicateSources({
-      strategy,
-      repeaterCount: 3,
-      startNodeName: 'Start',
-      endNodeName: 'End',
-      repeaterNameAt: index => `Repeater-${index + 1}`
-    })
     result.generatedNodes.forEach((node, index) => {
       const swapper = protocolsNamed(node.data.protocols, 'SwapperProt')[0]
       const parameters = parametersByName(swapper)
@@ -512,6 +534,13 @@ describe('repeater-chain protocol automation', () => {
         expect(parameters.nodeL.selectedType).toBeUndefined()
         expect(parameters.nodeH.selectedType).toBeUndefined()
       } else {
+        const expectedSources = buildSwapperPredicateSources({
+          strategy,
+          repeaterCount: 3,
+          startNodeName: 'Start',
+          endNodeName: 'End',
+          repeaterNameAt: repeaterIndex => repeaterName('Repeater', repeaterIndex + 1)
+        })
         expect(parameters.nodeL).toMatchObject({
           selectedType: 'Lambda',
           value: expectedSources[index].nodeL
@@ -576,6 +605,35 @@ describe('repeater-chain protocol automation', () => {
         }
       }
     }))).toMatchObject({ valid: false, error: expect.stringContaining('nodeH') })
+  })
+
+  it('uses virtual-edge metadata to replace eligible virtual chain edges only', () => {
+    const edgeOther = protocol('edge-other', 'Example.EdgeProtocol')
+    const { net } = makeNetwork({
+      virtualTemplate: true,
+      edgeProtocols: [
+        protocol('template-entangler', ENTANGLER_TYPE),
+        edgeOther
+      ]
+    })
+    const automation = enabledAutomation({ swapper: false, tracker: false })
+    automation.entangler.definition = { ...ENTANGLER_DEFINITION, virtual: true }
+
+    const result = generateRepeaterChain(net, baseOptions({
+      repeaterCount: 2,
+      automation
+    }))
+
+    expect(result.chainEdges).toHaveLength(3)
+    result.chainEdges.forEach(edge => {
+      expect(edge.isLogic).toBe(true)
+      expect(protocolsNamed(edge.data.protocols, 'EntanglerProt')).toHaveLength(1)
+      expect(protocolsNamed(edge.data.protocols, 'EdgeProtocol')).toHaveLength(1)
+      expect(protocolsNamed(edge.data.protocols, 'EntanglerProt')[0].id)
+        .not.toBe('template-entangler')
+    })
+    expect(result.virtualEdge.isLogic).toBe(true)
+    expect(result.virtualEdge.data.protocols).toEqual([])
   })
 
   it('rejects non-binary counts without mutating the network or endpoints', () => {

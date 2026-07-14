@@ -3,7 +3,6 @@
     type="button"
     class="option-help-trigger"
     :aria-label="label"
-    :title="text"
     v-tooltip.top="text"
   >
     <CircleHelp :size="16" aria-hidden="true" />

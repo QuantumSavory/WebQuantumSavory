@@ -209,7 +209,7 @@ describe('ProtocolConstructorForm', () => {
     expect(wrapper.get('input[type="number"]').attributes('disabled')).toBeDefined()
   })
 
-  it('keeps the existing ProtocolEditor chrome and parameter selectors', () => {
+  it('keeps the existing ProtocolEditor chrome and parameter selectors', async () => {
     const showResultsView = vi.fn()
     const wrapper = mount(ProtocolEditor, {
       props: {
@@ -230,6 +230,13 @@ describe('ProtocolConstructorForm', () => {
     expect(wrapper.get('.protocol-list-type').text()).toContain('TestNodeProtocol')
     expect(wrapper.findAll('.protocol-header-action')).toHaveLength(2)
     expect(wrapper.get('.protocol-container .param-item input').element.value).toBe('5')
+
+    await wrapper.get('[aria-label="Show results"]').trigger('click')
+    expect(showResultsView).toHaveBeenCalledWith(
+      'protocol',
+      expect.objectContaining({ id: 'protocol-1' }),
+      expect.objectContaining({ protocolType: 'TestNodeProtocol' })
+    )
   })
 })
 

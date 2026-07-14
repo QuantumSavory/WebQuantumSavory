@@ -2,7 +2,7 @@ function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-function deepClone(value, seen = new WeakMap()) {
+export function deepClone(value, seen = new WeakMap()) {
   if (value === null || typeof value !== 'object') return value
   if (seen.has(value)) return seen.get(value)
 

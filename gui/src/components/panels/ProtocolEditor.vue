@@ -3,7 +3,7 @@
         :class="{ 'selected':isSelected }" 
       >
     <div class="protocol-list-type" @click="toggleDetails">
-        <div>{{ getProtocolTypeSimpleName(protocol.type) }}</div>
+        <div>{{ protocolSimpleName(protocol.type) }}</div>
         <div class="protocol-header-actions">
           <button
             type="button"
@@ -43,6 +43,7 @@
 import { ChartNoAxesCombined, Trash2 } from '@lucide/vue'
 import ProtocolConstructorForm from './ProtocolConstructorForm.vue'
 import { useUiServices } from '../../composables/uiServices'
+import { protocolSimpleName } from '../../utils/protocolConstructors.js'
 
 const props = defineProps({
   protocol: {
@@ -81,14 +82,9 @@ function toggleDetails(){
 function showResults(){
   const context = {
     ...props.contextInfo,
-    protocolType: getProtocolTypeSimpleName(props.protocol.type)
+    protocolType: protocolSimpleName(props.protocol.type)
   }
   showResultsView('protocol', props.protocol, context)
-}
-
-function getProtocolTypeSimpleName( protocolType ){
-  const simpleName = protocolType.split(".").pop();
-  return simpleName;
 }
 
 function deleteProtocol(  ){

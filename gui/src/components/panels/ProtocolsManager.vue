@@ -35,7 +35,10 @@ import Menu from 'primevue/menu';
 import { api } from '../../utils/ApiConnector'
 import { getCurrentInstance } from 'vue'
 import { generateUUid } from '../../utils/Utils'
-import { createProtocolFromDefinition } from '../../utils/protocolConstructors'
+import {
+  createProtocolFromDefinition,
+  protocolSimpleName
+} from '../../utils/protocolConstructors'
 import { Plus } from '@lucide/vue'
 import { SIMULATION_EDITING_LOCK_MESSAGE, useUiServices } from '../../composables/uiServices'
 const { proxy } = getCurrentInstance()
@@ -92,7 +95,7 @@ const items = computed(() => {
   }
   
   return filteredTypes.map(type => ({
-    label: getProtocolTypeSimpleName(type.type),
+    label: protocolSimpleName(type.type),
     value: type.type, 
     command: () => {
       handleAddProtocol(type.type)
@@ -127,11 +130,6 @@ const computedProtocols = computed(() => {
     data: protocol.data || {}
   }))
 })
-
-function getProtocolTypeSimpleName( protocolType ){
-  const simpleName = protocolType.split(".").pop();
-  return simpleName;
-}
 
 function toggleAddProtocolMenu(event) {
   // Prevent adding protocols if simulation has run
