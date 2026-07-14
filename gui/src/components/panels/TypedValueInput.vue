@@ -76,7 +76,7 @@ import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import Checkbox from 'primevue/checkbox'
 import { Check } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
-import { escapeErrorHtml } from '../../utils/errorHtml.js'
+import { markdownCodeBlock } from '../../utils/markdown.js'
 import {
   isCodeType,
   isSymbolicType,
@@ -164,7 +164,7 @@ function openCodeEditor() {
 async function validateCode() {
   if (props.disabled) return
   if (!unsafeCodeEvaluationEnabled.value) {
-    props.parameter.error = '<pre>Server-side Julia evaluation is disabled.</pre>'
+    props.parameter.error = markdownCodeBlock('Server-side Julia evaluation is disabled.')
     return
   }
 
@@ -176,7 +176,7 @@ async function validateCode() {
   } catch (error) {
     codeEditorOpen.value = true
     delete props.parameter.latex
-    props.parameter.error = `<pre>${escapeErrorHtml(error?.message || 'Validation failed')}</pre>`
+    props.parameter.error = markdownCodeBlock(error?.message || 'Validation failed')
     return
   }
 
@@ -191,7 +191,7 @@ async function validateCode() {
 
   codeEditorOpen.value = true
   delete props.parameter.latex
-  props.parameter.error = `<pre>${escapeErrorHtml(response.error)}</pre>`
+  props.parameter.error = markdownCodeBlock(response.error)
 }
 </script>
 

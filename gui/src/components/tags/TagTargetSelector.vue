@@ -5,20 +5,19 @@
     <label>
       <span>Target</span>
       <select
-        :value="target.kind"
+        :value="targetScope"
         aria-label="Tag target kind"
         @change="changeKind($event.target.value)"
       >
         <option value="register">Register</option>
-        <option value="slot">Slot</option>
-        <option v-if="allowMessages" value="message_buffer">Message buffer</option>
+        <option v-if="allowMessages" value="message_buffer">Message Buffer</option>
       </select>
     </label>
 
     <label>
       <span>Node</span>
       <select
-        :value="target.node_id"
+        :value="selectedNodeId"
         aria-label="Target node"
         @change="changeNode($event.target.value)"
       >
@@ -28,26 +27,14 @@
       </select>
     </label>
 
-    <label v-if="target.kind === 'slot'">
+    <label v-if="targetScope === 'register'">
       <span>Slot</span>
       <select
-        :value="target.slot_id"
+        :value="selectedSlotId"
         aria-label="Target slot"
         @change="changeSlot($event.target.value)"
       >
-        <option v-for="(slot, index) in slots" :key="slot.id" :value="slot.id">
-          {{ index + 1 }} · {{ slot.type || 'Slot' }}
-        </option>
-      </select>
-    </label>
-
-    <label v-else-if="target.kind === 'register' && requireDestination">
-      <span>Destination slot</span>
-      <select
-        :value="target.destination_slot_id"
-        aria-label="Destination slot for register tag"
-        @change="changeDestination($event.target.value)"
-      >
+        <option value="">All slots</option>
         <option v-for="(slot, index) in slots" :key="slot.id" :value="slot.id">
           {{ index + 1 }} · {{ slot.type || 'Slot' }}
         </option>
@@ -72,10 +59,6 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
-  requireDestination: {
-    type: Boolean,
-    default: false
-  },
   disabled: {
     type: Boolean,
     default: false
@@ -85,37 +68,34 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const target = computed(() => props.modelValue || {})
+const targetScope = computed(() => (
+  target.value.kind === 'message_buffer' && props.allowMessages
+    ? 'message_buffer'
+    : 'register'
+))
 const selectedNode = computed(() => (
   props.nodes.find(node => String(node.id) === String(target.value.node_id))
   || props.nodes[0]
   || null
 ))
+const selectedNodeId = computed(() => selectedNode.value?.id ?? '')
 const slots = computed(() => selectedNode.value?.data?.slots || [])
-
-function emitTarget(patch) {
-  emit('update:modelValue', { ...target.value, ...patch })
-}
+const selectedSlot = computed(() => (
+  target.value.kind === 'slot'
+    ? slots.value.find(slot => String(slot.id) === String(target.value.slot_id)) || null
+    : null
+))
+const selectedSlotId = computed(() => selectedSlot.value?.id ?? '')
 
 function normalizedTarget() {
-  const kind = props.allowMessages || target.value.kind !== 'message_buffer'
-    ? (target.value.kind || 'register')
-    : 'register'
-  const nodeId = selectedNode.value?.id ?? ''
-  const slotIds = new Set(slots.value.map(slot => String(slot.id)))
-  const selectedSlot = slotIds.has(String(target.value.slot_id))
-    ? target.value.slot_id
-    : (slots.value[0]?.id ?? '')
-  const destinationSlot = slotIds.has(String(target.value.destination_slot_id))
-    ? target.value.destination_slot_id
-    : (slots.value[0]?.id ?? '')
-  return {
-    kind,
-    node_id: nodeId,
-    ...(kind === 'slot' ? { slot_id: selectedSlot } : {}),
-    ...(kind === 'register' && props.requireDestination
-      ? { destination_slot_id: destinationSlot }
-      : {})
+  const nodeId = selectedNodeId.value
+  if (targetScope.value === 'message_buffer') {
+    return { kind: 'message_buffer', node_id: nodeId }
   }
+  if (selectedSlot.value) {
+    return { kind: 'slot', node_id: nodeId, slot_id: selectedSlot.value.id }
+  }
+  return { kind: 'register', node_id: nodeId }
 }
 
 watchEffect(() => {
@@ -126,33 +106,25 @@ watchEffect(() => {
 })
 
 function changeKind(kind) {
-  emitTarget({
-    kind,
-    slot_id: kind === 'slot' ? (slots.value[0]?.id ?? '') : undefined,
-    destination_slot_id: kind === 'register' && props.requireDestination
-      ? (slots.value[0]?.id ?? '')
-      : undefined
-  })
+  const nodeId = selectedNodeId.value
+  emit('update:modelValue', kind === 'message_buffer' && props.allowMessages
+    ? { kind: 'message_buffer', node_id: nodeId }
+    : { kind: 'register', node_id: nodeId })
 }
 
 function changeNode(nodeId) {
   const node = props.nodes.find(candidate => String(candidate.id) === String(nodeId))
-  const firstSlotId = node?.data?.slots?.[0]?.id ?? ''
-  emitTarget({
-    node_id: nodeId,
-    slot_id: target.value.kind === 'slot' ? firstSlotId : undefined,
-    destination_slot_id: target.value.kind === 'register' && props.requireDestination
-      ? firstSlotId
-      : undefined
-  })
+  const normalizedNodeId = node?.id ?? ''
+  emit('update:modelValue', targetScope.value === 'message_buffer'
+    ? { kind: 'message_buffer', node_id: normalizedNodeId }
+    : { kind: 'register', node_id: normalizedNodeId })
 }
 
 function changeSlot(slotId) {
-  emitTarget({ slot_id: slotId })
-}
-
-function changeDestination(slotId) {
-  emitTarget({ destination_slot_id: slotId })
+  const slot = slots.value.find(candidate => String(candidate.id) === String(slotId))
+  emit('update:modelValue', slot
+    ? { kind: 'slot', node_id: selectedNodeId.value, slot_id: slot.id }
+    : { kind: 'register', node_id: selectedNodeId.value })
 }
 </script>
 

@@ -1844,8 +1844,8 @@ end
                 example: "function add(a, b)\nreturn a + b\nend"
               placement:
                 type: string
-                enum: [node, edge, floating]
-                description: Optional protocol placement used to provide representative custom-function context during validation; defaults to floating context
+                enum: [node, edge, floating, query]
+                description: Optional validation placement; protocol placements provide representative custom-function context, query matches tag-query runtime without injected context, and omission defaults to floating context
             required:
               - code
     responses:
@@ -1921,10 +1921,10 @@ route("/test_code", method="POST") do
   code_string = payload["code"]
   placement = get(payload, "placement", nothing)
   if placement !== nothing && !(
-    placement isa AbstractString && placement in ("node", "edge", "floating")
+    placement isa AbstractString && placement in ("node", "edge", "floating", "query")
   )
     throw(validation_error(
-      "Field 'placement' must be 'node', 'edge', or 'floating'",
+      "Field 'placement' must be 'node', 'edge', 'floating', or 'query'",
       Dict("field" => "placement"),
     ))
   end

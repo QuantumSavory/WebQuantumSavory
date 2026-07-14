@@ -53,6 +53,7 @@ function mountPanel(extraProps = {}) {
       ...extraProps
     },
     global: {
+      directives: { tooltip: vi.fn() },
       stubs: { TagConstructor: ConstructorStub }
     }
   })
@@ -61,7 +62,7 @@ function mountPanel(extraProps = {}) {
 describe('TagsQueriesPanel orchestration', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('lists, attaches, deletes, and refreshes target-specific tags without polling', async () => {
+  it('lists all slots by default and attaches selected-slot tags through the slot target', async () => {
     vi.spyOn(api, 'fetchTagTypes').mockResolvedValue(wireCatalog)
     const list = vi.spyOn(api, 'listTags').mockResolvedValue({
       success: true,
@@ -79,47 +80,77 @@ describe('TagsQueriesPanel orchestration', () => {
     const remove = vi.spyOn(api, 'deleteTag').mockResolvedValue({ success: true })
     const wrapper = mountPanel()
     await flushPromises()
+    const tagsPanel = wrapper.get('#tag-explorer-tags-panel')
 
     expect(list).toHaveBeenCalledWith('Explorer Test', expect.objectContaining({
       kind: 'register',
-      node_id: 'node-external',
-      destination_slot_id: 'slot-external'
+      node_id: 'node-external'
     }), expect.any(Object))
+    expect(list.mock.calls.at(-1)[1]).toEqual({
+      kind: 'register',
+      node_id: 'node-external'
+    })
     expect(wrapper.text()).toContain('PriorityTag')
+    expect(tagsPanel.get('[aria-label="Target slot"]').element.value).toBe('')
+    expect(tagsPanel.get('[aria-label="Target slot"] option').text()).toBe('All slots')
+    expect(tagsPanel.find('[data-testid="tag-constructor-submit"]').exists()).toBe(false)
 
-    await wrapper.get('[data-testid="tag-constructor-submit"]').trigger('click')
+    await tagsPanel.get('[aria-label="Target slot"]').setValue('slot-external')
+    await flushPromises()
+    expect(list).toHaveBeenCalledWith(
+      'Explorer Test',
+      { kind: 'slot', node_id: 'node-external', slot_id: 'slot-external' },
+      expect.any(Object)
+    )
+    const sections = tagsPanel.findAll('.tag-explorer-columns > section')
+    expect(sections[0].classes()).toContain('tag-constructor-column')
+    expect(sections[1].classes()).toContain('tag-results-column')
+
+    await tagsPanel.get('[data-testid="tag-constructor-submit"]').trigger('click')
     await flushPromises()
     expect(attach).toHaveBeenCalledWith(
       'Explorer Test',
-      expect.objectContaining({ destination_slot_id: 'slot-external' }),
+      { kind: 'slot', node_id: 'node-external', slot_id: 'slot-external' },
       expect.objectContaining({ kind: 'named' }),
       expect.any(Object)
     )
 
-    await wrapper.get('[aria-label="Delete tag tag-1"]').trigger('click')
+    await tagsPanel.get('[aria-label="Delete tag tag-1"]').trigger('click')
     await flushPromises()
     expect(remove).toHaveBeenCalledWith(
       'Explorer Test',
-      expect.objectContaining({ kind: 'register' }),
+      { kind: 'slot', node_id: 'node-external', slot_id: 'slot-external' },
       'tag-1',
       expect.any(Object)
     )
 
     const beforeRefresh = list.mock.calls.length
-    await wrapper.get('.tag-refresh-button').trigger('click')
+    await tagsPanel.get('.tag-refresh-button').trigger('click')
     await flushPromises()
     expect(list.mock.calls.length).toBeGreaterThan(beforeRefresh)
 
     list.mockRejectedValueOnce(new Error('Message list failed'))
-    await wrapper.get('[aria-label="Tag target kind"]').setValue('message_buffer')
+    await tagsPanel.get('[aria-label="Tag target kind"]').setValue('message_buffer')
     await flushPromises()
-    expect(wrapper.find('[aria-label="Delete tag tag-1"]').exists()).toBe(false)
+    expect(tagsPanel.find('[aria-label="Target slot"]').exists()).toBe(false)
+    expect(tagsPanel.find('[data-testid="tag-constructor-submit"]').exists()).toBe(true)
+    expect(tagsPanel.find('[aria-label="Delete tag tag-1"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('PriorityTag')
     expect(wrapper.text()).toContain('Message list failed')
     expect(wrapper.text()).toContain('can be inserted and listed, but not deleted')
+
+    await tagsPanel.get('[data-testid="tag-constructor-submit"]').trigger('click')
+    await flushPromises()
+    expect(attach).toHaveBeenLastCalledWith(
+      'Explorer Test',
+      { kind: 'message_buffer', node_id: 'node-external' },
+      expect.objectContaining({ kind: 'named' }),
+      expect.any(Object)
+    )
+    expect(tagsPanel.find('[aria-label="Delete tag tag-1"]').exists()).toBe(false)
   })
 
-  it('lists an empty register even when no destination slot is available', async () => {
+  it('lists an empty register while keeping all-slots attachment hidden', async () => {
     vi.spyOn(api, 'fetchTagTypes').mockResolvedValue(wireCatalog)
     const list = vi.spyOn(api, 'listTags').mockResolvedValue({ success: true, entries: [] })
     const wrapper = mountPanel({
@@ -135,13 +166,16 @@ describe('TagsQueriesPanel orchestration', () => {
 
     expect(list).toHaveBeenCalledWith(
       'Explorer Test',
-      expect.objectContaining({ kind: 'register', node_id: 'node-empty' }),
+      { kind: 'register', node_id: 'node-empty' },
       expect.any(Object)
     )
-    expect(wrapper.get('.tag-refresh-button').attributes()).not.toHaveProperty('disabled')
+    const tagsPanel = wrapper.get('#tag-explorer-tags-panel')
+    expect(tagsPanel.get('[aria-label="Target slot"]').findAll('option')).toHaveLength(1)
+    expect(tagsPanel.find('#tag-add-heading').exists()).toBe(false)
+    expect(tagsPanel.get('.tag-refresh-button').attributes()).not.toHaveProperty('disabled')
   })
 
-  it('supports accessible inner tab navigation, non-consuming queries, and lifecycle reset', async () => {
+  it('queries all slots or one slot non-consumingly and resets target scope with lifecycle changes', async () => {
     vi.spyOn(api, 'fetchTagTypes').mockResolvedValue(wireCatalog)
     const list = vi.spyOn(api, 'listTags').mockResolvedValue({ success: true, entries: [] })
     const query = vi.spyOn(api, 'queryTags').mockResolvedValue({
@@ -163,17 +197,44 @@ describe('TagsQueriesPanel orchestration', () => {
     const queriesTab = wrapper.get('#tag-explorer-queries-tab')
     expect(queriesTab.attributes('aria-selected')).toBe('true')
     expect(wrapper.get('#tag-explorer-queries-panel').isVisible()).toBe(true)
+    const queryPanel = wrapper.get('#tag-explorer-queries-panel')
+    const querySections = queryPanel.findAll('.tag-explorer-columns > section')
+    expect(querySections[0].classes()).toContain('tag-constructor-column')
+    expect(querySections[1].classes()).toContain('tag-results-column')
 
-    await wrapper.get('[data-testid="query-constructor-submit"]').trigger('click')
+    await queryPanel.get('[data-testid="query-constructor-submit"]').trigger('click')
     await flushPromises()
     expect(query).toHaveBeenCalledWith(
       'Explorer Test',
-      expect.objectContaining({ kind: 'register', node_id: 'node-external' }),
+      { kind: 'register', node_id: 'node-external' },
       expect.objectContaining({ fields: { priority: { kind: 'wildcard' } } }),
       expect.any(Object)
     )
     expect(wrapper.text()).toContain('Queries return all matches without consuming them')
     expect(wrapper.text()).toContain('PriorityTag')
+
+    await queryPanel.get('[aria-label="Target slot"]').setValue('slot-external')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('PriorityTag')
+    expect(queryPanel.get('.tag-refresh-button').attributes()).toHaveProperty('disabled')
+
+    await queryPanel.get('[data-testid="query-constructor-submit"]').trigger('click')
+    await flushPromises()
+    expect(query).toHaveBeenLastCalledWith(
+      'Explorer Test',
+      { kind: 'slot', node_id: 'node-external', slot_id: 'slot-external' },
+      expect.objectContaining({ fields: { priority: { kind: 'wildcard' } } }),
+      expect.any(Object)
+    )
+    const queryCallsBeforeRefresh = query.mock.calls.length
+    await queryPanel.get('.tag-refresh-button').trigger('click')
+    await flushPromises()
+    expect(query.mock.calls).toHaveLength(queryCallsBeforeRefresh + 1)
+    expect(query.mock.calls.at(-1)[1]).toEqual({
+      kind: 'slot',
+      node_id: 'node-external',
+      slot_id: 'slot-external'
+    })
 
     await wrapper.setProps({ enabled: false })
     await flushPromises()
@@ -182,10 +243,12 @@ describe('TagsQueriesPanel orchestration', () => {
     await wrapper.setProps({ enabled: true, projectName: 'New Project' })
     await flushPromises()
     expect(wrapper.get('#tag-explorer-tags-tab').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('[aria-label="Tag target kind"]').element.value).toBe('register')
+    const resetTagsPanel = wrapper.get('#tag-explorer-tags-panel')
+    expect(resetTagsPanel.get('[aria-label="Tag target kind"]').element.value).toBe('register')
+    expect(resetTagsPanel.get('[aria-label="Target slot"]').element.value).toBe('')
     expect(list).toHaveBeenCalledWith(
       'New Project',
-      expect.objectContaining({ node_id: 'node-external' }),
+      { kind: 'register', node_id: 'node-external' },
       expect.any(Object)
     )
   })

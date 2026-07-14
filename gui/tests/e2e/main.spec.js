@@ -178,6 +178,7 @@ test.describe.serial('Main Workflow', () => {
       await expect(actionButton).toBeVisible();
       await actionButton.hover();
       await expect(page.locator('.p-tooltip-text')).toHaveText(name);
+      await expect(page.locator('.p-tooltip-text').locator('p')).toHaveText(name);
     }
 
     const toggleDetailsButton = slotActions.getByRole('button', { name: 'Toggle details' });
@@ -279,26 +280,23 @@ test.describe.serial('Main Workflow', () => {
 
     const tagsPanel = page.locator('#tag-explorer-tags-panel');
     await expect(tagsPanel.getByRole('button', { name: 'Refresh' }).locator('.lucide-refresh-cw')).toBeVisible();
-    const tagCombobox = tagsPanel.getByRole('combobox', { name: 'Tag type' });
-    await expect(tagCombobox).toBeEnabled({ timeout: 10000 });
-    await tagCombobox.focus();
 
-    const generalOptions = tagsPanel.locator('.tag-option');
-    const optionCount = await generalOptions.count();
-    let headOnlySymbolOption = null;
-    for (let index = 0; index < optionCount; index += 1) {
-      const option = generalOptions.nth(index);
-      const label = await option.locator('span').innerText();
-      if (label.endsWith('(Symbol)')) {
-        headOnlySymbolOption = option;
-        break;
-      }
-    }
-    expect(headOnlySymbolOption).not.toBeNull();
-    await headOnlySymbolOption.click();
+    const tagSlotSelector = tagsPanel.getByRole('combobox', { name: 'Target slot' });
+    await expect(tagSlotSelector.locator('option').first()).toHaveText('All slots');
+    await expect(tagsPanel.locator('.tag-constructor')).toHaveCount(0);
+    await expect(tagSlotSelector).toBeEnabled({ timeout: 10000 });
+    await tagSlotSelector.selectOption({ index: 1 });
+    const selectedSlotId = await tagSlotSelector.inputValue();
+    expect(selectedSlotId).not.toBe('');
 
     const uniqueTagHead = 'webquantumsavory_e2e_tag';
-    await tagsPanel.getByLabel('General tag Symbol head').fill(uniqueTagHead);
+    const tagCombobox = tagsPanel.getByRole('combobox', { name: 'Tag type' });
+    await expect(tagCombobox).toBeEnabled({ timeout: 10000 });
+    await tagCombobox.fill(`:${uniqueTagHead}`);
+    await expect(tagsPanel.locator('.tag-option').filter({ hasText: 'General Tag: Symbol' })).toBeVisible();
+    await tagCombobox.press('Enter');
+    await expect(tagCombobox).toHaveValue(`:${uniqueTagHead}`);
+    await expect(tagsPanel.locator('.tag-constructor .tag-badge-identity')).toHaveAttribute('data-badge-kind', 'symbol');
     await expect(tagsPanel.locator('.tag-preview code')).toContainText(uniqueTagHead, {
       timeout: 10000,
     });
@@ -309,8 +307,19 @@ test.describe.serial('Main Workflow', () => {
     await expect(attachedTag).toHaveCount(1, { timeout: 10000 });
     await expect(attachedTag.getByRole('button', { name: 'Show rendered tag details' }).locator('.lucide-chevron-right')).toBeVisible();
     await expect(attachedTag.getByRole('button', { name: /Delete tag/ }).locator('.lucide-trash-2')).toBeVisible();
+    await expect(attachedTag.locator('.tag-result-details')).toHaveCount(0);
+
+    const identityBadge = attachedTag.locator('.tag-badge-identity');
+    await identityBadge.hover();
+    const markdownTooltip = page.locator('.p-tooltip-text');
+    await expect(markdownTooltip).toBeVisible();
+    await expect(markdownTooltip.locator('p')).toHaveCount(2);
+    await expect(markdownTooltip.locator('strong')).toHaveText('Head');
+    await expect(markdownTooltip.locator('code')).toHaveText('Symbol');
+
     await attachedTag.getByRole('button', { name: 'Show rendered tag details' }).click();
     await expect(attachedTag).toContainText('Tag ID');
+    await expect(attachedTag).toContainText('Slot ID');
     await expect(attachedTag).toContainText(uniqueTagHead);
 
     const tagsInnerTab = page.getByRole('tab', { name: 'Tags', exact: true });
@@ -321,23 +330,20 @@ test.describe.serial('Main Workflow', () => {
     await expect(queriesInnerTab).toHaveAttribute('aria-selected', 'true');
 
     const queriesPanel = page.locator('#tag-explorer-queries-panel');
+    const querySlotSelector = queriesPanel.getByRole('combobox', { name: 'Target slot' });
+    await expect(querySlotSelector.locator('option').first()).toHaveText('All slots');
+    await expect(querySlotSelector).toBeEnabled({ timeout: 10000 });
+    await querySlotSelector.selectOption(selectedSlotId);
     const queryCombobox = queriesPanel.getByRole('combobox', { name: 'Tag type' });
-    await queryCombobox.focus();
-    const queryOptions = queriesPanel.locator('.tag-option');
-    const queryOptionCount = await queryOptions.count();
-    let queryHeadOnlySymbolOption = null;
-    for (let index = 0; index < queryOptionCount; index += 1) {
-      const option = queryOptions.nth(index);
-      const label = await option.locator('span').innerText();
-      if (label.endsWith('(Symbol)')) {
-        queryHeadOnlySymbolOption = option;
-        break;
-      }
-    }
-    expect(queryHeadOnlySymbolOption).not.toBeNull();
-    await queryHeadOnlySymbolOption.click();
-    await queriesPanel.getByLabel('General tag Symbol head').fill(uniqueTagHead);
-    await queriesPanel.getByRole('button', { name: 'Run query' }).click();
+    await expect(queryCombobox).toBeEnabled({ timeout: 10000 });
+    await queryCombobox.fill(`:${uniqueTagHead}`);
+    await expect(queriesPanel.locator('.tag-option').filter({ hasText: 'General Tag: Symbol' })).toBeVisible();
+    await queryCombobox.press('Enter');
+    await expect(queryCombobox).toHaveValue(`:${uniqueTagHead}`);
+    await expect(queriesPanel.locator('.tag-constructor .tag-badge-identity')).toHaveAttribute('data-badge-kind', 'symbol');
+    const runQueryButton = queriesPanel.getByRole('button', { name: 'Run query' });
+    await expect(runQueryButton.locator('.lucide-search')).toBeVisible();
+    await runQueryButton.click();
 
     const queryResult = queriesPanel.locator('.tag-result-item').filter({ hasText: uniqueTagHead });
     await expect(queryResult).toHaveCount(1, { timeout: 10000 });

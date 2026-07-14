@@ -7,7 +7,7 @@ const FLOAT_TYPES = new Set([
   'Float16', 'Float32', 'Float64', 'AbstractFloat', 'Real', 'Number'
 ])
 
-function shortTypeName(typeId) {
+export function shortTypeName(typeId) {
   const value = String(typeId)
   return value.split('.').pop() || value
 }
@@ -201,19 +201,23 @@ export function defaultValueForType(type, dataTypes = []) {
   return ''
 }
 
-export function createTagDraft(definition, catalog = { dataTypes: [] }, query = false) {
-  if (!definition) return null
-  const headDataTypes = definition.allowedDataTypeIds?.length
-    ? catalog.dataTypes.filter(type => definition.allowedDataTypeIds.includes(type.id))
-    : catalog.dataTypes
-  const fields = definition.fields.map(field => ({
+function createFieldDraft(field, catalog, query) {
+  return {
     ...field,
     value: defaultValueForType(field.type, catalog.dataTypes),
     termKind: query ? 'exact' : undefined,
     operator: '==',
     predicateKind: 'preset',
     source: ''
-  }))
+  }
+}
+
+export function createTagDraft(definition, catalog = { dataTypes: [] }, query = false) {
+  if (!definition) return null
+  const headDataTypes = definition.allowedDataTypeIds?.length
+    ? catalog.dataTypes.filter(type => definition.allowedDataTypeIds.includes(type.id))
+    : catalog.dataTypes
+  const fields = definition.fields.map(field => createFieldDraft(field, catalog, query))
 
   return {
     kind: definition.kind,
@@ -226,6 +230,85 @@ export function createTagDraft(definition, catalog = { dataTypes: [] }, query = 
       : undefined,
     fields
   }
+}
+
+/**
+ * Start a general tag from its committed head. General fields are deliberately
+ * absent until the user chooses each next type from the compatible signatures.
+ */
+export function createGeneralTagDraft(headKind, head, catalog, query = false) {
+  return {
+    kind: 'general',
+    signatureId: undefined,
+    headKind,
+    head,
+    fields: [],
+    query,
+    catalog
+  }
+}
+
+export function compatibleGeneralSignatures(catalog, draft) {
+  if (!draft || draft.kind !== 'general') return []
+  const prefix = draft.fields.map(field => field.type)
+  return catalog.general.filter(signature => {
+    if (signature.headKind !== draft.headKind) return false
+    if (
+      draft.headKind === 'DataType'
+      && !signature.allowedDataTypeIds.includes(draft.head)
+    ) return false
+    if (signature.fields.length < prefix.length && !signature.variadic) return false
+    return prefix.every((type, index) => {
+      const candidate = signature.fields[index]
+        || (signature.variadic ? signature.fields.at(-1) : null)
+      return candidate?.type === type
+    })
+  })
+}
+
+export function completeGeneralSignature(catalog, draft) {
+  const length = draft?.fields?.length ?? -1
+  return compatibleGeneralSignatures(catalog, draft).find(signature => (
+    signature.fields.length === length
+    || (signature.variadic && length >= signature.fields.length)
+  )) || null
+}
+
+export function nextGeneralFieldChoices(catalog, draft) {
+  if (!draft || draft.kind !== 'general') return []
+  const index = draft.fields.length
+  const choices = new Map()
+  compatibleGeneralSignatures(catalog, draft).forEach(signature => {
+    const field = signature.fields[index]
+      || (signature.variadic ? signature.fields.at(-1) : null)
+    if (!field || choices.has(field.type)) return
+    choices.set(field.type, field)
+  })
+  return [...choices.values()]
+}
+
+export function appendGeneralField(draft, field, catalog, query = false) {
+  if (!draft || draft.kind !== 'general' || !field) return draft
+  draft.fields.push(createFieldDraft({
+    ...field,
+    name: field.name || `field_${draft.fields.length + 1}`,
+    position: draft.fields.length + 1
+  }, catalog, query))
+  return draft
+}
+
+/** Resolve an advertised DataType without ever looking it up in Julia. */
+export function resolveCatalogDataType(dataTypes, input) {
+  const needle = String(input ?? '').trim()
+  if (!needle) return null
+
+  const qualified = dataTypes.find(type => type.id === needle)
+  if (qualified) return qualified
+
+  const matches = dataTypes.filter(type => (
+    type.label === needle || shortTypeName(type.id) === needle
+  ))
+  return matches.length === 1 ? matches[0] : null
 }
 
 export function coerceCatalogValue(type, value) {
@@ -291,6 +374,7 @@ export function serializeTagDraft(draft, { query = false } = {}) {
 export function isTagDraftComplete(draft, { query = false } = {}) {
   if (!draft) return false
   if (draft.kind === 'general' && (draft.head === '' || draft.head == null)) return false
+  if (draft.kind === 'general' && !draft.signatureId) return false
   return draft.fields.every(field => {
     if (query && field.termKind === 'wildcard') return true
     if (query && field.termKind === 'predicate' && field.predicateKind === 'custom') {

@@ -645,6 +645,37 @@
         @test validation_error isa UndefVarError
       end
 
+      success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+        "x -> x > 1";
+        placement="query",
+      )
+      @test success
+      @test results isa Dict
+      @test validation_error === nothing
+
+      success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+        "candidate -> let nodeid = _ -> 1\n  candidate == nodeid(\"Amherst\")\nend";
+        placement="query",
+      )
+      @test success
+      @test results isa Dict
+      @test validation_error === nothing
+
+      for contextual_source in (
+        "<(self)",
+        "==(nodeid(\"Amherst\"))",
+        "candidate -> candidate == self",
+        "candidate -> candidate == nodeid(\"Amherst\")",
+      )
+        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+          contextual_source;
+          placement="query",
+        )
+        @test !success
+        @test results === nothing
+        @test validation_error isa UndefVarError
+      end
+
       success, results, validation_error = WebQuantumSavory.Sandbox.test_code("42")
       @test !success
       @test results === nothing

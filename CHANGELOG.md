@@ -2,7 +2,8 @@
 
 ## 1.7.1
 
-- Added a metadata-driven Tags & Queries explorer for live simulations, with safe typed tag construction, previews, register/slot/message-buffer inspection and mutation, and non-consuming FILO register/slot queries with exact, wildcard, preset, and policy-gated custom predicates.
+- Added a metadata-driven Tags & Queries explorer for live simulations, with a shared wrapping badge sequence for progressive named, Symbol, and allowlisted DataType construction; previews; Register targets spanning All slots or one selected slot; message-buffer inspection and mutation; and non-consuming FILO queries with exact, wildcard, preset, and policy-gated custom predicates. Constructors now precede their results, while rendered text, IDs, slot context, time, source, and buffer depth stay behind result disclosure.
+- Rendered every PrimeVue directive tooltip through the Description panel's safe Markdown and KaTeX pipeline, including structured catalog help and preformatted backend diagnostics, while leaving native browser `title` text unchanged.
 - Synchronized the frontend package and API documentation metadata with the application release version so release bumps remain consistent across shared CI checks and public version surfaces.
 - Made CI server ownership checks tolerate hosts whose socket tools cannot report process metadata, while still requiring the launched Genie server to confirm that it is listening.
 

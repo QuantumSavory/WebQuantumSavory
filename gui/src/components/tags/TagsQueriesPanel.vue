@@ -47,7 +47,6 @@
             v-model="tagTarget"
             :nodes="nodes"
             allow-messages
-            require-destination
             :disabled="busy"
           />
           <button
@@ -62,20 +61,11 @@
         </div>
 
         <div class="tag-explorer-columns">
-          <section class="tag-results-column" aria-labelledby="tag-list-heading">
-            <h3 id="tag-list-heading">Attached tags</h3>
-            <TagResultsList
-              :entries="tags"
-              :busy="busy"
-              :deletable="tagTarget.kind !== 'message_buffer'"
-              @delete="deleteEntry"
-            />
-            <p v-if="tagTarget.kind === 'message_buffer'" class="tag-message-note">
-              Message-buffer entries can be inserted and listed, but not deleted.
-            </p>
-          </section>
-
-          <section class="tag-constructor-column" aria-labelledby="tag-add-heading">
+          <section
+            v-if="showTagConstructor"
+            class="tag-constructor-column"
+            aria-labelledby="tag-add-heading"
+          >
             <h3 id="tag-add-heading">
               {{ tagTarget.kind === 'message_buffer' ? 'Insert message tag' : 'Attach tag' }}
             </h3>
@@ -83,11 +73,25 @@
               :key="`tag-${constructorGeneration}`"
               :catalog="catalog"
               :busy="busy"
-              :disabled="!catalogLoaded || !attachmentTargetReady(tagTarget)"
+              :disabled="!catalogLoaded || !targetReady(tagTarget)"
               :unsafe-evaluation-enabled="catalog.unsafeEvaluation"
               :action-label="tagTarget.kind === 'message_buffer' ? 'Insert tag' : 'Add tag'"
               @submit="attachTag"
             />
+          </section>
+
+          <section class="tag-results-column" aria-labelledby="tag-list-heading">
+            <h3 id="tag-list-heading">Attached tags</h3>
+            <TagResultsList
+              :entries="tags"
+              :catalog="catalog"
+              :busy="busy"
+              :deletable="tagTarget.kind !== 'message_buffer'"
+              @delete="deleteEntry"
+            />
+            <p v-if="tagTarget.kind === 'message_buffer'" class="tag-message-note">
+              Message-buffer entries can be inserted and listed, but not deleted.
+            </p>
           </section>
         </div>
       </section>
@@ -120,17 +124,6 @@
         </div>
 
         <div class="tag-explorer-columns">
-          <section class="tag-results-column" aria-labelledby="query-results-heading">
-            <h3 id="query-results-heading">Query results</h3>
-            <TagResultsList
-              :entries="queryResults"
-              :busy="busy"
-              :deletable="false"
-              empty-text="Run a query to find matching tags."
-            />
-            <p class="tag-message-note">Queries return all matches without consuming them.</p>
-          </section>
-
           <section class="tag-constructor-column" aria-labelledby="query-build-heading">
             <h3 id="query-build-heading">Build query</h3>
             <TagConstructor
@@ -143,6 +136,18 @@
               :unsafe-evaluation-enabled="catalog.unsafeEvaluation"
               @submit="runQuery"
             />
+          </section>
+
+          <section class="tag-results-column" aria-labelledby="query-results-heading">
+            <h3 id="query-results-heading">Query results</h3>
+            <TagResultsList
+              :entries="queryResults"
+              :catalog="catalog"
+              :busy="busy"
+              :deletable="false"
+              empty-text="Run a query to find matching tags."
+            />
+            <p class="tag-message-note">Queries return all matches without consuming them.</p>
           </section>
         </div>
       </section>
@@ -185,11 +190,14 @@ const props = defineProps({
 })
 
 const innerTab = ref('tags')
-const tagTarget = ref({ kind: 'register', node_id: '', destination_slot_id: '' })
+const tagTarget = ref({ kind: 'register', node_id: '' })
 const queryTarget = ref({ kind: 'register', node_id: '' })
 const lastQuery = ref(null)
 const constructorGeneration = ref(0)
 const nodes = computed(() => props.projectData?.net?.nodes || [])
+const showTagConstructor = computed(() => (
+  tagTarget.value.kind === 'slot' || tagTarget.value.kind === 'message_buffer'
+))
 const activeRef = computed(() => props.active)
 const enabledRef = computed(() => props.enabled)
 const projectNameRef = computed(() => props.projectName)
@@ -262,15 +270,10 @@ function targetReady(target) {
   return Boolean(target.node_id)
 }
 
-function attachmentTargetReady(target) {
-  if (!targetReady(target)) return false
-  return target.kind !== 'register' || Boolean(target.destination_slot_id)
-}
-
 function resetPanel() {
   clearTransient()
   innerTab.value = 'tags'
-  tagTarget.value = { kind: 'register', node_id: '', destination_slot_id: '' }
+  tagTarget.value = { kind: 'register', node_id: '' }
   queryTarget.value = { kind: 'register', node_id: '' }
   lastQuery.value = null
   constructorGeneration.value += 1
@@ -380,18 +383,23 @@ function handleInnerTabKeydown(event, index) {
   display: grid;
   min-height: 0;
   flex: 1 1 auto;
-  grid-template-columns: minmax(260px, 1fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   gap: var(--app-space-4);
+  overflow: auto;
 }
 
 .tag-results-column,
 .tag-constructor-column {
   min-width: 0;
-  overflow: auto;
   border: 1px solid var(--app-color-border);
   border-radius: var(--app-radius-control);
   padding: var(--app-space-3);
   background: var(--app-color-surface-subtle);
+}
+
+.tag-results-column {
+  min-height: 120px;
 }
 
 .tag-results-column h3,
@@ -427,11 +435,5 @@ function handleInnerTabKeydown(event, index) {
 
 @keyframes tag-explorer-spin {
   to { transform: rotate(360deg); }
-}
-
-@media (max-width: 700px) {
-  .tag-explorer-columns {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

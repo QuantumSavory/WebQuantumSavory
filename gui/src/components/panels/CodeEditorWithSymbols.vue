@@ -47,7 +47,6 @@
         role="alert"
         v-tooltip.top="{
           value: errorMessage,
-          escape: false,
           autoHide: false,
           class: 'reduce-y-tooltip'
         }"
@@ -91,6 +90,7 @@
           <button
             v-for="symbol in unicodeSymbols"
             :key="symbol"
+            type="button"
             class="symbol-button"
             :class="{ 'subscript-char': isSubscriptChar(symbol) }"
             @mousedown="handleSymbolClick($event, symbol)"
@@ -102,6 +102,7 @@
         </div>
 
         <button
+          type="button"
           @click="handleValidate"
           :disabled="interactionDisabled"
           :title="evaluationEnabled ? 'Validate' : 'Server-side Julia evaluation is disabled'"

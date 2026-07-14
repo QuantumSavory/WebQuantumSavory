@@ -704,6 +704,15 @@
           ("<(self)", "node", true),
           ("==(nodeid(\"Amherst\"))", "edge", true),
           ("<(self)", "edge", false),
+          ("x -> x > 1", "query", true),
+          (
+            "candidate -> let nodeid = _ -> 1; candidate == nodeid(\"Amherst\"); end",
+            "query",
+            true,
+          ),
+          ("==(nodeid(\"Amherst\"))", "query", false),
+          ("candidate -> candidate == nodeid(\"Amherst\")", "query", false),
+          ("<(self)", "query", false),
         )
           contextual_response = make_request(
             "POST",

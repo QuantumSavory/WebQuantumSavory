@@ -76,6 +76,20 @@ describe('ProtocolConstructorForm', () => {
     expect(wrapper.get('input[type="number"]').attributes('step')).toBe('1')
   })
 
+  it('adds unsupported parameter types to documentation as Markdown', () => {
+    const wrapper = mountForm({
+      protocol: {
+        type: PROTOCOL_TYPE,
+        parameters: [{ name: 'rounds', type: 'UnknownType', value: '' }]
+      },
+      category: 'node'
+    })
+
+    expect(wrapper.get('.param-name').attributes('data-tooltip')).toBe(
+      'Number of rounds.\n\n**Unsupported:** `UnknownType`'
+    )
+  })
+
   it('renders an explicit empty constructor panel when no configurable fields remain', () => {
     const wrapper = mountForm({
       protocol: {
@@ -285,7 +299,7 @@ describe('TypedValueInput disabled code values', () => {
     expect(parameter.value).toBe('x -> x < self')
   })
 
-  it('escapes validator responses and thrown transport errors for HTML tooltips', async () => {
+  it('passes raw validator responses and transport errors as Markdown code blocks', async () => {
     vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
     const validate = vi.spyOn(api, 'validateFunction').mockResolvedValue({
       success: false,
@@ -308,13 +322,13 @@ describe('TypedValueInput disabled code values', () => {
     await wrapper.get('.validate-code-stub').trigger('click')
     await flushPromises()
     expect(parameter.error).toBe(
-      '<pre>bad &lt;lambda&gt; &amp; &quot;quote&quot; &#039;single&#039;\nnext</pre>'
+      '```\nbad <lambda> & "quote" \'single\'\\nnext\n```'
     )
 
     validate.mockRejectedValueOnce(new Error('<transport> & "down"'))
     await wrapper.get('.validate-code-stub').trigger('click')
     await flushPromises()
-    expect(parameter.error).toBe('<pre>&lt;transport&gt; &amp; &quot;down&quot;</pre>')
+    expect(parameter.error).toBe('```\n<transport> & "down"\n```')
   })
 })
 

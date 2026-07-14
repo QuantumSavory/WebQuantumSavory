@@ -10,22 +10,10 @@
     <ul v-else class="tag-result-list" aria-label="Tag results">
       <li v-for="entry in entries" :key="entry.id" class="tag-result-item">
         <div class="tag-result-summary">
-          <span class="tag-chip tag-chip-type">{{ entryLabel(entry) }}</span>
-          <span
-            v-for="field in entryFields(entry)"
-            :key="field.key"
-            class="tag-chip"
-            :class="chipClass(field)"
-            :title="field.type"
-          >
-            <strong v-if="field.name">{{ field.name }}:</strong>
-            {{ field.label }}
-          </span>
-
-          <span v-if="entry.slotId" class="tag-result-context">Slot {{ entry.slotId }}</span>
-          <span v-if="entry.time != null" class="tag-result-context">Time {{ entry.time }}</span>
-          <span v-if="entry.source" class="tag-result-context">Source {{ entry.source }}</span>
-          <span v-if="entry.depth != null" class="tag-result-context">Depth {{ entry.depth }}</span>
+          <TagBadgeSequence
+            :identity="entryIdentity(entry)"
+            :fields="entryFields(entry)"
+          />
 
           <span class="tag-result-actions">
             <button
@@ -52,13 +40,29 @@
         </div>
 
         <dl v-if="isExpanded(entry)" class="tag-result-details">
-          <div>
+          <div v-if="entry.rendered">
             <dt>Rendered</dt>
-            <dd><code>{{ entry.rendered || 'Unavailable' }}</code></dd>
+            <dd><code>{{ entry.rendered }}</code></dd>
           </div>
-          <div>
+          <div v-if="entry.id">
             <dt>Tag ID</dt>
             <dd><code>{{ entry.id }}</code></dd>
+          </div>
+          <div v-if="entry.slotId">
+            <dt>Slot ID</dt>
+            <dd><code>{{ entry.slotId }}</code></dd>
+          </div>
+          <div v-if="entry.time != null">
+            <dt>Time</dt>
+            <dd>{{ entry.time }}</dd>
+          </div>
+          <div v-if="entry.source">
+            <dt>Message source</dt>
+            <dd>{{ entry.source }}</dd>
+          </div>
+          <div v-if="entry.depth != null">
+            <dt>Buffer depth</dt>
+            <dd>{{ entry.depth }}</dd>
           </div>
         </dl>
       </li>
@@ -69,11 +73,17 @@
 <script setup>
 import { ref } from 'vue'
 import { ChevronDown, ChevronRight, Trash2 } from '@lucide/vue'
+import { shortTypeName } from '../../utils/tagExplorer.js'
+import TagBadgeSequence from './TagBadgeSequence.vue'
 
-defineProps({
+const props = defineProps({
   entries: {
     type: Array,
     default: () => []
+  },
+  catalog: {
+    type: Object,
+    default: () => ({ named: [], general: [], dataTypes: [] })
   },
   deletable: {
     type: Boolean,
@@ -92,33 +102,64 @@ defineProps({
 const emit = defineEmits(['delete'])
 const expandedIds = ref(new Set())
 
-function entryLabel(entry) {
-  if (entry.kind === 'named') return entry.display_name
-  if (entry.kind === 'general') return String(entry.head.value).split('.').pop()
-  return 'Tag'
+function namedDefinition(entry) {
+  return props.catalog.named?.find(definition => definition.typeId === entry.type_id) || null
 }
 
-function formattedValue(value) {
-  return String(value)
+function generalDefinition(entry) {
+  const types = entry.fields.map(field => field.type)
+  return props.catalog.general?.find(definition => (
+    definition.headKind === entry.head?.type
+    && definition.fields.length === types.length
+    && types.every((type, index) => definition.fields[index]?.type === type)
+  )) || null
+}
+
+function entryIdentity(entry) {
+  if (entry.kind === 'named') {
+    const definition = namedDefinition(entry)
+    return {
+      key: 'identity',
+      kind: 'named',
+      name: 'Tag',
+      type: 'Named',
+      value: entry.display_name || shortTypeName(entry.type_id),
+      doc: definition?.doc || ''
+    }
+  }
+  if (entry.kind === 'general') {
+    const headType = entry.head?.type || 'Value'
+    const rawValue = entry.head?.value ?? 'Tag'
+    return {
+      key: 'identity',
+      kind: 'general',
+      badgeKind: headType === 'Symbol' ? 'symbol' : 'datatype',
+      name: 'Head',
+      type: headType,
+      value: headType === 'DataType' ? shortTypeName(rawValue) : rawValue,
+      doc: ''
+    }
+  }
+  return {
+    key: 'identity',
+    kind: 'general',
+    name: 'Tag',
+    type: 'Unknown',
+    value: 'Tag',
+    doc: ''
+  }
 }
 
 function entryFields(entry) {
-  return entry.fields.map(field => ({
+  const definition = entry.kind === 'named'
+    ? namedDefinition(entry)
+    : generalDefinition(entry)
+  return entry.fields.map((field, index) => ({
+    ...field,
     key: `${field.position}:${field.name}`,
-    name: field.name,
-    type: field.type,
-    value: field.value,
-    label: formattedValue(field.value)
+    value: field.type === 'DataType' ? shortTypeName(field.value) : String(field.value),
+    doc: definition?.fields?.[index]?.doc || ''
   }))
-}
-
-function chipClass(field) {
-  const type = field.type.toLowerCase()
-  if (type.includes('symbol')) return 'tag-chip-symbol'
-  if (type.includes('datatype') || type.includes('type{')) return 'tag-chip-datatype'
-  if (type.includes('int')) return 'tag-chip-integer'
-  if (type.includes('float') || type.includes('real') || type.includes('number')) return 'tag-chip-float'
-  return 'tag-chip-value'
 }
 
 function isExpanded(entry) {
@@ -165,53 +206,17 @@ function toggle(entry) {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: var(--app-space-1);
-  flex-wrap: wrap;
+  gap: var(--app-space-2);
 }
 
-.tag-chip {
-  display: inline-flex;
-  max-width: 260px;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 7px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--app-color-tag-value-soft);
-  color: var(--app-color-text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tag-chip-type {
-  background: var(--app-color-tag-named-soft);
-  color: var(--app-color-tag-named);
-  font-weight: 700;
-}
-
-.tag-chip-symbol {
-  background: var(--app-color-tag-symbol-soft);
-  color: var(--app-color-tag-symbol);
-}
-
-.tag-chip-datatype {
-  background: var(--app-color-tag-datatype-soft);
-  color: var(--app-color-tag-datatype);
-}
-
-.tag-chip-integer,
-.tag-chip-float {
-  background: var(--app-color-tag-number-soft);
-  color: var(--app-color-tag-number);
-}
-
-.tag-result-context {
-  color: var(--app-color-text-muted);
-  font-size: 0.78rem;
+.tag-result-summary :deep(.tag-badge-sequence) {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .tag-result-actions {
   display: inline-flex;
+  flex: 0 0 auto;
   margin-left: auto;
 }
 
@@ -234,7 +239,7 @@ function toggle(entry) {
 
 .tag-result-details div {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 112px minmax(0, 1fr);
   gap: var(--app-space-2);
 }
 

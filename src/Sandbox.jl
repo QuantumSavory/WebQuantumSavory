@@ -11,13 +11,47 @@ using ..WebQuantumSavory: _evaluate_function_source, _function_context_expressio
 
 import Base: Meta
 
+function _undefined_function_global(expression, evaluation_module::Module)
+    if expression isa GlobalRef
+        if expression.mod === evaluation_module &&
+           !isdefined(evaluation_module, expression.name)
+            return expression.name
+        end
+    elseif expression isa Expr
+        for argument in expression.args
+            undefined_name = _undefined_function_global(argument, evaluation_module)
+            undefined_name === nothing || return undefined_name
+        end
+    end
+
+    return nothing
+end
+
+"""Reject globals that a query predicate would fail to resolve when invoked."""
+function _validate_query_function_globals(
+    function_value::Function,
+    evaluation_module::Module,
+)
+    for method in methods(function_value)
+        method.module === evaluation_module || continue
+        code_info = Base.uncompressed_ast(method)
+        for statement in code_info.code
+            undefined_name = _undefined_function_global(statement, evaluation_module)
+            undefined_name === nothing || throw(UndefVarError(undefined_name))
+        end
+    end
+
+    return function_value
+end
+
 """
 Test Julia custom-function code in a fresh module.
 
 This executes code in the server process. A fresh module isolates names; it is
 not a security sandbox. `placement` supplies representative lexical context;
 omitting it uses the edge/floating context where `nodeid` is available and
-`self` is not.
+`self` is not. The `query` placement validates tag-query predicates without
+injecting protocol context, matching their runtime evaluation path.
 
 Returns a tuple of (success::Bool, results::Dict, error::Union{Nothing, Exception})
 """
@@ -31,28 +65,36 @@ function test_code(code_string::String; placement::Union{Nothing,String}=nothing
         # Get names that exist before evaluation (default functions)
         default_names = @invokelatest names(sandbox, all=true)
 
-        # Use the same complete-source parser, lexical context wrapper, and
-        # Function contract as runtime Lambda creation. Validation has no
-        # concrete project assignment yet, so contextual names use stable
-        # representative values while preserving placement availability.
+        # Use the same complete-source parser and Function contract as runtime
+        # Lambda creation. Protocol validation has no concrete assignment yet,
+        # so contextual names use stable representative values while preserving
+        # placement availability. Query validation uses no context wrapper.
         effective_placement = placement === nothing ? "floating" : placement
-        effective_placement in ("node", "edge", "floating") || throw(ArgumentError(
-            "Custom function placement must be 'node', 'edge', or 'floating'",
+        effective_placement in ("node", "edge", "floating", "query") || throw(ArgumentError(
+            "Custom function placement must be 'node', 'edge', 'floating', or 'query'",
         ))
-        function validation_nodeid(name::String)::Int
-            return 1
+        if effective_placement == "query"
+            function_value = _evaluate_function_source(
+                code_string;
+                evaluation_module=sandbox,
+            )
+            _validate_query_function_globals(function_value, sandbox)
+        else
+            function validation_nodeid(name::String)::Int
+                return 1
+            end
+            self_node_index = effective_placement == "node" ? 1 : nothing
+            transform = parsed -> _function_context_expression(
+                parsed,
+                validation_nodeid,
+                self_node_index,
+            )
+            _evaluate_function_source(
+                code_string;
+                evaluation_module=sandbox,
+                transform=transform,
+            )
         end
-        self_node_index = effective_placement == "node" ? 1 : nothing
-        transform = parsed -> _function_context_expression(
-            parsed,
-            validation_nodeid,
-            self_node_index,
-        )
-        _evaluate_function_source(
-            code_string;
-            evaluation_module=sandbox,
-            transform=transform,
-        )
 
         # Get names that exist after evaluation
         all_names = @invokelatest names(sandbox, all=true)

@@ -93,7 +93,6 @@
                     <div 
                       v-tooltip.top="{
                         value: api.getBackgroundNoiseParameterDefinition( slot.backgroundNoise.type, param.field )?.doc || 'NO DOC',
-                        escape: false, 
                         pt: {
                           arrow: {
                             style: {
