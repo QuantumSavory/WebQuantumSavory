@@ -62,20 +62,32 @@ rm -rf "$artifact_dir"
 : > "$server_log"
 cd "$app_root"
 GENIE_ENV=test julia --color=yes --project="$app_root" \
-  -e 'using WebQuantumSavory; WebQuantumSavory.main(); WebQuantumSavory.up(async=false)' >"$server_log" 2>&1 &
+  -e '
+    using WebQuantumSavory
+    WebQuantumSavory.main()
+    servers = WebQuantumSavory.up(async=true)
+    server = servers.webserver
+    server === nothing && error("Test server failed to start")
+    println(stderr, "__WEBQUANTUMSAVORY_CI_READY__ pid=$(getpid())")
+    flush(stderr)
+    wait(server)
+  ' >"$server_log" 2>&1 &
 server_pid=$!
+server_ready_marker="__WEBQUANTUMSAVORY_CI_READY__ pid=$server_pid"
 
 server_owns_port() {
-  if command -v ss >/dev/null 2>&1; then
-    ss -H -ltnp '( sport = :8000 )' 2>/dev/null | grep -Fq "pid=$server_pid,"
-    return
+  kill -0 "$server_pid" 2>/dev/null || return 1
+
+  if command -v ss >/dev/null 2>&1 \
+    && ss -H -ltnp '( sport = :8000 )' 2>/dev/null | grep -Fq "pid=$server_pid,"; then
+    return 0
   fi
-  if command -v lsof >/dev/null 2>&1; then
-    lsof -nP -a -p "$server_pid" -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null \
-      | grep -Fxq "$server_pid"
-    return
+  if command -v lsof >/dev/null 2>&1 \
+    && lsof -nP -a -p "$server_pid" -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null \
+      | grep -Fxq "$server_pid"; then
+    return 0
   fi
-  grep -Fq "Listening on: 127.0.0.1:8000" "$server_log"
+  grep -Fq "$server_ready_marker" "$server_log"
 }
 
 ready=false

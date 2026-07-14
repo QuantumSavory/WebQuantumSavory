@@ -647,6 +647,7 @@
       # The response should contain HTML content
       body = String(response.body)
       @test contains(body, "html") || contains(body, "swagger") || contains(body, "api")
+      @test contains(body, "\"version\":\"$(platform_info["versions"]["app"])\"")
   end
 
   @testset "Test Code Endpoint" begin
