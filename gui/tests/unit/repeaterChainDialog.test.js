@@ -1,0 +1,613 @@
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+
+vi.mock('maplibre-gl', () => ({
+  MercatorCoordinate: class MercatorCoordinate {}
+}))
+
+import RepeaterChainDialog from '../../src/components/RepeaterChainDialog.vue'
+import ProtocolConstructorForm from '../../src/components/panels/ProtocolConstructorForm.vue'
+import { api } from '../../src/utils/ApiConnector'
+
+const ENTANGLER_TYPE = 'QuantumSavory.ProtocolZoo.EntanglerProt'
+const SWAPPER_TYPE = 'QuantumSavory.ProtocolZoo.SwapperProt'
+const TRACKER_TYPE = 'QuantumSavory.ProtocolZoo.EntanglementTracker'
+
+const ENTANGLER_DEFINITION = {
+  type: ENTANGLER_TYPE,
+  group: 'edge',
+  virtual: false,
+  parameters: [
+    { field: 'nodeA', type: 'Int64' },
+    { field: 'nodeB', type: 'Int64' },
+    {
+      field: 'success_prob',
+      type: 'Float64',
+      defaultValue: 0.25,
+      doc: 'Probability that an attempt succeeds.'
+    },
+    {
+      field: 'attempts',
+      type: 'Int64',
+      defaultValue: 5,
+      doc: 'Maximum number of attempts.'
+    }
+  ]
+}
+
+const SWAPPER_DEFINITION = {
+  type: SWAPPER_TYPE,
+  group: 'node',
+  virtual: null,
+  parameters: [
+    { field: 'node', type: 'Int64' },
+    {
+      field: 'nodeL',
+      type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+      defaultValue: 'Wildcard',
+      doc: 'Low-side node predicate.'
+    },
+    {
+      field: 'nodeH',
+      type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+      defaultValue: 'Wildcard',
+      doc: 'High-side node predicate.'
+    },
+    {
+      field: 'rounds',
+      type: 'Int64',
+      defaultValue: 2,
+      doc: 'Number of swap rounds.'
+    }
+  ]
+}
+
+const TRACKER_DEFINITION = {
+  type: TRACKER_TYPE,
+  group: 'node',
+  virtual: null,
+  parameters: [{ field: 'node', type: 'Int64' }]
+}
+
+const FULL_PROTOCOL_TYPES = {
+  edge: [ENTANGLER_DEFINITION],
+  node: [SWAPPER_DEFINITION, TRACKER_DEFINITION],
+  floating: []
+}
+
+const AppDialogStub = {
+  props: {
+    show: { type: Boolean, default: false },
+    title: { type: String, default: '' },
+    width: { type: String, default: '' }
+  },
+  emits: ['close'],
+  template: `
+    <section v-if="show" role="dialog" :aria-label="title" :data-width="width">
+      <slot />
+      <footer><slot name="footer" /></footer>
+    </section>
+  `
+}
+
+const AppButtonStub = {
+  props: {
+    type: { type: String, default: 'button' },
+    form: { type: String, default: undefined },
+    disabled: { type: Boolean, default: false }
+  },
+  emits: ['click'],
+  template: `
+    <button
+      :type="type"
+      :form="form"
+      :disabled="disabled"
+      @click="$emit('click', $event)"
+    ><slot /></button>
+  `
+}
+
+function tooltipText(binding) {
+  return typeof binding.value === 'object' ? binding.value?.value : binding.value
+}
+
+const tooltip = {
+  beforeMount(element, binding) {
+    element.dataset.tooltip = tooltipText(binding) || ''
+  },
+  updated(element, binding) {
+    element.dataset.tooltip = tooltipText(binding) || ''
+  }
+}
+
+function protocol(id, type, parameters) {
+  return { id, type, parameters }
+}
+
+function makeNode(id, name, protocols = []) {
+  const positions = {
+    start: [-72, 42],
+    end: [-70, 42],
+    template: [-71, 43],
+    anchor: [-71, 44]
+  }
+  return {
+    id,
+    name,
+    position: positions[id],
+    data: { protocols }
+  }
+}
+
+function makeFixture({
+  virtualTemplate = false,
+  templateProtocols = [],
+  edgeProtocols = []
+} = {}) {
+  const start = makeNode('start', 'Start')
+  const end = makeNode('end', 'End')
+  const template = makeNode('template', 'Repeater', templateProtocols)
+  const anchor = makeNode('anchor', 'Anchor')
+  return {
+    nodes: [start, end, template, anchor],
+    edges: [{
+      id: 'template-edge',
+      source: template,
+      target: anchor,
+      isLogic: virtualTemplate,
+      data: { protocols: edgeProtocols }
+    }]
+  }
+}
+
+let wrappers = []
+const originalConfig = api._config.value
+const originalKnownFunctions = api.known_functions.value
+
+beforeEach(() => {
+  api._config.value = { protocolTypes: FULL_PROTOCOL_TYPES }
+  api.known_functions.value = ['minimum', 'maximum']
+})
+
+afterEach(() => {
+  wrappers.forEach(wrapper => wrapper.unmount())
+  wrappers = []
+})
+
+afterAll(() => {
+  api._config.value = originalConfig
+  api.known_functions.value = originalKnownFunctions
+})
+
+function mountDialog({
+  fixture = makeFixture(),
+  protocolTypes = FULL_PROTOCOL_TYPES,
+  variables = [],
+  show = true
+} = {}) {
+  api._config.value = { protocolTypes }
+  const wrapper = mount(RepeaterChainDialog, {
+    props: {
+      show,
+      nodes: fixture.nodes,
+      edges: fixture.edges,
+      protocolTypes,
+      variables
+    },
+    attachTo: document.body,
+    global: {
+      directives: { tooltip },
+      stubs: {
+        AppDialog: AppDialogStub,
+        AppButton: AppButtonStub
+      }
+    }
+  })
+  wrappers.push(wrapper)
+  return wrapper
+}
+
+async function selectValidTemplate(wrapper, { count = 1 } = {}) {
+  await wrapper.get('#chain-start-node').setValue('start')
+  await wrapper.get('#chain-end-node').setValue('end')
+  await wrapper.get('#chain-template-node').setValue('template')
+  await wrapper.get('#chain-template-edge').setValue('template-edge')
+  await wrapper.get('#chain-repeater-count').setValue(String(count))
+  await nextTick()
+}
+
+function constructorFor(wrapper, type) {
+  return wrapper.findAllComponents(ProtocolConstructorForm)
+    .find(component => component.props('protocol')?.type === type)
+}
+
+function parameterByName(component, name) {
+  return component.findAll('.param-item')
+    .find(item => item.get('.param-name').text().startsWith(name))
+}
+
+function valuesByName(protocolValue) {
+  return Object.fromEntries(
+    protocolValue.parameters.map(parameter => [parameter.name, parameter])
+  )
+}
+
+describe('RepeaterChainDialog protocol automation', () => {
+  it('starts with replacement off, a virtual edge on, and restores every default when reopened', async () => {
+    const wrapper = mountDialog()
+
+    expect(wrapper.get('#chain-create-virtual-edge').element.checked).toBe(true)
+    for (const id of [
+      '#chain-replace-entangler',
+      '#chain-replace-swapper',
+      '#chain-replace-tracker'
+    ]) {
+      expect(wrapper.get(id).element.checked).toBe(false)
+    }
+    expect(wrapper.find('.constructor-panel').exists()).toBe(false)
+
+    await wrapper.get('#chain-create-virtual-edge').setValue(false)
+    await wrapper.get('#chain-replace-entangler').setValue(true)
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+    await wrapper.get('#chain-replace-tracker').setValue(true)
+    await wrapper.get('#chain-swapper-strategy-eager').setValue()
+
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+
+    expect(wrapper.get('#chain-create-virtual-edge').element.checked).toBe(true)
+    expect(wrapper.get('#chain-replace-entangler').element.checked).toBe(false)
+    expect(wrapper.get('#chain-replace-swapper').element.checked).toBe(false)
+    expect(wrapper.get('#chain-replace-tracker').element.checked).toBe(false)
+    expect(wrapper.find('.constructor-panel').exists()).toBe(false)
+
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+    expect(wrapper.get('#chain-swapper-strategy-template').element.checked).toBe(true)
+  })
+
+  it('disables unavailable automation and gives every checkbox visible and tooltip guidance', () => {
+    const wrapper = mountDialog({ protocolTypes: {} })
+    const cases = [{
+      id: 'chain-create-virtual-edge',
+      disabled: false,
+      text: 'Create one direct logical edge between the named endpoints.'
+    }, {
+      id: 'chain-replace-entangler',
+      disabled: true,
+      text: 'EntanglerProt is unavailable in runtime protocol metadata'
+    }, {
+      id: 'chain-replace-swapper',
+      disabled: true,
+      text: 'SwapperProt is unavailable in runtime protocol metadata'
+    }, {
+      id: 'chain-replace-tracker',
+      disabled: true,
+      text: 'EntanglementTracker is unavailable in runtime protocol metadata'
+    }]
+
+    for (const expectation of cases) {
+      const checkbox = wrapper.get(`#${expectation.id}`)
+      expect(checkbox.element.disabled).toBe(expectation.disabled)
+
+      const descriptionId = checkbox.attributes('aria-describedby')
+      expect(descriptionId).toBeTruthy()
+      const description = wrapper.get(`#${descriptionId}`)
+      expect(description.text()).toContain(expectation.text)
+
+      const card = checkbox.element.closest('.option-card')
+      const help = card.querySelector('.option-help-trigger')
+      expect(help).not.toBeNull()
+      expect(help.getAttribute('aria-label')).toMatch(/^About /)
+      expect(help.getAttribute('title')).toBe(description.text())
+      expect(help.dataset.tooltip).toBe(description.text())
+    }
+  })
+
+  it('seeds EntanglerProt and SwapperProt from the first matching templates and fills metadata defaults', async () => {
+    const fixture = makeFixture({
+      templateProtocols: [
+        protocol('node-other', 'Example.OtherProtocol', []),
+        protocol('swapper-first', 'Saved.Namespace.SwapperProt', [{
+          name: 'nodeL',
+          type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+          selectedType: 'Lambda',
+          value: 'x -> x == 11'
+        }, {
+          name: 'nodeH',
+          type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+          selectedType: 'Lambda',
+          value: 'x -> x == 12'
+        }, {
+          name: 'rounds',
+          type: 'Int64',
+          value: 7
+        }]),
+        protocol('swapper-second', SWAPPER_TYPE, [{
+          name: 'rounds',
+          type: 'Int64',
+          value: 99
+        }])
+      ],
+      edgeProtocols: [
+        protocol('edge-other', 'Example.OtherEdgeProtocol', []),
+        protocol('entangler-first', 'Saved.Namespace.EntanglerProt', [{
+          name: 'success_prob',
+          type: 'Float64',
+          value: 0.45
+        }]),
+        protocol('entangler-second', ENTANGLER_TYPE, [{
+          name: 'success_prob',
+          type: 'Float64',
+          value: 0.95
+        }])
+      ]
+    })
+    const wrapper = mountDialog({ fixture })
+
+    await selectValidTemplate(wrapper)
+    await wrapper.get('#chain-replace-entangler').setValue(true)
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+
+    const entangler = constructorFor(wrapper, ENTANGLER_TYPE).props('protocol')
+    const swapper = constructorFor(wrapper, SWAPPER_TYPE).props('protocol')
+    const entanglerValues = valuesByName(entangler)
+    const swapperValues = valuesByName(swapper)
+
+    expect(entangler.id).toBeUndefined()
+    expect(entanglerValues.success_prob.value).toBe(0.45)
+    expect(entanglerValues.attempts.value).toBe(5)
+    expect(swapper.id).toBeUndefined()
+    expect(swapperValues.nodeL.value).toBe('x -> x == 11')
+    expect(swapperValues.nodeH.value).toBe('x -> x == 12')
+    expect(swapperValues.rounds.value).toBe(7)
+  })
+
+  it('shows constructor panels only for selected replacements, including an explicit empty tracker form', async () => {
+    const wrapper = mountDialog()
+
+    expect(wrapper.findAll('.constructor-panel')).toHaveLength(0)
+    await wrapper.get('#chain-replace-entangler').setValue(true)
+    expect(wrapper.findAll('.constructor-panel h4').map(heading => heading.text()))
+      .toEqual(['EntanglerProt constructor'])
+
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+    await wrapper.get('#chain-replace-tracker').setValue(true)
+    expect(wrapper.findAll('.constructor-panel h4').map(heading => heading.text())).toEqual([
+      'EntanglerProt constructor',
+      'SwapperProt constructor',
+      'EntanglementTracker constructor'
+    ])
+    expect(constructorFor(wrapper, TRACKER_TYPE).get('.empty-protocol-parameters').text()).toBe(
+      'This protocol currently has no configurable constructor parameters.'
+    )
+
+    await wrapper.get('#chain-replace-entangler').setValue(false)
+    expect(wrapper.text()).not.toContain('EntanglerProt constructor')
+    expect(wrapper.text()).toContain('SwapperProt constructor')
+    expect(wrapper.text()).toContain('EntanglementTracker constructor')
+  })
+
+  it('describes and tooltips every predicate strategy radio', async () => {
+    const wrapper = mountDialog()
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+
+    const expectedLabels = [
+      'Use template',
+      'Eager swaps',
+      'Sequential forward',
+      'Sequential backwards',
+      'Binary tree'
+    ]
+    const radios = wrapper.findAll('input[name="chain-swapper-strategy"]')
+    expect(radios).toHaveLength(expectedLabels.length)
+
+    radios.forEach((radio, index) => {
+      const option = radio.element.closest('.strategy-option')
+      const descriptionId = radio.attributes('aria-describedby')
+      const description = option.querySelector(`#${descriptionId}`)
+      const help = option.querySelector('.option-help-trigger')
+
+      expect(option.querySelector('label').textContent).toContain(expectedLabels[index])
+      expect(description).not.toBeNull()
+      expect(description.textContent.trim()).not.toBe('')
+      expect(help.getAttribute('aria-label')).toBe(`About the ${expectedLabels[index]} strategy`)
+      expect(help.getAttribute('title')).toBe(description.textContent.trim())
+      expect(help.dataset.tooltip).toBe(description.textContent.trim())
+    })
+  })
+
+  it('makes both eager predicate fields strategy-controlled while leaving unrelated fields editable', async () => {
+    const wrapper = mountDialog({
+      variables: [
+        { id: 'predicate-var', name: 'predicate', type: 'Lambda' },
+        { id: 'rounds-var', name: 'rounds', type: 'Int64' }
+      ]
+    })
+    await selectValidTemplate(wrapper, { count: 3 })
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+    await wrapper.get('#chain-swapper-strategy-eager').setValue()
+    await flushPromises()
+
+    const constructor = constructorFor(wrapper, SWAPPER_TYPE)
+    for (const name of ['nodeL', 'nodeH']) {
+      const parameter = parameterByName(constructor, name)
+      const note = parameter.get('.controlled-parameter-note')
+
+      expect(parameter.get('.param-item-row').classes()).toContain('controlled-parameter')
+      expect(note.text()).toContain('Strategy-controlled')
+      expect(note.text()).toContain('selected predicate strategy')
+      expect(parameter.get('.complexTypeSelector').attributes('disabled')).toBeDefined()
+      expect(parameter.get('fieldset.code-value-input').attributes('disabled')).toBeDefined()
+      expect(parameter.get('.variable-binding-button').attributes('disabled')).toBeDefined()
+      expect(parameter.get('fieldset.code-value-input').attributes('aria-describedby'))
+        .toBe(note.attributes('id'))
+    }
+
+    const rounds = parameterByName(constructor, 'rounds')
+    expect(rounds.get('input[type="number"]').attributes('disabled')).toBeUndefined()
+    expect(rounds.get('.variable-binding-button').attributes('disabled')).toBeUndefined()
+    await rounds.get('input[type="number"]').setValue('9')
+    expect(valuesByName(constructor.props('protocol')).rounds.value).toBe(9)
+  })
+
+  it('restores Use template when SwapperProt replacement is turned off', async () => {
+    const wrapper = mountDialog()
+    await selectValidTemplate(wrapper, { count: 3 })
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+    await wrapper.get('#chain-swapper-strategy-eager').setValue()
+    expect(wrapper.findAll('.controlled-parameter-note')).toHaveLength(2)
+
+    await wrapper.get('#chain-replace-swapper').setValue(false)
+    await nextTick()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    wrapper.get('button[type="submit"]').element.click()
+    await nextTick()
+    expect(wrapper.emitted('confirm')).toHaveLength(1)
+    expect(wrapper.emitted('confirm')[0][0].automation.swapper).toMatchObject({
+      enabled: false,
+      predicateStrategy: 'template'
+    })
+
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+    expect(wrapper.get('#chain-swapper-strategy-template').element.checked).toBe(true)
+    expect(wrapper.find('.controlled-parameter-note').exists()).toBe(false)
+  })
+
+  it('rejects a binary-tree strategy unless the count is 2^n - 1', async () => {
+    const wrapper = mountDialog()
+    await selectValidTemplate(wrapper, { count: 2 })
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+    await wrapper.get('#chain-swapper-strategy-binary-tree').setValue()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('2^n - 1')
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('#chain-repeater-count').setValue('3')
+    await nextTick()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('disables EntanglerProt replacement for a virtual template edge', async () => {
+    const wrapper = mountDialog({ fixture: makeFixture({ virtualTemplate: true }) })
+    await selectValidTemplate(wrapper)
+
+    const checkbox = wrapper.get('#chain-replace-entangler')
+    const description = wrapper.get(`#${checkbox.attributes('aria-describedby')}`)
+    const help = checkbox.element.closest('.option-card').querySelector('.option-help-trigger')
+
+    expect(checkbox.element.disabled).toBe(true)
+    expect(checkbox.element.checked).toBe(false)
+    expect(description.text()).toContain('cannot be assigned to a virtual template edge')
+    expect(help.getAttribute('title')).toBe(description.text())
+  })
+
+  it('blocks confirmation while an enabled constructor has a validation error', async () => {
+    const fixture = makeFixture({
+      edgeProtocols: [protocol('entangler-error', ENTANGLER_TYPE, [{
+        name: 'success_prob',
+        type: 'Float64',
+        value: 0.4,
+        error: '<pre>Invalid probability</pre>'
+      }])]
+    })
+    const wrapper = mountDialog({ fixture })
+    await selectValidTemplate(wrapper)
+    await wrapper.get('#chain-replace-entangler').setValue(true)
+
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'Resolve the constructor validation error before generating the chain.'
+    )
+    expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('#repeater-chain-form').trigger('submit')
+    expect(wrapper.emitted('confirm')).toBeUndefined()
+  })
+
+  it('emits exactly one independent structured automation payload for a valid submission', async () => {
+    const wrapper = mountDialog()
+    await selectValidTemplate(wrapper, { count: 3 })
+    await wrapper.get('#chain-create-virtual-edge').setValue(false)
+    await wrapper.get('#chain-replace-entangler').setValue(true)
+    await wrapper.get('#chain-replace-swapper').setValue(true)
+    await wrapper.get('#chain-replace-tracker').setValue(true)
+
+    const entanglerConstructor = constructorFor(wrapper, ENTANGLER_TYPE)
+    const swapperConstructor = constructorFor(wrapper, SWAPPER_TYPE)
+    await parameterByName(entanglerConstructor, 'success_prob')
+      .get('input[type="number"]').setValue('0.73')
+    await parameterByName(swapperConstructor, 'rounds')
+      .get('input[type="number"]').setValue('8')
+    await wrapper.get('#chain-swapper-strategy-eager').setValue()
+    await nextTick()
+
+    wrapper.get('button[type="submit"]').element.click()
+    await nextTick()
+
+    const emissions = wrapper.emitted('confirm')
+    expect(emissions).toHaveLength(1)
+    expect(emissions[0]).toHaveLength(1)
+    const payload = emissions[0][0]
+    expect(payload).toEqual({
+      startNodeId: 'start',
+      endNodeId: 'end',
+      templateNodeId: 'template',
+      templateEdgeId: 'template-edge',
+      repeaterCount: 3,
+      createVirtualEdge: false,
+      automation: {
+        entangler: {
+          enabled: true,
+          definition: ENTANGLER_DEFINITION,
+          protocol: {
+            type: ENTANGLER_TYPE,
+            parameters: [
+              { name: 'nodeA', type: 'Int64', value: undefined },
+              { name: 'nodeB', type: 'Int64', value: undefined },
+              { name: 'success_prob', type: 'Float64', value: 0.73 },
+              { name: 'attempts', type: 'Int64', value: 5 }
+            ]
+          }
+        },
+        swapper: {
+          enabled: true,
+          definition: SWAPPER_DEFINITION,
+          protocol: {
+            type: SWAPPER_TYPE,
+            parameters: [
+              { name: 'node', type: 'Int64', value: undefined },
+              {
+                name: 'nodeL',
+                type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+                value: 'x -> (x < self && x >= nodeid("Repeater-1")) || x == nodeid("Start")',
+                selectedType: 'Lambda'
+              },
+              {
+                name: 'nodeH',
+                type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+                value: 'x -> (x > self && x <= nodeid("Repeater-3")) || x == nodeid("End")',
+                selectedType: 'Lambda'
+              },
+              { name: 'rounds', type: 'Int64', value: 8 }
+            ]
+          },
+          predicateStrategy: 'eager'
+        },
+        tracker: {
+          enabled: true,
+          definition: TRACKER_DEFINITION,
+          protocol: {
+            type: TRACKER_TYPE,
+            parameters: [{ name: 'node', type: 'Int64', value: undefined }]
+          }
+        }
+      }
+    })
+
+    await parameterByName(entanglerConstructor, 'success_prob')
+      .get('input[type="number"]').setValue('0.1')
+    expect(valuesByName(payload.automation.entangler.protocol).success_prob.value).toBe(0.73)
+  })
+})

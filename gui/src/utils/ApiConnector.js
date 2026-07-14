@@ -377,14 +377,14 @@ export class ApiConnector {
   }
 
   getProtocolDefinition( type, name ){
-    const typedProtocols = this._config.value.protocolTypes[type] || []
+    const typedProtocols = this._config.value.protocolTypes?.[type] || []
     const protocol = typedProtocols.find(p => p.type === name)
     return protocol
   }
 
   getProtocolParameterDefinition( protocolType, protocolName, paramName ){
     const protocolDefinition = this.getProtocolDefinition( protocolType, protocolName )
-    const param = protocolDefinition.parameters.find(p => p.field === paramName)
+    const param = protocolDefinition?.parameters?.find(p => p.field === paramName)
     return param
   }
 

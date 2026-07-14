@@ -5,6 +5,8 @@ import GraphNetworkDialog from '../../src/components/GraphNetworkDialog.vue'
 import ProjectNameDialog from '../../src/components/ProjectNameDialog.vue'
 import RepeaterChainDialog from '../../src/components/RepeaterChainDialog.vue'
 import StarNetworkDialog from '../../src/components/StarNetworkDialog.vue'
+import LayoutGeneratorDialog from '../../src/components/ui/LayoutGeneratorDialog.vue'
+import LayoutGeneratorHelp from '../../src/components/ui/LayoutGeneratorHelp.vue'
 
 vi.mock('maplibre-gl', () => {
   class MercatorCoordinate {
@@ -44,6 +46,13 @@ const mountDialog = (component, props) => mount(component, {
   props: { show: true, ...props },
   attachTo: document.body,
   global: {
+    directives: {
+      tooltip: {
+        beforeMount(element, binding) {
+          element.dataset.tooltip = binding.value
+        }
+      }
+    },
     stubs: {
       AppDialog: AppDialogStub,
       AppButton: AppButtonStub
@@ -93,6 +102,43 @@ async function clickSubmit(wrapper) {
   await nextTick()
 }
 
+function expectSharedGeneratorFrame(wrapper, {
+  formId,
+  title,
+  description,
+  submitLabel,
+  helpText
+}) {
+  const dialog = wrapper.getComponent(LayoutGeneratorDialog)
+  expect(dialog.props()).toMatchObject({
+    formId,
+    title,
+    description,
+    submitLabel,
+    width: 'min(640px, calc(100vw - 32px))'
+  })
+
+  const form = wrapper.get(`#${formId}`)
+  const sections = Array.from(form.element.children)
+    .map(element => element.dataset.layoutSection)
+    .filter(Boolean)
+  expect(sections).toEqual(['description', 'fields', 'validation', 'help'])
+
+  const help = wrapper.getComponent(LayoutGeneratorHelp)
+  const note = help.get('[role="note"]')
+  const headingId = note.attributes('aria-labelledby')
+  expect(headingId).toBeTruthy()
+  expect(document.getElementById(headingId)?.textContent).toBe('Template behavior')
+  expect(note.text()).toContain(helpText)
+
+  const buttons = wrapper.findAll('footer button')
+  expect(buttons).toHaveLength(2)
+  expect(buttons[0].text()).toBe('Cancel')
+  expect(buttons[0].attributes('type')).toBe('button')
+  expect(buttons[1].text()).toBe(submitLabel)
+  expect(buttons[1].attributes()).toMatchObject({ type: 'submit', form: formId })
+}
+
 describe('dialog form submission', () => {
   it('emits one project-name confirmation while it remains mounted', async () => {
     const wrapper = mountDialog(ProjectNameDialog)
@@ -136,7 +182,14 @@ describe('dialog form submission', () => {
     await wrapper.get('#star-template-edge').setValue('star-edge')
     await clickSubmit(wrapper)
 
-    expect(wrapper.emitted('confirm')).toHaveLength(1)
+    expect(wrapper.emitted('confirm')).toEqual([[
+      {
+        centerNodeId: 'start',
+        peripheralNodeId: 'end',
+        templateEdgeId: 'star-edge',
+        peripheralCount: 4
+      }
+    ]])
     expect(wrapper.exists()).toBe(true)
   })
 
@@ -153,7 +206,58 @@ describe('dialog form submission', () => {
     await wrapper.get('#graph-template-edge').setValue('graph-edge')
     await clickSubmit(wrapper)
 
-    expect(wrapper.emitted('confirm')).toHaveLength(1)
+    expect(wrapper.emitted('confirm')).toEqual([[
+      {
+        templateNodeId: 'start',
+        templateEdgeId: 'graph-edge',
+        topology: 'grid',
+        xCount: 3,
+        yCount: 2,
+        nodeCount: 4
+      }
+    ]])
     expect(wrapper.exists()).toBe(true)
+  })
+
+  it('uses the shared accessible frame for the star generator', async () => {
+    const starNodes = nodes.slice(0, 2)
+    const starEdge = { id: 'star-edge', source: starNodes[0], target: starNodes[1] }
+    const wrapper = mountDialog(StarNetworkDialog, {
+      nodes: starNodes,
+      edges: [starEdge]
+    })
+    wrappers.push(wrapper)
+
+    await wrapper.get('#star-center-node').setValue('start')
+
+    expectSharedGeneratorFrame(wrapper, {
+      formId: 'star-network-form',
+      title: 'Star Network Generator',
+      description: 'Replace one peripheral template with evenly spaced copies around a center node.',
+      submitLabel: 'Generate Star',
+      helpText: 'remaining nodes rotate counterclockwise around the center'
+    })
+    expect(wrapper.get('[role="alert"]').text()).toContain('peripheral template node')
+  })
+
+  it('uses the shared accessible frame for the graph generator', async () => {
+    const graphNodes = nodes.slice(0, 2)
+    const graphEdge = { id: 'graph-edge', source: graphNodes[0], target: graphNodes[1] }
+    const wrapper = mountDialog(GraphNetworkDialog, {
+      nodes: graphNodes,
+      edges: [graphEdge]
+    })
+    wrappers.push(wrapper)
+
+    await wrapper.get('#graph-template-node').setValue('start')
+
+    expectSharedGeneratorFrame(wrapper, {
+      formId: 'graph-network-form',
+      title: 'Graph Network Generator',
+      description: 'Replace an isolated template edge and its endpoints with a grid or all-to-all network.',
+      submitLabel: 'Generate Graph',
+      helpText: 'edge endpoints define the first two positions'
+    })
+    expect(wrapper.get('[role="alert"]').text()).toContain('edge template')
   })
 })

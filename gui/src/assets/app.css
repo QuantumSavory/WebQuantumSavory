@@ -396,20 +396,33 @@
   color: var(--app-color-text);
 }
 
-.layout-generator-dialog .dialog-description,
-.layout-generator-dialog .template-note {
+.layout-generator-dialog .layout-generator-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-5);
+}
+
+.layout-generator-dialog .dialog-description {
+  margin: 0;
   color: var(--app-color-text-muted);
   line-height: 1.4;
 }
 
-.layout-generator-dialog .dialog-description {
-  margin: 0 0 var(--app-space-5);
+.layout-generator-dialog .template-note {
+  margin: 14px 0 0;
+  color: var(--app-color-text-muted);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.layout-generator-dialog .layout-generator-content {
+  min-width: 0;
 }
 
 .layout-generator-dialog .form-grid {
   display: grid;
-  grid-template-columns: minmax(145px, auto) minmax(220px, 1fr);
-  gap: 11px 14px;
+  grid-template-columns: minmax(165px, auto) minmax(240px, 1fr);
+  gap: var(--app-space-4) var(--app-space-5);
   align-items: center;
 }
 
@@ -419,31 +432,63 @@
 }
 
 .layout-generator-dialog .form-grid select,
-.layout-generator-dialog .form-grid input {
+.layout-generator-dialog .form-grid input:not([type="checkbox"]):not([type="radio"]) {
   width: 100%;
   min-width: 0;
 }
 
-.layout-generator-dialog .template-note {
-  margin: 14px 0 0;
-  font-size: 0.86rem;
-}
-
 .layout-generator-dialog .validation-error {
-  margin-top: 7px;
+  margin: 0;
   color: var(--app-color-danger);
   font-size: 0.9rem;
 }
 
-@media (max-width: 560px) {
+.layout-generator-help-slot {
+  min-width: 0;
+}
+
+.layout-generator-help {
+  padding: var(--app-space-4);
+  border: solid 1px var(--app-color-border);
+  border-radius: var(--app-radius-surface);
+  background: var(--app-color-surface-subtle);
+  color: var(--app-color-text-muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.layout-generator-help-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-2);
+  margin-bottom: var(--app-space-2);
+  color: var(--app-color-primary);
+}
+
+.layout-generator-help-heading h3 {
+  margin: 0;
+  color: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.layout-generator-help-content > :first-child {
+  margin-top: 0;
+}
+
+.layout-generator-help-content > :last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
   .layout-generator-dialog .form-grid {
     grid-template-columns: 1fr;
-    gap: 5px;
+    gap: var(--app-space-2);
   }
 
   .layout-generator-dialog .form-grid select,
-  .layout-generator-dialog .form-grid input {
-    margin-bottom: 7px;
+  .layout-generator-dialog .form-grid input:not([type="checkbox"]):not([type="radio"]) {
+    margin-bottom: var(--app-space-2);
   }
 }
 

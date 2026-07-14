@@ -1,17 +1,15 @@
 <template>
-  <AppDialog
+  <LayoutGeneratorDialog
     :show="show"
     title="Graph Network Generator"
-    width="min(560px, calc(100vw - 32px))"
-    class="layout-generator-dialog"
-    dismissable-mask
-    @close="handleCancel"
+    form-id="graph-network-form"
+    description="Replace an isolated template edge and its endpoints with a grid or all-to-all network."
+    :valid="validation.valid"
+    :validation-message="validationMessage"
+    submit-label="Generate Graph"
+    @submit="handleConfirm"
+    @cancel="handleCancel"
   >
-    <form id="graph-network-form" @submit.prevent="handleConfirm">
-      <p class="dialog-description">
-      Replace an isolated template edge and its endpoints with a grid or all-to-all network.
-      </p>
-
     <div class="form-grid">
         <label for="graph-template-node">Node template</label>
         <select id="graph-template-node" v-model="form.templateNodeId" autofocus>
@@ -76,27 +74,15 @@
         </template>
     </div>
 
-    <p class="template-note">
-      Both edge endpoints and the selected edge are removed. Every generated node copies the
-      selected node's configuration, while the edge endpoints define the first two positions.
-    </p>
-    <div v-if="validationMessage" class="validation-error" role="alert">
-      {{ validationMessage }}
-    </div>
-    </form>
-
-    <template #footer>
-        <AppButton @click="handleCancel">Cancel</AppButton>
-        <AppButton
-          variant="primary"
-          type="submit"
-          form="graph-network-form"
-          :disabled="!validation.valid"
-        >
-          Generate Graph
-        </AppButton>
+    <template #help>
+      <LayoutGeneratorHelp title="Template behavior">
+        <p>
+          Both edge endpoints and the selected edge are removed. Every generated node copies the
+          selected node's configuration, while the edge endpoints define the first two positions.
+        </p>
+      </LayoutGeneratorHelp>
     </template>
-  </AppDialog>
+  </LayoutGeneratorDialog>
 </template>
 
 <script setup>
@@ -106,8 +92,8 @@ import {
   validateGraphNetwork
 } from '../utils/graphNetwork'
 import { edgeHasNode, endpointId } from '../utils/layoutTemplates'
-import AppButton from './ui/AppButton.vue'
-import AppDialog from './ui/AppDialog.vue'
+import LayoutGeneratorDialog from './ui/LayoutGeneratorDialog.vue'
+import LayoutGeneratorHelp from './ui/LayoutGeneratorHelp.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },

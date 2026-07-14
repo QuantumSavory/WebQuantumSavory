@@ -79,7 +79,19 @@ async function connectNodes(page, sourceIndex, targetIndex, virtual = false, exp
 async function openLayoutHelper(page, name) {
   await page.getByRole('tab', { name: 'Layout Tools' }).click()
   await page.getByRole('button', { name }).click()
-  await expect(page.getByRole('dialog', { name })).toBeVisible()
+  const dialog = page.getByRole('dialog', { name })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-layout-section="description"]')).toBeVisible()
+  await expect(dialog.locator('[data-layout-section="fields"]')).toBeVisible()
+  await expect(dialog.locator('[data-layout-section="help"]')).toBeVisible()
+  await expect(dialog.getByRole('note')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: /^Generate / })).toBeVisible()
+
+  const sectionOrder = await dialog.locator('[data-layout-section]').evaluateAll(sections => (
+    sections.map(section => section.dataset.layoutSection)
+  ))
+  expect(sectionOrder).toEqual(['description', 'fields', 'help'])
 }
 
 async function configureTemplates(page, templateNodeName = 'Node 1') {

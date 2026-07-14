@@ -1,10 +1,53 @@
 import { test, expect } from '@playwright/test'
 
-async function mockBackendMetadata(page) {
+const REPEATER_AUTOMATION_PROTOCOL_TYPES = [{
+  type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
+  doc: 'Generate entanglement between two nodes.',
+  group: 'edge',
+  virtual: false,
+  parameters: [{
+    field: 'success_prob',
+    type: 'Float64',
+    defaultValue: 0.25,
+    doc: 'Probability that an entanglement attempt succeeds.',
+  }],
+}, {
+  type: 'QuantumSavory.ProtocolZoo.SwapperProt',
+  doc: 'Swap entanglement at a node.',
+  group: 'node',
+  virtual: null,
+  parameters: [{
+    field: 'nodeL',
+    type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+    defaultValue: 'Wildcard',
+    doc: 'Remote low node, a predicate, or a wildcard.',
+  }, {
+    field: 'nodeH',
+    type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+    defaultValue: 'Wildcard',
+    doc: 'Remote high node, a predicate, or a wildcard.',
+  }, {
+    field: 'chooseL',
+    type: 'Function',
+    defaultValue: 'minimum',
+    doc: 'Choose one candidate from the filtered low-node results.',
+  }],
+}, {
+  type: 'QuantumSavory.ProtocolZoo.EntanglementTracker',
+  doc: 'Track established entanglement at a node.',
+  group: 'node',
+  virtual: null,
+  parameters: [],
+}]
+
+async function mockBackendMetadata(page, {
+  knownFunctions = [],
+  protocolTypes = [],
+} = {}) {
   await page.route('**/known_functions', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    json: { known_functions: [] },
+    json: { known_functions: knownFunctions },
   }))
   await page.route('**/background_types', route => route.fulfill({
     status: 200,
@@ -14,7 +57,7 @@ async function mockBackendMetadata(page) {
   await page.route('**/protocol_types', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    json: { protocol_types: [] },
+    json: { protocol_types: protocolTypes },
   }))
   await page.route('**/platform_info', route => route.fulfill({
     status: 200,
@@ -41,8 +84,8 @@ async function mockBackendMetadata(page) {
   }))
 }
 
-async function createProjectWithNodes(page, projectName, count = 3) {
-  await mockBackendMetadata(page)
+async function createProjectWithNodes(page, projectName, count = 3, metadata = {}) {
+  await mockBackendMetadata(page, metadata)
   await page.goto('/')
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
 
@@ -299,6 +342,310 @@ test.describe('Layout Tools repeater chain generator', () => {
       isLogic: true,
       protocolCount: 0,
     })
+  })
+
+  test('replaces seeded chain protocols with configured automation and eager predicates', async ({ page }) => {
+    await createProjectWithNodes(page, 'Repeater Protocol Automation', 3, {
+      knownFunctions: ['minimum', 'maximum'],
+      protocolTypes: REPEATER_AUTOMATION_PROTOCOL_TYPES,
+    })
+    await connectNodes(page, 2, 0)
+
+    const seededIds = await page.evaluate(() => {
+      const app = document.querySelector('#app')?.__vue_app__
+      const projectData = app?._instance?.setupState?.projectData
+      const startNode = projectData.net.nodes.find(node => node.name === 'Node 1')
+      const endNode = projectData.net.nodes.find(node => node.name === 'Node 2')
+      const templateNode = projectData.net.nodes.find(node => node.name === 'Node 3')
+      const templateEdge = projectData.net.edges[0]
+
+      const tracker = id => ({
+        id,
+        type: 'QuantumSavory.ProtocolZoo.EntanglementTracker',
+        parameters: [],
+      })
+      const swapper = (id, chooseL, suffix) => ({
+        id,
+        type: 'QuantumSavory.ProtocolZoo.SwapperProt',
+        parameters: [{
+          name: 'nodeL',
+          type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+          selectedType: 'Lambda',
+          value: `x -> x == nodeid(\"seed-low-${suffix}\")`,
+        }, {
+          name: 'nodeH',
+          type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
+          selectedType: 'Lambda',
+          value: `x -> x == nodeid(\"seed-high-${suffix}\")`,
+        }, {
+          name: 'chooseL',
+          type: 'Function',
+          selectedType: 'Function',
+          value: chooseL,
+        }],
+      })
+
+      startNode.data.protocols.push({
+        id: 'protocol_start_unrelated',
+        type: 'StartNodeProtocol',
+        parameters: [{ name: 'marker', type: 'String', value: 'keep-start' }],
+      })
+      startNode.data.protocols.push(tracker('protocol_start_tracker_first'))
+      startNode.data.protocols.push(tracker('protocol_start_tracker_duplicate'))
+
+      endNode.data.protocols.push({
+        id: 'protocol_end_unrelated',
+        type: 'EndNodeProtocol',
+        parameters: [{ name: 'marker', type: 'String', value: 'keep-end' }],
+      })
+      endNode.data.protocols.push(tracker('protocol_end_tracker_first'))
+      endNode.data.protocols.push(tracker('protocol_end_tracker_duplicate'))
+
+      templateNode.data.protocols.push({
+        id: 'protocol_template_unrelated',
+        type: 'TemplateNodeProtocol',
+        parameters: [{ name: 'marker', type: 'String', value: 'keep-repeater' }],
+      })
+      templateNode.data.protocols.push(swapper('protocol_swapper_first', 'minimum', 'first'))
+      templateNode.data.protocols.push(swapper('protocol_swapper_duplicate', 'maximum', 'duplicate'))
+      templateNode.data.protocols.push(tracker('protocol_template_tracker_first'))
+      templateNode.data.protocols.push(tracker('protocol_template_tracker_duplicate'))
+
+      templateEdge.data.protocols.push({
+        id: 'protocol_edge_unrelated',
+        type: 'TemplateEdgeProtocol',
+        parameters: [{ name: 'marker', type: 'String', value: 'keep-edge' }],
+      })
+      templateEdge.data.protocols.push({
+        id: 'protocol_entangler_first',
+        type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
+        parameters: [{ name: 'success_prob', type: 'Float64', value: 0.35 }],
+      })
+      templateEdge.data.protocols.push({
+        id: 'protocol_entangler_duplicate',
+        type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
+        parameters: [{ name: 'success_prob', type: 'Float64', value: 0.95 }],
+      })
+
+      return {
+        targeted: [
+          'protocol_start_tracker_first',
+          'protocol_start_tracker_duplicate',
+          'protocol_end_tracker_first',
+          'protocol_end_tracker_duplicate',
+          'protocol_swapper_first',
+          'protocol_swapper_duplicate',
+          'protocol_template_tracker_first',
+          'protocol_template_tracker_duplicate',
+          'protocol_entangler_first',
+          'protocol_entangler_duplicate',
+        ],
+        endpointUnrelated: ['protocol_start_unrelated', 'protocol_end_unrelated'],
+      }
+    })
+
+    await openGenerator(page)
+    await fillGenerator(page, { count: 3 })
+    const dialog = page.getByRole('dialog', { name: 'Repeater Chain Generator' })
+
+    await dialog.locator('#chain-replace-entangler').setChecked(true)
+    const entanglerConstructor = dialog.locator('.constructor-panel', {
+      hasText: 'EntanglerProt constructor',
+    })
+    const successProbability = entanglerConstructor.locator('.param-item', {
+      hasText: 'success_prob',
+    }).locator('input[type="number"]')
+    await expect(successProbability).toHaveValue('0.35')
+    await successProbability.fill('0.73')
+
+    await dialog.locator('#chain-replace-swapper').setChecked(true)
+    const swapperConstructor = dialog.locator('.constructor-panel', {
+      hasText: 'SwapperProt constructor',
+    })
+    const chooseL = swapperConstructor.locator('.param-item', { hasText: 'chooseL' })
+    await expect(chooseL.locator('.complexTypeSelector')).toHaveValue('Function')
+    await expect(chooseL.locator('.functionSelector')).toHaveValue('minimum')
+
+    await dialog.getByRole('radio', { name: 'Eager swaps' }).check()
+    for (const parameterName of ['nodeL', 'nodeH']) {
+      const parameter = swapperConstructor.locator('.param-item', { hasText: parameterName })
+      await expect(parameter.locator('.complexTypeSelector')).toBeDisabled()
+      await expect(parameter).toContainText(
+        'Strategy-controlled: Set separately for each repeater by the selected predicate strategy.',
+      )
+    }
+    await expect(swapperConstructor).toContainText(
+      'nodeL and nodeH are set separately for each repeater by the selected strategy.',
+    )
+
+    await dialog.locator('#chain-replace-tracker').setChecked(true)
+    const trackerConstructor = dialog.locator('.constructor-panel', {
+      hasText: 'EntanglementTracker constructor',
+    })
+    await expect(trackerConstructor).toContainText(
+      'This protocol currently has no configurable constructor parameters.',
+    )
+    const guidance = dialog.getByRole('note', { name: 'Repeater protocol guidance' })
+    await expect(guidance).toContainText('Aggressive or mismatched predicates')
+    await expect(guidance).toContainText('CutoffProt')
+
+    await dialog.getByRole('button', { name: 'Generate Chain' }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(page.locator('.node-marker')).toHaveCount(5)
+    await expect(page.locator('.edge-list-item')).toHaveCount(5)
+
+    const generated = await page.evaluate(() => {
+      const app = document.querySelector('#app')?.__vue_app__
+      const projectData = app?._instance?.setupState?.projectData
+      const nodes = projectData.net.nodes
+      const edges = projectData.net.edges
+      const simpleName = protocol => protocol.type.split('.').pop()
+      const namedProtocols = (protocols, name) => (
+        protocols.filter(protocol => simpleName(protocol) === name)
+      )
+      const parameter = (protocol, name) => (
+        protocol.parameters.find(candidate => candidate.name === name)
+      )
+      const summarizeProtocol = protocol => ({
+        id: protocol.id,
+        type: simpleName(protocol),
+        parameters: protocol.parameters,
+      })
+
+      const startNode = nodes.find(node => node.name === 'Node 1')
+      const endNode = nodes.find(node => node.name === 'Node 2')
+      const repeaters = nodes.filter(node => node.name.startsWith('Node 3-'))
+      const physicalEdges = edges.filter(edge => edge.isLogic !== true)
+      const directVirtualEdge = edges.find(edge => (
+        edge.isLogic === true
+        && [edge.source.name, edge.target.name].includes('Node 1')
+        && [edge.source.name, edge.target.name].includes('Node 2')
+      ))
+
+      const repeaterSummaries = repeaters.map(node => {
+        const swappers = namedProtocols(node.data.protocols, 'SwapperProt')
+        const trackers = namedProtocols(node.data.protocols, 'EntanglementTracker')
+        const unrelated = namedProtocols(node.data.protocols, 'TemplateNodeProtocol')
+        const swapperProtocol = swappers[0]
+        return {
+          name: node.name,
+          swapperCount: swappers.length,
+          trackerCount: trackers.length,
+          unrelatedCount: unrelated.length,
+          unrelatedMarker: unrelated[0]?.parameters[0]?.value,
+          swapper: swapperProtocol && {
+            id: swapperProtocol.id,
+            nodeL: parameter(swapperProtocol, 'nodeL'),
+            nodeH: parameter(swapperProtocol, 'nodeH'),
+            chooseL: parameter(swapperProtocol, 'chooseL')?.value,
+          },
+          tracker: trackers[0] && summarizeProtocol(trackers[0]),
+        }
+      })
+
+      const edgeSummaries = physicalEdges.map(edge => {
+        const entanglers = namedProtocols(edge.data.protocols, 'EntanglerProt')
+        const unrelated = namedProtocols(edge.data.protocols, 'TemplateEdgeProtocol')
+        return {
+          endpoints: [edge.source.name, edge.target.name],
+          entanglerCount: entanglers.length,
+          unrelatedCount: unrelated.length,
+          unrelatedMarker: unrelated[0]?.parameters[0]?.value,
+          entangler: entanglers[0] && {
+            id: entanglers[0].id,
+            successProbability: Number(parameter(entanglers[0], 'success_prob')?.value),
+          },
+        }
+      })
+
+      const endpointSummaries = [startNode, endNode].map(node => {
+        const trackers = namedProtocols(node.data.protocols, 'EntanglementTracker')
+        const unrelated = node.data.protocols.filter(protocol => (
+          ['StartNodeProtocol', 'EndNodeProtocol'].includes(simpleName(protocol))
+        ))
+        return {
+          name: node.name,
+          trackerCount: trackers.length,
+          tracker: trackers[0] && summarizeProtocol(trackers[0]),
+          unrelated: unrelated.map(summarizeProtocol),
+        }
+      })
+
+      return {
+        repeaterSummaries,
+        edgeSummaries,
+        endpointSummaries,
+        virtualEdge: directVirtualEdge && {
+          type: directVirtualEdge.data.type,
+          protocolCount: directVirtualEdge.data.protocols.length,
+        },
+        templateNodeRemoved: !nodes.some(node => node.name === 'Node 3'),
+        targetedIds: [
+          ...edgeSummaries.map(edge => edge.entangler.id),
+          ...repeaterSummaries.map(node => node.swapper.id),
+          ...repeaterSummaries.map(node => node.tracker.id),
+          ...endpointSummaries.map(node => node.tracker.id),
+        ],
+      }
+    })
+
+    expect(generated.templateNodeRemoved).toBe(true)
+    expect(generated.edgeSummaries).toHaveLength(4)
+    for (const edge of generated.edgeSummaries) {
+      expect(edge.entanglerCount).toBe(1)
+      expect(edge.unrelatedCount).toBe(1)
+      expect(edge.unrelatedMarker).toBe('keep-edge')
+      expect(edge.entangler.successProbability).toBeCloseTo(0.73)
+    }
+
+    const eagerNodeL = 'x -> (x < self && x >= nodeid("Node 3-1")) || x == nodeid("Node 1")'
+    const eagerNodeH = 'x -> (x > self && x <= nodeid("Node 3-3")) || x == nodeid("Node 2")'
+    expect(generated.repeaterSummaries.map(node => node.name)).toEqual([
+      'Node 3-1',
+      'Node 3-2',
+      'Node 3-3',
+    ])
+    for (const repeater of generated.repeaterSummaries) {
+      expect(repeater.swapperCount).toBe(1)
+      expect(repeater.trackerCount).toBe(1)
+      expect(repeater.unrelatedCount).toBe(1)
+      expect(repeater.unrelatedMarker).toBe('keep-repeater')
+      expect(repeater.swapper.chooseL).toBe('minimum')
+      expect(repeater.swapper.nodeL).toMatchObject({
+        selectedType: 'Lambda',
+        value: eagerNodeL,
+      })
+      expect(repeater.swapper.nodeH).toMatchObject({
+        selectedType: 'Lambda',
+        value: eagerNodeH,
+      })
+      expect(repeater.tracker.parameters).toEqual([])
+    }
+
+    expect(generated.endpointSummaries.map(node => ({
+      name: node.name,
+      trackerCount: node.trackerCount,
+      unrelatedIds: node.unrelated.map(protocol => protocol.id),
+    }))).toEqual([{
+      name: 'Node 1',
+      trackerCount: 1,
+      unrelatedIds: ['protocol_start_unrelated'],
+    }, {
+      name: 'Node 2',
+      trackerCount: 1,
+      unrelatedIds: ['protocol_end_unrelated'],
+    }])
+    expect(generated.endpointSummaries.every(node => (
+      node.tracker.parameters.length === 0 && node.unrelated.length === 1
+    ))).toBe(true)
+    expect(generated.virtualEdge).toEqual({ type: 'connection', protocolCount: 0 })
+
+    expect(new Set(generated.targetedIds).size).toBe(generated.targetedIds.length)
+    expect(generated.targetedIds.some(id => seededIds.targeted.includes(id))).toBe(false)
+    expect(seededIds.endpointUnrelated).toEqual([
+      'protocol_start_unrelated',
+      'protocol_end_unrelated',
+    ])
   })
 
   test('can omit the end-to-end virtual edge', async ({ page }) => {

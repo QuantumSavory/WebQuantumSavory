@@ -5,8 +5,10 @@
     v-model="parameter.value"
     :min="parameter.min"
     :max="parameter.max"
+    :step="numberInputStep"
     :placeholder="placeholder"
     :aria-label="valueInputLabel"
+    :aria-describedby="ariaDescribedby"
     :disabled="disabled"
   />
   <Checkbox
@@ -14,13 +16,21 @@
     v-model="parameter.value"
     binary
     :aria-label="valueInputLabel"
+    :aria-describedby="ariaDescribedby"
     :disabled="disabled"
   >
     <template #icon="{ checked, class: iconClass }">
       <Check v-if="checked" :class="iconClass" :size="14" aria-hidden="true" />
     </template>
   </Checkbox>
-  <div v-else-if="isCodeType(type)" class="code-value-input" role="group" :aria-label="valueInputLabel">
+  <fieldset
+    v-else-if="isCodeType(type)"
+    class="code-value-input"
+    role="group"
+    :aria-label="valueInputLabel"
+    :aria-describedby="ariaDescribedby"
+    :disabled="disabled"
+  >
     <CodeEditorWithSymbols
       :modelValue="parameter.value || ''"
       :readOnly="disabled || !unsafeCodeEvaluationEnabled"
@@ -35,12 +45,13 @@
       @validate="validateCode"
       @edit="openCodeEditor"
     />
-  </div>
+  </fieldset>
   <select
     v-else-if="type === 'Function'"
     v-model="parameter.value"
     class="functionSelector"
     :aria-label="valueInputLabel"
+    :aria-describedby="ariaDescribedby"
     :disabled="disabled"
   >
     <option value="default">Default</option>
@@ -55,6 +66,7 @@
     v-model="parameter.value"
     :placeholder="placeholder"
     :aria-label="valueInputLabel"
+    :aria-describedby="ariaDescribedby"
     :disabled="disabled"
   />
 </template>
@@ -97,11 +109,19 @@ const props = defineProps({
   initiallyOpen: {
     type: Boolean,
     default: false
+  },
+  ariaDescribedby: {
+    type: String,
+    default: undefined
   }
 })
 
 const unsafeCodeEvaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
 const valueInputLabel = computed(() => `${props.parameter.name || 'Parameter'} value`)
+const numberInputStep = computed(() => {
+  const normalizedType = String(props.type || '').toLowerCase()
+  return normalizedType === 'int' || normalizedType === 'int64' ? 1 : 'any'
+})
 const selectableFunctions = computed(() => api.getKnownFunctions().filter(func => (
   props.category === 'node' || !func.endsWith('(self)')
 )))
@@ -131,15 +151,17 @@ watch(
 )
 
 function onCodeEditorValueChanged(value) {
+  if (props.disabled) return
   props.parameter.value = value
   delete props.parameter.error
 }
 
 function openCodeEditor() {
-  if (isCodeType(props.type)) codeEditorOpen.value = true
+  if (!props.disabled && isCodeType(props.type)) codeEditorOpen.value = true
 }
 
 async function validateCode() {
+  if (props.disabled) return
   if (!unsafeCodeEvaluationEnabled.value) {
     props.parameter.error = '<pre>Server-side Julia evaluation is disabled.</pre>'
     return
@@ -175,6 +197,10 @@ async function validateCode() {
 <style scoped>
 .code-value-input {
   width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 input[type="text"],
