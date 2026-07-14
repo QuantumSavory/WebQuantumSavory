@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1
+
+- Synchronized the frontend package and API documentation metadata with the application release version so release bumps remain consistent across shared CI checks and public version surfaces.
+- Made CI server ownership checks tolerate hosts whose socket tools cannot report process metadata, while still requiring the launched Genie server to confirm that it is listening.
+
 ## 1.7.0
 
 - Added opt-in repeater-chain automation for fresh EntanglerProt, SwapperProt, and EntanglementTracker construction, including eager, sequential, and binary-tree swap predicates generated from stable node names.
