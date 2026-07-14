@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Unified complete-source parsing and placement-aware context for Custom Function validation, runtime construction, and script export; added regression coverage for curried and named functions, allowed multi-statement sources and trailing comments, and made validation failures readable from the warning tooltip.
 - Added backend-managed `nodeid("Node name")` and node-only `self` bindings to custom Julia functions and Lambda variables, with matching exported-script behavior and in-app guidance.
 - Named simulator and exported-script registers after their configured nodes so log messages identify nodes clearly.
 - Added clipboard image pasting to the project Description editor, inserting safe bitmap images as Markdown data URLs at the current selection.

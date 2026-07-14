@@ -147,7 +147,7 @@ async function validateCode() {
 
   const response = isSymbolicType(props.type)
     ? await api.validateSymbolicFunction(props.parameter.value)
-    : await api.validateFunction(props.parameter.value)
+    : await api.validateFunction(props.parameter.value, props.category)
 
   if (response.success) {
     delete props.parameter.error

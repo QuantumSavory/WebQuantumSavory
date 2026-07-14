@@ -652,17 +652,28 @@
   @testset "Test Code Endpoint" begin
       # The same contract supports default-enabled test servers and explicit
       # disabled-policy integration runs.
-      response = make_request("POST", "/test_code", body=Dict("code" => "f(x) = x + 1"))
-      data = parse_response(response)
-      if unsafe_evaluation_enabled
-        @test response.status == 200
-        @test data["success"] == true
-        @test haskey(data, "results")
-      else
-        @test response.status == 403
-        @test data["success"] == false
-        @test data["error"] == "Unsafe Julia code evaluation is disabled"
-        @test data["error_code"] == "UNSAFE_EVALUATION_DISABLED"
+      accepted_sources = (
+        "<(1)",
+        "f(x) = x + 1",
+        "f(x) = x + 1\nf\n# trailing comment",
+      )
+      for source in accepted_sources
+        response = make_request(
+          "POST",
+          "/test_code",
+          body=Dict("code" => source, "placement" => "node"),
+        )
+        data = parse_response(response)
+        if unsafe_evaluation_enabled
+          @test response.status == 200
+          @test data["success"] == true
+          @test haskey(data, "results")
+        else
+          @test response.status == 403
+          @test data["success"] == false
+          @test data["error"] == "Unsafe Julia code evaluation is disabled"
+          @test data["error_code"] == "UNSAFE_EVALUATION_DISABLED"
+        end
       end
 
       # Validation error (missing field)
@@ -671,6 +682,46 @@
       data2 = parse_response(response2)
       @test data2["success"] == false
       @test occursin("Missing required field 'code'", data2["error"])
+
+      invalid_placement_response = make_request(
+        "POST",
+        "/test_code",
+        body=Dict("code" => "x -> x", "placement" => "invalid"),
+      )
+      @test invalid_placement_response.status == 400
+      invalid_placement_data = parse_response(invalid_placement_response)
+      @test invalid_placement_data["success"] == false
+      @test occursin("Field 'placement'", invalid_placement_data["error"])
+
+      if unsafe_evaluation_enabled
+        for (source, placement, expected_success) in (
+          ("<(self)", "node", true),
+          ("==(nodeid(\"Amherst\"))", "edge", true),
+          ("<(self)", "edge", false),
+        )
+          contextual_response = make_request(
+            "POST",
+            "/test_code",
+            body=Dict("code" => source, "placement" => placement),
+          )
+          @test contextual_response.status == 200
+          contextual_data = parse_response(contextual_response)
+          @test contextual_data["success"] == expected_success
+        end
+
+        invalid_response = make_request(
+          "POST",
+          "/test_code",
+          body=Dict("code" => "invalid("),
+        )
+        @test invalid_response.status == 200
+        invalid_data = parse_response(invalid_response)
+        @test invalid_data["success"] == false
+        @test invalid_data["error_code"] == "EVALUATION_FAILED"
+        @test startswith(invalid_data["error"], "ParseError:")
+        @test occursin("Expected `)` or `,`", invalid_data["error"])
+        @test !occursin("Base.Meta.ParseError(", invalid_data["error"])
+      end
   end
 
   @testset "Test Symbolic Expression Endpoint" begin

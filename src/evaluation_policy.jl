@@ -47,7 +47,7 @@ function evaluation_failure_response(error; environment::AbstractString=Genie.Co
   )
 
   if lowercase(strip(environment)) in ("dev", "test")
-    response[:error] = string(error)
+    response[:error] = error isa Exception ? sprint(showerror, error) : string(error)
     response[:error_type] = string(typeof(error))
   else
     response[:error] = "Evaluation failed"

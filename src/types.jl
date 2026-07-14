@@ -1,3 +1,69 @@
+"""Find a parser exception embedded in Julia's `:error`/`:incomplete` AST."""
+function _function_source_parse_error(parsed)
+    parsed isa Expr || return nothing
+    if parsed.head in (:error, :incomplete)
+        exception = findfirst(argument -> argument isa Exception, parsed.args)
+        exception === nothing || return parsed.args[exception]
+    end
+
+    for argument in parsed.args
+        exception = _function_source_parse_error(argument)
+        exception === nothing || return exception
+    end
+    return nothing
+end
+
+"""Parse all expressions in a custom-function source as one scoped block."""
+function _parse_function_source(source::AbstractString)
+    parsed = Meta.parseall(String(source))
+    parse_error = _function_source_parse_error(parsed)
+    parse_error === nothing || throw(parse_error)
+
+    if !(parsed isa Expr && parsed.head === :toplevel)
+        return parsed
+    end
+
+    # `Meta.parseall` can nest `:toplevel` expressions when the source itself
+    # contains multiple statements. Flatten only that outer parser structure;
+    # any quoted or function-body expressions remain untouched.
+    scoped_statements = Any[]
+    function append_toplevel!(expression)
+        if expression isa Expr && expression.head === :toplevel
+            foreach(append_toplevel!, expression.args)
+        else
+            push!(scoped_statements, expression)
+        end
+    end
+    append_toplevel!(parsed)
+    return Expr(:block, scoped_statements...)
+end
+
+"""
+Evaluate custom-function source and require the resulting value to satisfy the
+`Function` contract used by QuantumSavory protocol parameters.
+
+`transform` can wrap the parsed block in assignment-specific lexical context
+before evaluation.
+"""
+function _evaluate_function_source(
+    source::AbstractString;
+    evaluation_module::Module=Module(),
+    transform::Function=identity,
+)
+    parsed = _parse_function_source(source)
+    value = Base.eval(evaluation_module, transform(parsed))
+
+    if !(value isa Function)
+        throw(ArgumentError(
+            "Custom function source must evaluate to a Julia Function; " *
+            "got $(typeof(value)). Try an expression such as `x -> x + 1`, " *
+            "`<(1)`, or `f(x) = x + 1`.",
+        ))
+    end
+
+    return value
+end
+
 """
 A globally-defined, typed simulation variable.
 
@@ -67,14 +133,12 @@ function _nodeid_resolver(node_name_to_index::Dict{String,Int})
     return nodeid
 end
 
-"""Wrap parsed function code in its supported lexical runtime context."""
-function _contextual_function_expression(
+"""Wrap parsed function code around the supplied lexical context bindings."""
+function _function_context_expression(
     parsed,
-    node_name_to_index::Dict{String,Int},
+    nodeid::Function,
     self_node_index::Union{Nothing,Int},
 )
-    nodeid = _nodeid_resolver(node_name_to_index)
-
     if self_node_index === nothing
         return :(let nodeid = $(QuoteNode(nodeid))
             $parsed
@@ -84,6 +148,19 @@ function _contextual_function_expression(
     return :(let nodeid = $(QuoteNode(nodeid)), self = $self_node_index
         $parsed
     end)
+end
+
+"""Wrap parsed function code in its supported lexical runtime context."""
+function _contextual_function_expression(
+    parsed,
+    node_name_to_index::Dict{String,Int},
+    self_node_index::Union{Nothing,Int},
+)
+    return _function_context_expression(
+        parsed,
+        _nodeid_resolver(node_name_to_index),
+        self_node_index,
+    )
 end
 
 """
@@ -100,32 +177,19 @@ function create_lambda(
 )
     require_unsafe_code_evaluation()
 
-    # Create a temporary namespace for evaluation
-    temp_module = Module()
-
     try
-        parsed = Meta.parse(lambda_string)
-        # `:toplevel` expressions bypass surrounding lexical scope during
-        # evaluation. Preserve multi-statement sources as a scoped block so
-        # every statement captures the contextual bindings below.
-        if parsed isa Expr && parsed.head === :toplevel
-            parsed = Expr(:block, parsed.args...)
-        end
-        contextual_expression = _contextual_function_expression(
-            parsed,
-            node_name_to_index,
-            self_node_index,
+        value = _evaluate_function_source(
+            lambda_string;
+            transform=parsed -> _contextual_function_expression(
+                parsed,
+                node_name_to_index,
+                self_node_index,
+            ),
         )
-        value = Base.eval(temp_module, contextual_expression)
-
-        # If expression evaluated directly to a function, use it
-        if value isa Function
-            return LambdaImpl(value)
-        end
-
-        error("String does not evaluate to a function: '$lambda_string'")
+        return LambdaImpl(value)
     catch e
-        error("Failed to create lambda from string '$lambda_string': $e")
+        detail = sprint(showerror, e)
+        error("Failed to create lambda from string '$lambda_string': $detail")
     end
 end
 

@@ -28,6 +28,13 @@ const VALID_FUNCTION_SOURCE = `valid_callback = function (value)
   return value + 1
 end`
 
+const INVALID_FUNCTION_ERROR = [
+  'ParseError:',
+  '# Error @ none:1:9',
+  'invalid(',
+  '#       └ ── Expected `)` or `,`',
+].join('\n')
+
 async function mockConfiguration(page) {
   await page.route('**/known_functions', route => route.fulfill({
     status: 200,
@@ -88,8 +95,8 @@ async function mockConfiguration(page) {
     })
   })
   await page.route('**/test_code', route => {
-    const { code } = route.request().postDataJSON()
-    if (code.startsWith('valid')) {
+    const { code, placement } = route.request().postDataJSON()
+    if (code.startsWith('valid') && placement === 'node') {
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -103,7 +110,7 @@ async function mockConfiguration(page) {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      json: { success: false, error: 'Invalid custom function' },
+      json: { success: false, error: INVALID_FUNCTION_ERROR },
     })
   })
 }
@@ -206,7 +213,7 @@ async function expectEditorLayersAligned(valueEditor) {
   expect(Math.abs(origins.caret.y - origins.highlightedText.y)).toBeLessThan(0.5)
 }
 
-async function expectCustomFunctionValidationLifecycle(valueEditor) {
+async function expectCustomFunctionValidationLifecycle(page, valueEditor) {
   const input = valueEditor.locator('textarea')
   await expect(input).toBeVisible()
   const contextHelp = valueEditor.getByTestId('custom-function-context-help')
@@ -219,7 +226,12 @@ async function expectCustomFunctionValidationLifecycle(valueEditor) {
   await input.fill('invalid(')
   await valueEditor.locator('.validate-button').click()
 
-  await expect(valueEditor.locator('.function-error-badge')).toContainText('Error!')
+  const errorBadge = valueEditor.locator('.function-error-badge')
+  await expect(errorBadge).toContainText('Validation failed')
+  await expect(errorBadge).toHaveAttribute('role', 'alert')
+  await errorBadge.hover()
+  await expect(page.locator('.p-tooltip-text')).toContainText('ParseError:')
+  await expect(page.locator('.p-tooltip-text')).toContainText('Expected `)` or `,`')
   await expect(input).toBeVisible()
   await expect(valueEditor.getByTestId('code-collapsed-view')).toHaveCount(0)
 
@@ -264,7 +276,7 @@ test.describe('Code editor lifecycle', () => {
     await expectEditorLayersAligned(valueEditor)
     await valueEditor.locator('.validate-button').click()
 
-    await expect(valueEditor.locator('.function-error-badge')).toContainText('Error!')
+    await expect(valueEditor.locator('.function-error-badge')).toContainText('Validation failed')
     await expect(input).toBeVisible()
     await expect(valueEditor.getByTestId('symbolic-collapsed-view')).toHaveCount(0)
 
@@ -325,7 +337,7 @@ test.describe('Code editor lifecycle', () => {
     await expect(valueEditor.locator('textarea')).toHaveCount(0)
 
     await initialValue.click()
-    await expectCustomFunctionValidationLifecycle(valueEditor)
+    await expectCustomFunctionValidationLifecycle(page, valueEditor)
 
     const serializedParameter = await page.evaluate(() => {
       const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
@@ -350,7 +362,7 @@ test.describe('Code editor lifecycle', () => {
     await variableRow.locator('.variable-type-select').selectOption('Lambda')
     const valueEditor = variableRow.locator('.code-editor-with-symbols')
 
-    await expectCustomFunctionValidationLifecycle(valueEditor)
+    await expectCustomFunctionValidationLifecycle(page, valueEditor)
 
     const variableId = await variableRow.getAttribute('data-variable-id')
     const serializedVariables = await page.evaluate(() => {

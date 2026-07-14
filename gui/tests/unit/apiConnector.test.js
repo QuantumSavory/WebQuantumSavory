@@ -47,4 +47,15 @@ describe('ApiConnector project namespaces', () => {
       'http://api.test/logs/user_A%2FB%3F?purge=false',
     )
   })
+
+  it('sends custom-function placement context for validation', async () => {
+    const connector = new ApiConnector('http://api.test')
+    await connector.validateFunction('<(self)', 'node')
+
+    expect(fetch.mock.calls[0][0]).toBe('http://api.test/test_code')
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      code: '<(self)',
+      placement: 'node'
+    })
+  })
 })
