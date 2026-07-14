@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0
 
 - Added opt-in repeater-chain automation for fresh EntanglerProt, SwapperProt, and EntanglementTracker construction, including eager, sequential, and binary-tree swap predicates generated from stable node names.
 - Unified protocol constructor fields and Layout Helper dialog/help patterns so metadata defaults, variables, custom-function validation, accessibility guidance, and responsive actions behave consistently.
