@@ -1,17 +1,15 @@
 <template>
-  <AppDialog
+  <LayoutGeneratorDialog
     :show="show"
     title="Star Network Generator"
-    width="min(540px, calc(100vw - 32px))"
-    class="layout-generator-dialog"
-    dismissable-mask
-    @close="handleCancel"
+    form-id="star-network-form"
+    description="Replace one peripheral template with evenly spaced copies around a center node."
+    :valid="validation.valid"
+    :validation-message="validationMessage"
+    submit-label="Generate Star"
+    @submit="handleConfirm"
+    @cancel="handleCancel"
   >
-    <form id="star-network-form" @submit.prevent="handleConfirm">
-      <p class="dialog-description">
-      Replace one peripheral template with evenly spaced copies around a center node.
-      </p>
-
     <div class="form-grid">
         <label for="star-center-node">Center node</label>
         <select id="star-center-node" v-model="form.centerNodeId" autofocus>
@@ -56,35 +54,23 @@
         >
     </div>
 
-    <p class="template-note">
-      The peripheral template and its edge are removed. The first generated node keeps the
-      template position; the remaining nodes rotate counterclockwise around the center.
-    </p>
-    <div v-if="validationMessage" class="validation-error" role="alert">
-      {{ validationMessage }}
-    </div>
-    </form>
-
-    <template #footer>
-        <AppButton @click="handleCancel">Cancel</AppButton>
-        <AppButton
-          variant="primary"
-          type="submit"
-          form="star-network-form"
-          :disabled="!validation.valid"
-        >
-          Generate Star
-        </AppButton>
+    <template #help>
+      <LayoutGeneratorHelp title="Template behavior">
+        <p>
+          The peripheral template and its edge are removed. The first generated node keeps the
+          template position; the remaining nodes rotate counterclockwise around the center.
+        </p>
+      </LayoutGeneratorHelp>
     </template>
-  </AppDialog>
+  </LayoutGeneratorDialog>
 </template>
 
 <script setup>
 import { computed, reactive, watch } from 'vue'
 import { endpointId } from '../utils/layoutTemplates'
 import { validateStarNetwork } from '../utils/starNetwork'
-import AppButton from './ui/AppButton.vue'
-import AppDialog from './ui/AppDialog.vue'
+import LayoutGeneratorDialog from './ui/LayoutGeneratorDialog.vue'
+import LayoutGeneratorHelp from './ui/LayoutGeneratorHelp.vue'
 
 const props = defineProps({
   show: { type: Boolean, default: false },

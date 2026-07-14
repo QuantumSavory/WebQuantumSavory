@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added opt-in repeater-chain automation for fresh EntanglerProt, SwapperProt, and EntanglementTracker construction, including eager, sequential, and binary-tree swap predicates generated from stable node names.
+- Unified protocol constructor fields and Layout Helper dialog/help patterns so metadata defaults, variables, custom-function validation, accessibility guidance, and responsive actions behave consistently.
 - Unified complete-source parsing and placement-aware context for Custom Function validation, runtime construction, and script export; added regression coverage for curried and named functions, allowed multi-statement sources and trailing comments, and made validation failures readable from the warning tooltip.
 - Added backend-managed `nodeid("Node name")` and node-only `self` bindings to custom Julia functions and Lambda variables, with matching exported-script behavior and in-app guidance.
 - Named simulator and exported-script registers after their configured nodes so log messages identify nodes clearly.

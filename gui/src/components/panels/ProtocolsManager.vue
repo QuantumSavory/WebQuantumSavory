@@ -35,6 +35,10 @@ import Menu from 'primevue/menu';
 import { api } from '../../utils/ApiConnector'
 import { getCurrentInstance } from 'vue'
 import { generateUUid } from '../../utils/Utils'
+import {
+  createProtocolFromDefinition,
+  protocolSimpleName
+} from '../../utils/protocolConstructors'
 import { Plus } from '@lucide/vue'
 import { SIMULATION_EDITING_LOCK_MESSAGE, useUiServices } from '../../composables/uiServices'
 const { proxy } = getCurrentInstance()
@@ -91,7 +95,7 @@ const items = computed(() => {
   }
   
   return filteredTypes.map(type => ({
-    label: getProtocolTypeSimpleName(type.type),
+    label: protocolSimpleName(type.type),
     value: type.type, 
     command: () => {
       handleAddProtocol(type.type)
@@ -127,11 +131,6 @@ const computedProtocols = computed(() => {
   }))
 })
 
-function getProtocolTypeSimpleName( protocolType ){
-  const simpleName = protocolType.split(".").pop();
-  return simpleName;
-}
-
 function toggleAddProtocolMenu(event) {
   // Prevent adding protocols if simulation has run
   if (props.editingLocked) {
@@ -162,16 +161,16 @@ function handleAddProtocol( protocolTypeId) {
   }
   const protocolId = generateUUid('protocol')
 
-  const protocolTypeDefinitions = api.config.value.protocolTypes[props.protocolGroupName];
+  const protocolTypeDefinitions = api.config.value.protocolTypes?.[props.protocolGroupName] || [];
   const defaultType = protocolTypeDefinitions.find(type => type.type === protocolTypeId);
+  if (!defaultType) {
+    showAlert('Protocol unavailable', 'The selected protocol is not available in the runtime metadata.')
+    return
+  }
+  const protocolConstructor = createProtocolFromDefinition(defaultType)
   const newProtocol = new props.protocolClass({
     id: protocolId,
-    type: defaultType.type,
-    parameters: defaultType.parameters.map(param => ({
-      name: param.field,
-      type: param.type,
-      value: param.defaultValue
-    }))
+    ...protocolConstructor
   })
    props.protocols.push(newProtocol);
    forceRerender();

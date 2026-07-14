@@ -1213,6 +1213,8 @@ onUnmounted(() => {
       :show="showRepeaterChainDialog"
       :nodes="projectData.net.nodes"
       :edges="projectData.net.edges"
+      :protocol-types="api.config.value.protocolTypes"
+      :variables="projectData.variables"
       @confirm="handleGenerateRepeaterChain"
       @cancel="closeRepeaterChainGenerator"
     />
