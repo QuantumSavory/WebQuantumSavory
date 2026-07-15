@@ -8,6 +8,7 @@
      so PrimeVue and native controls can share one visual foundation. */
   --app-color-primary: #4345ac;
   --app-color-primary-hover: #3637a0;
+  --app-color-primary-soft: #ebeaff;
   --app-color-on-primary: #fff;
   --app-color-text: #222;
   --app-color-text-muted: #666;
@@ -43,6 +44,7 @@
   --app-z-popup: 3000;
   --app-z-tooltip: 10000;
   --app-shadow-dialog: 0 2px 16px rgba(0, 0, 0, 0.13);
+  --app-shadow-marker: 0 1px 4px rgba(0, 0, 0, 0.35);
   --app-radius-control: 4px;
   --app-radius-surface: 8px;
   --app-control-height: 25px;
