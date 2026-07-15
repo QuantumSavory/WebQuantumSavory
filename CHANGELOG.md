@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.0
 
 - Added immediate, accessible loading feedback for simulation setup and application-shell initialization while keeping ordinary execution, polling, tag previews, plots, and script export on their existing local indicators.
 - Made Markdown tooltips stack consistently above application overlays for both top and bottom placements.
