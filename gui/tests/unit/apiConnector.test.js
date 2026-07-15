@@ -172,4 +172,70 @@ describe('ApiConnector project namespaces', () => {
       tag: { kind: 'named', type_id: 'T', fields: {} }
     })
   })
+
+  it('shares in-flight tag catalogs without letting one caller abort the other', async () => {
+    const response = {
+      named_tags: [],
+      general_signatures: [],
+      allowed_data_types: [],
+      unsafe_evaluation: false
+    }
+    let resolveResponse
+    globalThis.fetch = vi.fn(() => new Promise(resolve => {
+      resolveResponse = () => resolve({
+        ok: true,
+        json: async () => response
+      })
+    }))
+    const connector = new ApiConnector('http://api.test')
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+
+    const first = connector.fetchTagTypes({ signal: firstController.signal })
+    const second = connector.fetchTagTypes({ signal: secondController.signal })
+    firstController.abort()
+
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(false)
+
+    resolveResponse()
+    await expect(second).resolves.toEqual(response)
+    await expect(connector.fetchTagTypes()).resolves.toEqual(response)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts an unobserved catalog request and force-refreshes completed caches', async () => {
+    const responses = [
+      { named_tags: [{ type_id: 'Old.Tag' }] },
+      { named_tags: [{ type_id: 'New.Tag' }] },
+    ]
+    globalThis.fetch = vi.fn(async (_url, { signal }) => {
+      if (fetch.mock.calls.length === 1) {
+        await new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(abortErrorForTest()), { once: true })
+        })
+      }
+      const body = responses.shift()
+      return { ok: true, json: async () => body }
+    })
+    const connector = new ApiConnector('http://api.test')
+    const controller = new AbortController()
+    const abandoned = connector.fetchTagTypes({ signal: controller.signal })
+
+    controller.abort()
+    await expect(abandoned).rejects.toMatchObject({ name: 'AbortError' })
+
+    const first = await connector.fetchTagTypes()
+    const refreshed = await connector.fetchTagTypes({ force: true })
+    expect(first.named_tags[0].type_id).toBe('Old.Tag')
+    expect(refreshed.named_tags[0].type_id).toBe('New.Tag')
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
 })
+
+function abortErrorForTest() {
+  const error = new Error('aborted')
+  error.name = 'AbortError'
+  return error
+}

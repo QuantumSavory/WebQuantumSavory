@@ -134,7 +134,7 @@ function _tag_method_argument_types(method::Method)
   return Any[parameters[2:end]...]
 end
 
-function _named_tag_definitions()
+function _tag_converter_definitions()
   definitions = _NamedTagDefinition[]
   seen = Set{String}()
   for method in methods(QuantumSavory.Tag)
@@ -161,6 +161,12 @@ function _named_tag_definitions()
   end
   sort!(definitions; by=definition -> (lowercase(definition.display_name), definition.type_id))
   return definitions
+end
+
+function _named_tag_definitions(converter_definitions=_tag_converter_definitions())
+  return filter(converter_definitions) do definition
+    definition.type <: QuantumSavory.AbstractTag
+  end
 end
 
 function _supported_tag_value_type(type)
@@ -199,14 +205,18 @@ function _general_tag_signatures()
 end
 
 function _build_tag_catalog_snapshot()
-  named = _named_tag_definitions()
+  converter_definitions = _tag_converter_definitions()
+  named = _named_tag_definitions(converter_definitions)
   general = _general_tag_signatures()
   named_by_id = Dict(definition.type_id => definition for definition in named)
   named_by_type = Dict(definition.type => definition for definition in named)
   general_by_id = Dict(signature.id => signature for signature in general)
 
   allowed_types = DataType[Int]
-  append!(allowed_types, definition.type for definition in named)
+  # General DataType-head tag tooling intentionally retains every safe
+  # one-argument Tag converter. Only the public named/protocol catalog is
+  # constrained to the upstream AbstractTag hierarchy.
+  append!(allowed_types, definition.type for definition in converter_definitions)
   allowed_by_id = Dict{String,DataType}()
   for type in allowed_types
     allowed_by_id[_qualified_tag_type_id(type)] = type
@@ -214,6 +224,7 @@ function _build_tag_catalog_snapshot()
 
   return (;
     named,
+    converter_definitions,
     general,
     named_by_id,
     named_by_type,
@@ -264,7 +275,7 @@ end
 function _compatible_data_type_ids(signature::_GeneralTagSignature, catalog)
   signature.head_type === DataType || return String[]
   compatible_types = DataType[Int]
-  for definition in catalog.named
+  for definition in catalog.converter_definitions
     length(definition.fields) == length(signature.fields) || continue
     all(
       field.type === expected
@@ -273,6 +284,41 @@ function _compatible_data_type_ids(signature::_GeneralTagSignature, catalog)
     push!(compatible_types, definition.type)
   end
   return sort!(unique(_qualified_tag_type_id.(compatible_types)))
+end
+
+
+"""Resolve an exact, fully qualified AbstractTag type ID for a protocol field."""
+function _resolve_named_abstract_tag_type(
+  value;
+  nullable::Bool,
+  context::AbstractString,
+  catalog=_tag_catalog_snapshot(),
+)
+  if value isa AbstractString && strip(value) == "nothing"
+    nullable || throw(validation_error(
+      "$context does not accept nothing",
+      Dict{String,Any}("context" => String(context)),
+    ))
+    return nothing
+  end
+
+  value isa AbstractString || throw(validation_error(
+    "$context must be a fully qualified named AbstractTag type ID",
+    Dict{String,Any}(
+      "context" => String(context),
+      "received_type" => string(typeof(value)),
+    ),
+  ))
+  type_id = String(value)
+  type = get(catalog.named_by_id, type_id, nothing)
+  type === nothing || return type.type
+  throw(validation_error(
+    "$context is not an advertised named AbstractTag type",
+    Dict{String,Any}(
+      "context" => String(context),
+      "type_id" => type_id,
+    ),
+  ))
 end
 
 function _wire_tag_field(field)

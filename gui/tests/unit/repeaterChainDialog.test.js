@@ -13,6 +13,8 @@ import { api } from '../../src/utils/ApiConnector'
 const ENTANGLER_TYPE = 'QuantumSavory.ProtocolZoo.EntanglerProt'
 const SWAPPER_TYPE = 'QuantumSavory.ProtocolZoo.SwapperProt'
 const TRACKER_TYPE = 'QuantumSavory.ProtocolZoo.EntanglementTracker'
+const NAMED_TAG_ID = 'QuantumSavory.EntanglementCounterpart'
+const REPLACEMENT_TAG_ID = 'QuantumSavory.EntanglementHistory'
 
 const ENTANGLER_DEFINITION = {
   type: ENTANGLER_TYPE,
@@ -108,6 +110,13 @@ const AppButtonStub = {
   `
 }
 
+const NamedTagTypeAutocompleteStub = {
+  name: 'NamedTagTypeAutocomplete',
+  props: ['modelValue', 'nullable', 'disabled', 'parameterName', 'ariaDescribedby'],
+  emits: ['update:modelValue'],
+  template: '<button type="button" class="named-tag-type-stub" :disabled="disabled">Named tag type</button>'
+}
+
 function tooltipText(binding) {
   return typeof binding.value === 'object' ? binding.value?.value : binding.value
 }
@@ -184,7 +193,8 @@ function mountDialog({
   fixture = makeFixture(),
   protocolTypes = FULL_PROTOCOL_TYPES,
   variables = [],
-  show = true
+  show = true,
+  stubs = {}
 } = {}) {
   api._config.value = { protocolTypes }
   const wrapper = mount(RepeaterChainDialog, {
@@ -200,7 +210,8 @@ function mountDialog({
       directives: { tooltip },
       stubs: {
         AppDialog: AppDialogStub,
-        AppButton: AppButtonStub
+        AppButton: AppButtonStub,
+        ...stubs
       }
     }
   })
@@ -386,6 +397,60 @@ describe('RepeaterChainDialog protocol automation', () => {
     expect(wrapper.text()).not.toContain('EntanglerProt constructor')
     expect(wrapper.text()).toContain('SwapperProt constructor')
     expect(wrapper.text()).toContain('EntanglementTracker constructor')
+  })
+
+  it('renders live named-tag metadata in the shared layout constructor and preserves qualified IDs', async () => {
+    const taggedEntanglerDefinition = {
+      ...ENTANGLER_DEFINITION,
+      parameters: [
+        ...ENTANGLER_DEFINITION.parameters,
+        {
+          field: 'tag',
+          type: 'Union{Nothing, Type{<:QuantumSavory.AbstractTag}}',
+          kind: 'named_tag_type',
+          nullable: true,
+          doc: 'Named tag head.'
+        }
+      ]
+    }
+    const protocolTypes = {
+      ...FULL_PROTOCOL_TYPES,
+      edge: [taggedEntanglerDefinition]
+    }
+    const fixture = makeFixture({
+      edgeProtocols: [protocol('saved-entangler', ENTANGLER_TYPE, [{
+        name: 'tag',
+        type: 'DataType',
+        value: NAMED_TAG_ID
+      }])]
+    })
+    const wrapper = mountDialog({
+      fixture,
+      protocolTypes,
+      stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
+    })
+
+    await selectValidTemplate(wrapper)
+    await wrapper.get('#chain-replace-entangler').setValue(true)
+
+    const control = wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' })
+    expect(control.props()).toMatchObject({
+      modelValue: NAMED_TAG_ID,
+      nullable: true,
+      parameterName: 'tag'
+    })
+
+    control.vm.$emit('update:modelValue', REPLACEMENT_TAG_ID)
+    await nextTick()
+    wrapper.get('button[type="submit"]').element.click()
+    await nextTick()
+
+    const generated = wrapper.emitted('confirm')[0][0].automation.entangler.protocol
+    expect(valuesByName(generated).tag).toEqual({
+      name: 'tag',
+      type: 'DataType',
+      value: REPLACEMENT_TAG_ID
+    })
   })
 
   it('describes and tooltips every predicate strategy radio', async () => {

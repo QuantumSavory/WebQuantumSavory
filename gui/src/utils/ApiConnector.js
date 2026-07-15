@@ -54,6 +54,15 @@ function tagTargetPayload(target = {}, { includeDestination = false } = {}) {
   return payload
 }
 
+function abortError() {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('The request was aborted', 'AbortError')
+  }
+  const error = new Error('The request was aborted')
+  error.name = 'AbortError'
+  return error
+}
+
 async function readJsonResponse(response, fallbackMessage) {
   const body = await response.json().catch(() => null)
   if (!response.ok) {
@@ -71,6 +80,8 @@ export class ApiConnector {
     this._loading = ref(false)
     this._error   = ref(null)
     this.known_functions = ref([]);
+    this._tagTypesRequest = null
+    this._tagTypesRequestGeneration = 0
     this.requestHeaders = {
       'Content-Type': 'application/json', 
       'Accept': 'application/json'
@@ -133,20 +144,80 @@ export class ApiConnector {
     return readJsonResponse(res, 'Julia script export failed')
   }
 
-  async fetchTagTypes({ signal, force = false } = {}) {
+  fetchTagTypes({ signal, force = false } = {}) {
     const cachedCatalog = this._config.value.tagTypes
-    if (!force && cachedCatalog) return cachedCatalog
-
-    const res = await fetch(`${this.baseUrl}/tag_types`, {
-      headers: this.requestHeaders,
-      signal,
-    })
-    const catalog = await readJsonResponse(res, 'Tag types fetch failed')
-    this._config.value = {
-      ...this._config.value,
-      tagTypes: catalog,
+    if (!force && cachedCatalog) {
+      return signal?.aborted ? Promise.reject(abortError()) : Promise.resolve(cachedCatalog)
     }
-    return catalog
+
+    let request = this._tagTypesRequest
+    if (!request || (force && !request.force)) {
+      const controller = new AbortController()
+      const generation = ++this._tagTypesRequestGeneration
+      request = {
+        controller,
+        force,
+        generation,
+        subscribers: 0,
+        settled: false,
+        promise: null,
+      }
+      request.promise = (async () => {
+        const res = await fetch(`${this.baseUrl}/tag_types`, {
+          headers: this.requestHeaders,
+          signal: controller.signal,
+        })
+        const catalog = await readJsonResponse(res, 'Tag types fetch failed')
+        if (generation === this._tagTypesRequestGeneration) {
+          this._config.value = {
+            ...this._config.value,
+            tagTypes: catalog,
+          }
+        }
+        return catalog
+      })()
+      this._tagTypesRequest = request
+      request.promise.then(
+        () => this._settleTagTypesRequest(request),
+        () => this._settleTagTypesRequest(request),
+      )
+    }
+
+    return this._subscribeToTagTypesRequest(request, signal)
+  }
+
+  _settleTagTypesRequest(request) {
+    request.settled = true
+    if (this._tagTypesRequest === request) this._tagTypesRequest = null
+  }
+
+  _subscribeToTagTypesRequest(request, signal) {
+    if (signal?.aborted) return Promise.reject(abortError())
+    request.subscribers += 1
+
+    return new Promise((resolve, reject) => {
+      let finished = false
+      const finish = (callback, value) => {
+        if (finished) return
+        finished = true
+        signal?.removeEventListener('abort', handleAbort)
+        request.subscribers -= 1
+        callback(value)
+      }
+      const handleAbort = () => {
+        finish(reject, abortError())
+        if (!request.settled && request.subscribers === 0) {
+          if (this._tagTypesRequest === request) this._tagTypesRequest = null
+          request.controller.abort()
+        }
+      }
+
+      signal?.addEventListener('abort', handleAbort, { once: true })
+      request.promise.then(
+        value => finish(resolve, value),
+        error => finish(reject, error),
+      )
+    })
   }
 
   async previewTag(tag, { signal } = {}) {

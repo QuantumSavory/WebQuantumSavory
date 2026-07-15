@@ -6,6 +6,7 @@
 - Made Markdown tooltips stack consistently above application overlays for both top and bottom placements.
 - Added documented local-run steps and an accessible System Information dialog with Julia, Genie, QuantumSavory provenance, WebQuantumSavory, and exact frontend dependency versions; copied panic reports now include the same normalized diagnostics.
 - Clarified startup warmup as precompilation work and kept its internal simulator logs out of server output.
+- Added metadata-driven, force-selection autocomplete for protocol named-tag types, with authoritative `AbstractTag` validation during construction and script export.
 
 ## 1.7.1
 

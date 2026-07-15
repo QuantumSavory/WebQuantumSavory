@@ -111,6 +111,124 @@
     @test occursin("CairoMakie.record", script)
     @test occursin("show(io, MIME\"image/png\"(), protocol)", script)
 
+    counterpart_id = "QuantumSavory.ProtocolZoo.EntanglementCounterpart"
+    tagged_payload = deepcopy(payload)
+    tagged_parameters = tagged_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+    tagged_by_name = Dict(parameter["name"] => parameter for parameter in tagged_parameters)
+    # Old saved projects call this a DataType union. The current constructor
+    # metadata, not this forged snapshot, drives safe source generation.
+    tagged_by_name["tag"]["type"] = "Float64"
+    tagged_by_name["tag"]["value"] = counterpart_id
+    tagged_by_name["attempt_time"]["type"] = "String"
+    tagged_by_name["attempt_time"]["value"] = 0.125
+    push!(tagged_parameters, Dict(
+      "name" => "stale_blank_parameter",
+      "type" => "DataType",
+      "value" => "",
+    ))
+    tagged_script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+      WebQuantumSavory.generate_julia_script(tagged_payload)
+    end
+    @test tagged_script == WebQuantumSavory.generate_julia_script(tagged_payload)
+    @test occursin("tag = $counterpart_id", tagged_script)
+    @test occursin("attempt_time = 0.125", tagged_script)
+    @test !occursin("attempt_time = \"0.125\"", tagged_script)
+    @test !occursin("stale_blank_parameter", tagged_script)
+    @test Meta.parseall(tagged_script) isa Expr
+
+    symbolic_payload = deepcopy(tagged_payload)
+    symbolic_parameters =
+      symbolic_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+    symbolic_pairstate = only(
+      parameter for parameter in symbolic_parameters if parameter["name"] == "pairstate"
+    )
+    symbolic_pairstate["type"] = "Float64"
+    symbolic_pairstate["value"] = Dict(
+      "kind" => "states_zoo",
+      "state_type" => "DepolarizedBellPair",
+      "parameters" => Dict("p" => 0.85),
+    )
+    symbolic_script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+      WebQuantumSavory.generate_julia_script(symbolic_payload)
+    end
+    @test occursin(
+      "pairstate = QuantumSavory.StatesZoo.DepolarizedBellPair(0.85)",
+      symbolic_script,
+    )
+
+    lambda_payload = deepcopy(tagged_payload)
+    lambda_parameters = lambda_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+    lambda_by_name = Dict(parameter["name"] => parameter for parameter in lambda_parameters)
+    lambda_by_name["chooseA"]["type"] = "Lambda"
+    lambda_by_name["chooseA"]["value"] = "slots -> first(slots)"
+    lambda_by_name["chooseB"]["type"] = "Lambda"
+    lambda_by_name["chooseB"]["value"] = "slots -> last(slots)"
+    lambda_script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      WebQuantumSavory.generate_julia_script(lambda_payload)
+    end
+    @test lambda_script == WebQuantumSavory.generate_julia_script(lambda_payload)
+    @test occursin("chooseslotA = (let", lambda_script)
+    @test occursin("chooseslotB = (let", lambda_script)
+    @test occursin("slots -> first(slots)", lambda_script)
+    @test occursin("slots -> last(slots)", lambda_script)
+    @test Meta.parseall(lambda_script) isa Expr
+
+    forged_lambda_payload = deepcopy(tagged_payload)
+    forged_lambda_parameters =
+      forged_lambda_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+    forged_lambda_success = only(
+      parameter for parameter in forged_lambda_parameters if parameter["name"] == "success_prob"
+    )
+    forged_lambda_success["type"] = "Lambda"
+    forged_lambda_success["value"] = 0.375
+    forged_lambda_script = WebQuantumSavory.generate_julia_script(forged_lambda_payload)
+    @test occursin("success_prob = 0.375", forged_lambda_script)
+
+    no_tag_payload = deepcopy(tagged_payload)
+    no_tag_parameters = no_tag_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+    only(parameter for parameter in no_tag_parameters if parameter["name"] == "tag")["value"] = "nothing"
+    no_tag_script = WebQuantumSavory.generate_julia_script(no_tag_payload)
+    @test occursin("tag = nothing", no_tag_script)
+
+    function tag_export_error(value; client_type="Type{<:AbstractTag}")
+      invalid_payload = deepcopy(tagged_payload)
+      invalid_parameters = invalid_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+      tag_parameter = only(parameter for parameter in invalid_parameters if parameter["name"] == "tag")
+      tag_parameter["type"] = client_type
+      tag_parameter["value"] = value
+      try
+        WebQuantumSavory.generate_julia_script(invalid_payload)
+        nothing
+      catch error
+        error
+      end
+    end
+
+    for invalid_id in ("EntanglementCounterpart", "Main.UnknownTag", "Core.Int64")
+      error = tag_export_error(invalid_id; client_type="Float64")
+      @test error isa WebQuantumSavory.APIError
+      @test occursin("not an advertised named AbstractTag type", error.message)
+    end
+    variable_tag_error = tag_export_error(Dict("kind" => "variable", "id" => "state-variable"))
+    @test variable_tag_error isa WebQuantumSavory.APIError
+    @test occursin("cannot use a variable", variable_tag_error.message)
+
+    unknown_export_parameter = deepcopy(tagged_payload)
+    unknown_parameters = unknown_export_parameter["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+    push!(unknown_parameters, Dict(
+      "name" => "forged_parameter",
+      "type" => "Float64",
+      "value" => 0.5,
+    ))
+    unknown_export_error = try
+      WebQuantumSavory.generate_julia_script(unknown_export_parameter)
+      nothing
+    catch error
+      error
+    end
+    @test unknown_export_error isa WebQuantumSavory.APIError
+    @test occursin("unknown parameter 'forged_parameter'", unknown_export_error.message)
+
     diagnostic_payload = deepcopy(payload)
     diagnostic_payload["net"]["protocols"] = Any[
       Dict(
@@ -919,6 +1037,268 @@
       entangler_parameters = protocol_types_by_name[string(QuantumSavory.ProtocolZoo.EntanglerProt)]["parameters"]
       pairstate = only(filter(parameter -> string(parameter.field) == "pairstate", entangler_parameters))
       @test pairstate.type == "Symbolic"
+
+      entangler_tag = only(filter(parameter -> string(parameter.field) == "tag", entangler_parameters))
+      @test entangler_tag.type == ["Nothing", "Type{<:AbstractTag}"]
+      @test entangler_tag.kind == WebQuantumSavory.NAMED_TAG_PARAMETER_KIND
+      @test entangler_tag.nullable === true
+
+      consumer_parameters = virtual_protocol["parameters"]
+      consumer_tag = only(filter(parameter -> string(parameter.field) == "tag", consumer_parameters))
+      @test consumer_tag.type == "Type{<:AbstractTag}"
+      @test consumer_tag.kind == WebQuantumSavory.NAMED_TAG_PARAMETER_KIND
+      @test consumer_tag.nullable === false
+
+      @test WebQuantumSavory._named_tag_parameter_semantics(
+        Type{<:QuantumSavory.AbstractTag},
+      ) == (; nullable=false)
+      @test WebQuantumSavory._named_tag_parameter_semantics(
+        Union{Nothing,Type{<:QuantumSavory.AbstractTag}},
+      ) == (; nullable=true)
+      @test WebQuantumSavory._named_tag_parameter_semantics(DataType) === nothing
+      @test WebQuantumSavory._named_tag_parameter_semantics(
+        Union{Nothing,DataType},
+      ) === nothing
+      @test WebQuantumSavory._named_tag_parameter_semantics(
+        Union{Nothing,Float64,Type{<:QuantumSavory.AbstractTag}},
+      ) === nothing
+      @test WebQuantumSavory._protocol_parameter_handling_type(
+        Union{Int64,Function},
+        "Int64",
+        "1",
+      ) === Int64
+      @test WebQuantumSavory._protocol_parameter_handling_type(
+        Union{Int64,Function},
+        "Lambda",
+        "slots -> first(slots)",
+      ) == "Lambda"
+      @test WebQuantumSavory._is_symbolic_parameter_type(QuantumSavory.SymQObj)
+      @test WebQuantumSavory._protocol_parameter_handling_type(
+        QuantumSavory.SymQObj,
+        "Symbolic",
+        Dict("kind" => "states_zoo"),
+      ) === QuantumSavory.SymQObj
+      consumer_declared_types = WebQuantumSavory._protocol_constructor_parameter_types(
+        QuantumSavory.ProtocolZoo.EntanglementConsumer,
+      )
+      @test consumer_declared_types["_log"] == fieldtype(
+        QuantumSavory.ProtocolZoo.EntanglementConsumer,
+        :_log,
+      )
+  end
+
+  @testset "Named AbstractTag Protocol Parameters" begin
+    payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    simulation_name = "named_abstract_tag_protocol_parameters"
+    payload["name"] = simulation_name
+    state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(payload))
+    context = Dict{Symbol,Any}(
+      :sim => WebQuantumSavory.get_network_time_tracker(state.network),
+      :net => state.network,
+      :nodeA => 1,
+      :nodeB => 2,
+    )
+    counterpart_id = "QuantumSavory.ProtocolZoo.EntanglementCounterpart"
+
+    protocol_definition(T, value; client_type="Any") = Dict(
+      "type" => string(T),
+      "parameters" => [Dict(
+        "name" => "tag",
+        "type" => client_type,
+        "value" => value,
+      )],
+    )
+
+    captured_error(thunk) = try
+      thunk()
+      nothing
+    catch error
+      error
+    end
+
+    try
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+        # These deliberately carry the legacy/forged parameter snapshots found
+        # in older saved projects. Constructor metadata remains authoritative.
+        entangler = WebQuantumSavory._instantiate_protocol(
+          protocol_definition(
+            QuantumSavory.ProtocolZoo.EntanglerProt,
+            counterpart_id;
+            client_type=["Nothing", "DataType"],
+          ),
+          context,
+        )
+        @test entangler.tag === QuantumSavory.ProtocolZoo.EntanglementCounterpart
+
+        consumer = WebQuantumSavory._instantiate_protocol(
+          protocol_definition(
+            QuantumSavory.ProtocolZoo.EntanglementConsumer,
+            counterpart_id;
+            client_type="Any",
+          ),
+          context,
+        )
+        @test consumer.tag === QuantumSavory.ProtocolZoo.EntanglementCounterpart
+
+        no_tag = WebQuantumSavory._instantiate_protocol(
+          protocol_definition(
+            QuantumSavory.ProtocolZoo.EntanglerProt,
+            "nothing";
+            client_type="Float64",
+          ),
+          context,
+        )
+        @test no_tag.tag === nothing
+
+        forged_ordinary_types = Dict(
+          "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),
+          "parameters" => Any[
+            Dict("name" => "success_prob", "type" => "String", "value" => 0.25),
+            Dict("name" => "chooseslotA", "type" => "String", "value" => 1),
+            Dict("name" => "chooseslotB", "type" => "Float64", "value" => "minimum"),
+          ],
+        )
+        authoritative_protocol = WebQuantumSavory._instantiate_protocol(
+          forged_ordinary_types,
+          context,
+        )
+        @test authoritative_protocol.success_prob == 0.25
+        @test authoritative_protocol.chooseslotA == 1
+        @test authoritative_protocol.chooseslotB === minimum
+
+        authoritative_symbolic = WebQuantumSavory._instantiate_protocol(
+          Dict(
+            "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),
+            "parameters" => [Dict(
+              "name" => "pairstate",
+              "type" => "Float64",
+              "value" => Dict(
+                "kind" => "states_zoo",
+                "state_type" => "DepolarizedBellPair",
+                "parameters" => Dict("p" => 0.85),
+              ),
+            )],
+          ),
+          context,
+        )
+        @test authoritative_symbolic.pairstate isa QuantumSavory.SymQObj
+
+        log_entries = @NamedTuple{t::Float64,obs1::Float64,obs2::Float64}[
+          (t=1.0, obs1=2.0, obs2=3.0),
+        ]
+        consumer_with_log = WebQuantumSavory._instantiate_protocol(
+          Dict(
+            "type" => string(QuantumSavory.ProtocolZoo.EntanglementConsumer),
+            "parameters" => [Dict(
+              "name" => "log",
+              "type" => "String",
+              "value" => log_entries,
+            )],
+          ),
+          context,
+        )
+        @test consumer_with_log._log == log_entries
+
+        for blank in (nothing, "", "  ")
+          default_entangler = WebQuantumSavory._instantiate_protocol(
+            protocol_definition(
+              QuantumSavory.ProtocolZoo.EntanglerProt,
+              blank;
+              client_type="DataType",
+            ),
+            context,
+          )
+          @test default_entangler.tag === QuantumSavory.ProtocolZoo.EntanglementCounterpart
+        end
+
+        invalid_values = Any[
+          "nothing" => "does not accept nothing",
+          "EntanglementCounterpart" => "not an advertised named AbstractTag type",
+          "Main.UnknownTag" => "not an advertised named AbstractTag type",
+          "Core.Int64" => "not an advertised named AbstractTag type",
+          42 => "fully qualified named AbstractTag type ID",
+          Dict("kind" => "variable", "id" => "tag-variable") => "cannot use variables",
+        ]
+        for (value, message) in invalid_values
+          T = value == "nothing" ?
+            QuantumSavory.ProtocolZoo.EntanglementConsumer :
+            QuantumSavory.ProtocolZoo.EntanglerProt
+          error = captured_error(() -> WebQuantumSavory._instantiate_protocol(
+            protocol_definition(T, value; client_type="Type{<:AbstractTag}"),
+            context,
+          ))
+          @test error isa WebQuantumSavory.APIError
+          if error isa WebQuantumSavory.APIError
+            @test error.status_code == 400
+            @test occursin(message, error.message)
+          end
+        end
+
+
+        unknown_parameter = Dict(
+          "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),
+          "parameters" => [Dict(
+            "name" => "forged_parameter",
+            "type" => "Float64",
+            "value" => 0.5,
+          )],
+        )
+        error = captured_error(() -> WebQuantumSavory._instantiate_protocol(
+          unknown_parameter,
+          context,
+        ))
+        @test error isa WebQuantumSavory.APIError
+        @test occursin("Unknown protocol parameter", error.message)
+        unknown_parameter["parameters"][1]["value"] = ""
+        @test WebQuantumSavory._instantiate_protocol(
+          unknown_parameter,
+          context,
+        ) isa QuantumSavory.ProtocolZoo.EntanglerProt
+      end
+
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+        custom_choosers = WebQuantumSavory._instantiate_protocol(
+          Dict(
+            "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),
+            "parameters" => Any[
+              Dict(
+                "name" => "chooseA",
+                "type" => "Lambda",
+                "value" => "slots -> first(slots)",
+              ),
+              Dict(
+                "name" => "chooseB",
+                "type" => "Lambda",
+                "value" => "slots -> last(slots)",
+              ),
+            ],
+          ),
+          context,
+        )
+        @test custom_choosers.chooseslotA([2, 3]) == 2
+        @test custom_choosers.chooseslotB([2, 3]) == 3
+
+        forged_lambda = WebQuantumSavory._instantiate_protocol(
+          Dict(
+            "type" => string(QuantumSavory.ProtocolZoo.EntanglerProt),
+            "parameters" => [Dict(
+              "name" => "success_prob",
+              "type" => "Lambda",
+              "value" => 0.25,
+            )],
+          ),
+          context,
+        )
+        @test forged_lambda.success_prob == 0.25
+        @test WebQuantumSavory._protocol_parameter_handling_type(
+          Float64,
+          "Lambda",
+          0.25,
+        ) === Float64
+      end
+    finally
+      WebQuantumSavory.destroy_simulation(simulation_name)
+    end
   end
 
   @testset "States Zoo Registry and Recipes" begin
@@ -1535,18 +1915,16 @@
         @test constructor_error.details["variable_assignments"][1]["variable_id"] == "string_probability"
         @test constructor_error.details["variable_assignments"][1]["parameter_name"] == "success_prob"
 
-        # Literal-only constructor failures preserve their pre-variable behavior.
+        # Literal parameters use the authoritative constructor field type, not
+        # a stale or forged client snapshot.
         literal_protocol_definition = deepcopy(incompatible_protocol_definition)
         literal_protocol_definition["parameters"][1]["value"] = "0.25"
         literal_protocol_definition["parameters"][1]["type"] = "String"
-        literal_constructor_error = try
-          WebQuantumSavory._instantiate_protocol(literal_protocol_definition, ctx)
-          nothing
-        catch e
-          e
-        end
-        @test literal_constructor_error !== nothing
-        @test !(literal_constructor_error isa WebQuantumSavory.APIError)
+        literal_protocol = WebQuantumSavory._instantiate_protocol(
+          literal_protocol_definition,
+          ctx,
+        )
+        @test literal_protocol.success_prob == 0.25
       finally
         haskey(WebQuantumSavory.STATE, simulation_name) && WebQuantumSavory.destroy_simulation(simulation_name)
       end
@@ -2801,7 +3179,14 @@
     end
     method_invalidated_snapshot = WebQuantumSavory._tag_catalog_snapshot()
     @test method_invalidated_snapshot !== cached_snapshot
-    @test any(definition -> definition.type === TagCatalogCacheProbe, method_invalidated_snapshot.named)
+    @test any(
+      definition -> definition.type === TagCatalogCacheProbe,
+      method_invalidated_snapshot.converter_definitions,
+    )
+    @test !any(
+      definition -> definition.type === TagCatalogCacheProbe,
+      method_invalidated_snapshot.named,
+    )
 
     WebQuantumSavory._invalidate_tag_catalog_cache!()
     @test WebQuantumSavory._tag_catalog_snapshot() !== method_invalidated_snapshot
@@ -2837,6 +3222,7 @@
       if length(arguments) == 1
         type = only(arguments)
         if type isa DataType && isconcretetype(type) &&
+           type <: QuantumSavory.AbstractTag &&
            !(type in (QuantumSavory.Tag, Symbol, DataType)) &&
            all(fieldtypes(type)) do field_type
              field_type === Symbol || field_type === DataType ||
@@ -2864,6 +3250,10 @@
       ) for signature in catalog["general_signatures"]
     )
     @test actual_named_ids == expected_named_ids
+    @test all(definition -> begin
+      type = method_invalidated_snapshot.named_by_id[String(definition["type_id"])].type
+      isconcretetype(type) && type <: QuantumSavory.AbstractTag
+    end, catalog["named_tags"])
     @test actual_general_shapes == expected_general_shapes
     @test length(unique(signature["signature_id"] for signature in catalog["general_signatures"])) ==
       length(catalog["general_signatures"])
@@ -2915,6 +3305,7 @@
 
     allowed_type_ids = Set(String(type["type_id"]) for type in catalog["allowed_data_types"])
     @test "Core.Int64" in allowed_type_ids
+    @test WebQuantumSavory._qualified_tag_type_id(TagCatalogCacheProbe) in allowed_type_ids
     datatype_empty_signature = only(filter(catalog["general_signatures"]) do signature
       signature["head_type"] == "DataType" && isempty(signature["fields"])
     end)
@@ -2937,6 +3328,20 @@
         error
       end
     end
+
+    non_abstract_converter_id = WebQuantumSavory._qualified_tag_type_id(TagCatalogCacheProbe)
+    non_abstract_protocol_error = captured_error(() ->
+      WebQuantumSavory._resolve_named_abstract_tag_type(
+        non_abstract_converter_id;
+        nullable=true,
+        context="Protocol tag",
+      )
+    )
+    @test non_abstract_protocol_error isa WebQuantumSavory.APIError
+    @test occursin(
+      "not an advertised named AbstractTag type",
+      non_abstract_protocol_error.message,
+    )
 
     missing_named = deepcopy(graph_spec)
     delete!(missing_named["fields"], "vertex")

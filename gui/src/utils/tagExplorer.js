@@ -196,6 +196,44 @@ export function normalizeTagCatalog(response) {
   }
 }
 
+/**
+ * Build the named-tag choices used by protocol constructor fields.
+ *
+ * The backend advertises only concrete `AbstractTag` subtypes in
+ * `named_tags`. Keep their fully qualified IDs as values, while qualifying
+ * duplicate short names just enough that every visible choice is distinct.
+ */
+export function namedTagTypeOptions(response) {
+  const named = normalizeTagCatalog(response).named
+  const nameCounts = new Map()
+  named.forEach(definition => {
+    nameCounts.set(definition.label, (nameCounts.get(definition.label) || 0) + 1)
+  })
+
+  return named.map(definition => {
+    const duplicate = nameCounts.get(definition.label) > 1
+    // The full ID is the only universally unambiguous qualification. A
+    // concrete parametric tag can contain additional dots inside its type
+    // parameters, and two instantiations can otherwise share both module and
+    // short name.
+    const qualification = definition.typeId
+    const label = duplicate
+      ? `${definition.label} — ${qualification}`
+      : definition.label
+
+    return {
+      key: `named:${definition.typeId}`,
+      kind: 'named',
+      value: definition.typeId,
+      name: definition.label,
+      label,
+      qualification,
+      duplicate,
+      searchText: `${definition.label} ${definition.typeId}`.toLowerCase()
+    }
+  })
+}
+
 export function defaultValueForType(type, dataTypes = []) {
   if (String(type) === 'DataType') return dataTypes[0]?.id ?? ''
   return ''

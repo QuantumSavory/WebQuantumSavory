@@ -257,6 +257,210 @@
       @test virtual_protocol["virtual"] === true
       @test all(pt["group"] == "edge" for pt in physical_protocols)
       @test all(pt["virtual"] === false for pt in physical_protocols)
+
+      entangler_tag = only(filter(
+        parameter -> parameter["field"] == "tag",
+        protocol_types_by_name[string(QuantumSavory.ProtocolZoo.EntanglerProt)]["parameters"],
+      ))
+      @test entangler_tag["type"] == ["Nothing", "Type{<:AbstractTag}"]
+      @test entangler_tag["kind"] == "named_tag_type"
+      @test entangler_tag["nullable"] === true
+
+      consumer_tag = only(filter(
+        parameter -> parameter["field"] == "tag",
+        virtual_protocol["parameters"],
+      ))
+      @test consumer_tag["type"] == "Type{<:AbstractTag}"
+      @test consumer_tag["kind"] == "named_tag_type"
+      @test consumer_tag["nullable"] === false
+  end
+
+  @testset "Named AbstractTag Protocol Boundaries" begin
+      counterpart_id = "QuantumSavory.ProtocolZoo.EntanglementCounterpart"
+
+      function tagged_protocol_payload(
+        name;
+        entangler_tag=counterpart_id,
+        consumer_tag=counterpart_id,
+        client_type="Float64",
+      )
+        payload = deepcopy(test_payload)
+        payload["name"] = name
+        payload["variables"] = Any[]
+        payload["simulationConfig"] = Dict("time" => 0.01, "timeStep" => 0.01)
+        protocols = payload["net"]["edges"][1]["data"]["protocols"]
+        entangler = only(filter(
+          protocol -> protocol["type"] == string(QuantumSavory.ProtocolZoo.EntanglerProt),
+          protocols,
+        ))
+        consumer = only(filter(
+          protocol -> protocol["type"] == string(QuantumSavory.ProtocolZoo.EntanglementConsumer),
+          protocols,
+        ))
+        entangler_parameter = only(filter(
+          parameter -> parameter["name"] == "tag",
+          entangler["parameters"],
+        ))
+        consumer_parameter = only(filter(
+          parameter -> parameter["name"] == "tag",
+          consumer["parameters"],
+        ))
+        # Deliberately stale/forged snapshots: authoritative constructor
+        # metadata must identify the semantic field on the running server.
+        entangler_parameter["type"] = client_type
+        entangler_parameter["value"] = entangler_tag
+        consumer_parameter["type"] = client_type
+        consumer_parameter["value"] = consumer_tag
+        return payload
+      end
+
+      valid_cases = [
+        (
+          "named-tag-http-valid",
+          tagged_protocol_payload("named-tag-http-valid"),
+        ),
+        (
+          "named-tag-http-entangler-nothing",
+          tagged_protocol_payload(
+            "named-tag-http-entangler-nothing";
+            entangler_tag="nothing",
+          ),
+        ),
+      ]
+      for (simulation_name, payload) in valid_cases
+        try
+          parse_response_http = make_request("POST", "/parse_network_graph"; body=payload)
+          @test parse_response_http.status == 200
+          prepare_response = make_request(
+            "POST",
+            "/prepare_simulation";
+            body=Dict("name" => simulation_name),
+          )
+          @test prepare_response.status == 200
+          prepare_data = parse_response(prepare_response)
+          @test prepare_data["status"] == WebQuantumSavory.STATUS_PREPARED
+          @test get(prepare_data, "error_code", nothing) != "UNSAFE_EVALUATION_DISABLED"
+        finally
+          make_request(
+            "POST",
+            "/destroy_simulation";
+            body=Dict("name" => simulation_name),
+          )
+        end
+      end
+
+      invalid_cases = [
+        (
+          "named-tag-http-consumer-nothing",
+          tagged_protocol_payload(
+            "named-tag-http-consumer-nothing";
+            consumer_tag="nothing",
+          ),
+        ),
+        (
+          "named-tag-http-short",
+          tagged_protocol_payload(
+            "named-tag-http-short";
+            entangler_tag="EntanglementCounterpart",
+          ),
+        ),
+        (
+          "named-tag-http-unknown",
+          tagged_protocol_payload(
+            "named-tag-http-unknown";
+            entangler_tag="Main.UnknownTag",
+          ),
+        ),
+        (
+          "named-tag-http-general-datatype",
+          tagged_protocol_payload(
+            "named-tag-http-general-datatype";
+            entangler_tag="Core.Int64",
+          ),
+        ),
+      ]
+      for (simulation_name, payload) in invalid_cases
+        try
+          parse_response_http = make_request("POST", "/parse_network_graph"; body=payload)
+          @test parse_response_http.status == 200
+          prepare_response = make_request(
+            "POST",
+            "/prepare_simulation";
+            body=Dict("name" => simulation_name),
+          )
+          @test prepare_response.status == 400
+          prepare_data = parse_response(prepare_response)
+          @test prepare_data["success"] == false
+          @test prepare_data["error_code"] == "VALIDATION_ERROR"
+        finally
+          make_request(
+            "POST",
+            "/destroy_simulation";
+            body=Dict("name" => simulation_name),
+          )
+        end
+      end
+
+      simulations_before = make_request("GET", "/simulations")
+      names_before = Set(
+        simulation["name"]
+        for simulation in parse_response(simulations_before)["simulations"]
+      )
+      export_payload = tagged_protocol_payload("named-tag-http-export")
+      export_response_one = make_request("POST", "/export_script"; body=export_payload)
+      export_response_two = make_request("POST", "/export_script"; body=export_payload)
+      @test export_response_one.status == 200
+      @test export_response_two.status == 200
+      export_one = parse_response(export_response_one)
+      export_two = parse_response(export_response_two)
+      @test export_one["script"] == export_two["script"]
+      @test length(findall("tag = $counterpart_id", export_one["script"])) == 2
+      @test Meta.parseall(export_one["script"]) isa Expr
+
+      nothing_export_payload = tagged_protocol_payload(
+        "named-tag-http-export-nothing";
+        entangler_tag="nothing",
+      )
+      nothing_export_response = make_request(
+        "POST",
+        "/export_script";
+        body=nothing_export_payload,
+      )
+      @test nothing_export_response.status == 200
+      @test occursin("tag = nothing", parse_response(nothing_export_response)["script"])
+
+      invalid_export_payloads = [
+        tagged_protocol_payload(
+          "named-tag-http-export-consumer-nothing";
+          consumer_tag="nothing",
+        ),
+        tagged_protocol_payload(
+          "named-tag-http-export-short";
+          entangler_tag="EntanglementCounterpart",
+        ),
+        tagged_protocol_payload(
+          "named-tag-http-export-unknown";
+          entangler_tag="Main.UnknownTag",
+        ),
+        tagged_protocol_payload(
+          "named-tag-http-export-general-datatype";
+          entangler_tag="Core.Int64",
+        ),
+      ]
+      for invalid_payload in invalid_export_payloads
+        invalid_response = make_request("POST", "/export_script"; body=invalid_payload)
+        @test invalid_response.status == 400
+        invalid_data = parse_response(invalid_response)
+        @test invalid_data["success"] == false
+        @test invalid_data["error_code"] == "VALIDATION_ERROR"
+      end
+
+      simulations_after = make_request("GET", "/simulations")
+      names_after = Set(
+        simulation["name"]
+        for simulation in parse_response(simulations_after)["simulations"]
+      )
+      @test names_after == names_before
   end
 
   @testset "States Zoo Endpoints" begin
@@ -1027,6 +1231,30 @@
       @test !isempty(catalog["general_signatures"])
       @test !isempty(catalog["allowed_data_types"])
       @test catalog["unsafe_evaluation"] == unsafe_evaluation_enabled
+      @test all(definition -> startswith(
+        definition["type_id"],
+        "QuantumSavory.ProtocolZoo.",
+      ), catalog["named_tags"])
+      @test Set(definition["type_id"] for definition in catalog["named_tags"]) == Set([
+        "QuantumSavory.ProtocolZoo.EntanglementCounterpart",
+        "QuantumSavory.ProtocolZoo.EntanglementDelete",
+        "QuantumSavory.ProtocolZoo.EntanglementHistory",
+        "QuantumSavory.ProtocolZoo.EntanglementUpdateX",
+        "QuantumSavory.ProtocolZoo.EntanglementUpdateZ",
+        "QuantumSavory.ProtocolZoo.MBQCEntanglementDistillation.GraphStateStorage",
+        "QuantumSavory.ProtocolZoo.MBQCEntanglementDistillation.PurifiedEntanglementCounterpart",
+        "QuantumSavory.ProtocolZoo.MBQCEntanglementDistillation.PurifierBellMeasurementResults",
+        "QuantumSavory.ProtocolZoo.QTCP.Flow",
+        "QuantumSavory.ProtocolZoo.QTCP.LinkLevelReply",
+        "QuantumSavory.ProtocolZoo.QTCP.LinkLevelReplyAtHop",
+        "QuantumSavory.ProtocolZoo.QTCP.LinkLevelReplyAtSource",
+        "QuantumSavory.ProtocolZoo.QTCP.LinkLevelRequest",
+        "QuantumSavory.ProtocolZoo.QTCP.QDatagram",
+        "QuantumSavory.ProtocolZoo.QTCP.QDatagramSuccess",
+        "QuantumSavory.ProtocolZoo.QTCP.QTCPPairBegin",
+        "QuantumSavory.ProtocolZoo.QTCP.QTCPPairEnd",
+        "QuantumSavory.ProtocolZoo.Switches.SwitchRequest",
+      ])
 
       symbol_int_signature = only(filter(catalog["general_signatures"]) do signature
         signature["head_type"] == "Symbol" &&

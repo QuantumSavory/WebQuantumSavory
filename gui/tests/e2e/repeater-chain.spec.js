@@ -1,5 +1,24 @@
 import { test, expect } from '@playwright/test'
 
+const TAG_ALPHA = 'Example.Alpha.ReadyTag'
+const TAG_BETA = 'Example.Beta.ReadyTag'
+const TAG_CATALOG = {
+  named_tags: [{
+    type_id: TAG_ALPHA,
+    display_name: 'ReadyTag',
+    doc: 'Alpha ready tag.',
+    fields: [],
+  }, {
+    type_id: TAG_BETA,
+    display_name: 'ReadyTag',
+    doc: 'Beta ready tag.',
+    fields: [],
+  }],
+  general_signatures: [],
+  allowed_data_types: [],
+  unsafe_evaluation: false,
+}
+
 const REPEATER_AUTOMATION_PROTOCOL_TYPES = [{
   type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
   doc: 'Generate entanglement between two nodes.',
@@ -43,7 +62,10 @@ const REPEATER_AUTOMATION_PROTOCOL_TYPES = [{
 async function mockBackendMetadata(page, {
   knownFunctions = [],
   protocolTypes = [],
+  tagCatalog = TAG_CATALOG,
 } = {}) {
+  const tagCatalogState = { requests: 0 }
+  page.tagCatalogState = tagCatalogState
   await page.route('**/known_functions', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -59,6 +81,14 @@ async function mockBackendMetadata(page, {
     contentType: 'application/json',
     json: { protocol_types: protocolTypes },
   }))
+  await page.route('**/tag_types', route => {
+    tagCatalogState.requests += 1
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      json: tagCatalog,
+    })
+  })
   await page.route('**/platform_info', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -646,6 +676,87 @@ test.describe('Layout Tools repeater chain generator', () => {
       'protocol_start_unrelated',
       'protocol_end_unrelated',
     ])
+  })
+
+  test('selects qualified named tags in the shared layout constructor above the dialog', async ({ page }) => {
+    const taggedProtocolTypes = REPEATER_AUTOMATION_PROTOCOL_TYPES.map(definition => (
+      definition.type.endsWith('.EntanglerProt')
+        ? {
+            ...definition,
+            parameters: [...definition.parameters, {
+              field: 'tag',
+              type: 'Union{Nothing, Type{<:QuantumSavory.AbstractTag}}',
+              kind: 'named_tag_type',
+              nullable: true,
+              doc: 'Named tag head.',
+            }],
+          }
+        : definition
+    ))
+    await createProjectWithNodes(page, 'Repeater Named Tag Automation', 3, {
+      knownFunctions: ['minimum'],
+      protocolTypes: taggedProtocolTypes,
+    })
+    await connectNodes(page, 2, 0)
+    await page.evaluate(({ savedTag }) => {
+      const app = document.querySelector('#app')?.__vue_app__
+      const projectData = app?._instance?.setupState?.projectData
+      projectData.net.edges[0].data.protocols.push({
+        id: 'protocol_entangler_named_tag',
+        type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
+        parameters: [{
+          name: 'tag',
+          type: 'Any',
+          value: savedTag,
+        }],
+      })
+    }, { savedTag: TAG_BETA })
+
+    await openGenerator(page)
+    await fillGenerator(page, { count: 2 })
+    const dialog = page.getByRole('dialog', { name: 'Repeater Chain Generator' })
+    await dialog.locator('#chain-replace-entangler').setChecked(true)
+    const constructor = dialog.locator('.constructor-panel', {
+      hasText: 'EntanglerProt constructor',
+    })
+    const tagInput = constructor.getByRole('combobox', { name: 'tag named tag type' })
+
+    await expect(tagInput).toHaveValue(`ReadyTag — ${TAG_BETA}`)
+    await tagInput.fill('Example.Alpha')
+    const overlay = page.locator('.p-autocomplete-overlay.named-tag-type-overlay')
+    await expect(overlay).toBeVisible()
+    const layers = await page.evaluate(() => {
+      const popup = document.querySelector('.p-autocomplete-overlay.named-tag-type-overlay')
+      const modal = document.querySelector('.p-dialog-mask.app-dialog-mask')
+      return {
+        popup: Number.parseInt(getComputedStyle(popup).zIndex, 10),
+        modal: Number.parseInt(getComputedStyle(modal).zIndex, 10),
+      }
+    })
+    expect(layers.popup).toBeGreaterThan(layers.modal)
+
+    await page.getByRole('option', { name: /ReadyTag.*Example\.Alpha/ }).click()
+    await expect(tagInput).toHaveValue(`ReadyTag — ${TAG_ALPHA}`)
+    expect(page.tagCatalogState.requests).toBe(1)
+
+    await dialog.getByRole('button', { name: 'Generate Chain' }).click()
+    await expect(dialog).toHaveCount(0)
+    const generatedTags = await page.evaluate(() => {
+      const app = document.querySelector('#app')?.__vue_app__
+      const projectData = app?._instance?.setupState?.projectData
+      return projectData.net.edges
+        .filter(edge => edge.isLogic !== true)
+        .map(edge => edge.data.protocols.find(protocol => (
+          protocol.type.endsWith('.EntanglerProt')
+        )))
+        .map(protocol => protocol.parameters.find(parameter => parameter.name === 'tag'))
+    })
+    expect(generatedTags).toHaveLength(3)
+    expect(generatedTags).toEqual(Array.from({ length: 3 }, () => ({
+      name: 'tag',
+      type: 'Any',
+      value: TAG_ALPHA,
+    })))
   })
 
   test('can omit the end-to-end virtual edge', async ({ page }) => {
