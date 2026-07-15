@@ -61,6 +61,33 @@ describe('simulation lifecycle reducer', () => {
     })
   })
 
+  it('tracks one tokenized foreground request and ignores stale completion', () => {
+    const request = { id: 2, action: 'run' }
+    let state = reduceSimulationState(createSimulationState(), {
+      type: 'FOREGROUND_REQUEST_STARTED',
+      request,
+      message: 'Initializing simulation...'
+    })
+
+    expect(state).toMatchObject({
+      foregroundRequest: request,
+      message: 'Initializing simulation...'
+    })
+    expect(reduceSimulationState(state, {
+      type: 'FOREGROUND_REQUEST_FINISHED',
+      requestId: 1
+    })).toBe(state)
+
+    state = reduceSimulationState(state, {
+      type: 'FOREGROUND_REQUEST_FINISHED',
+      requestId: request.id
+    })
+    expect(state.foregroundRequest).toBeNull()
+
+    state = reduceSimulationState({ ...state, foregroundRequest: request }, { type: 'RESET' })
+    expect(state.foregroundRequest).toBeNull()
+  })
+
   it('recognizes all supported not-found response shapes', () => {
     expect(isNotFoundResponse({ error_code: 'NOT_FOUND' })).toBe(true)
     expect(isNotFoundResponse({ status_code: 404 })).toBe(true)
@@ -89,5 +116,22 @@ describe('simulation lifecycle reducer', () => {
     expect(simulationCapabilities(SimulationPhase.ERROR, false, false).canExploreTags).toBe(false)
     expect(simulationCapabilities(SimulationPhase.BLOCKED, false, true).canExploreTags).toBe(false)
     expect(simulationCapabilities(SimulationPhase.PARSED, true, true).canExploreTags).toBe(false)
+  })
+
+  it('locks editing and foreground controls while a request is pending', () => {
+    expect(simulationCapabilities(
+      SimulationPhase.PREPARED,
+      false,
+      true,
+      { id: 1, action: 'run' }
+    )).toMatchObject({
+      canRun: false,
+      canPause: false,
+      canResume: false,
+      canStop: false,
+      canPrepare: false,
+      editingDisabled: true,
+      canExploreTags: true
+    })
   })
 })

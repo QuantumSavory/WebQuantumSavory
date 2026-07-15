@@ -40,6 +40,179 @@ afterEach(() => {
 })
 
 describe('simulation controller polling ownership', () => {
+  it('sets Parse pending synchronously, suppresses duplicates, and clears it on success', async () => {
+    const parseRequest = deferred()
+    const api = {
+      parseNetworkGraph: vi.fn(() => parseRequest.promise)
+    }
+    const { controller, projectData, stop } = createController(api)
+    projectData.value.net.nodes.push({ id: 'node-1', data: { slots: [] } })
+
+    const first = controller.prepareNetworkGraph(false)
+    expect(controller.foregroundRequest.value).toMatchObject({ action: 'parse' })
+    expect(controller.capabilities.value).toMatchObject({ canPrepare: false, editingDisabled: true })
+
+    const duplicate = controller.prepareNetworkGraph(false)
+    expect(await duplicate).toBe(false)
+    expect(api.parseNetworkGraph).toHaveBeenCalledTimes(1)
+
+    parseRequest.resolve({ success: true, state: { status: 'created' } })
+    expect(await first).toBe(true)
+    expect(controller.foregroundRequest.value).toBeNull()
+    stop()
+  })
+
+  it('tracks Prepare through failure and clears the request in finally', async () => {
+    const prepareRequest = deferred()
+    const api = {
+      prepareSimulation: vi.fn(() => prepareRequest.promise)
+    }
+    const { controller, stop } = createController(api)
+    controller.state.value = {
+      ...controller.state.value,
+      phase: 'parsed',
+      isParsed: true
+    }
+
+    const pending = controller.prepareSimulation()
+    expect(controller.foregroundRequest.value).toMatchObject({ action: 'prepare' })
+    expect(await controller.prepareSimulation()).toBe(false)
+
+    prepareRequest.resolve({ success: false, message: 'prepare failed' })
+    expect(await pending).toBe(false)
+    expect(controller.foregroundRequest.value).toBeNull()
+    expect(controller.phase.value).toBe('error')
+    stop()
+  })
+
+  it('clears Run pending after backend acceptance without treating polling as foreground', async () => {
+    const runRequest = deferred()
+    const api = {
+      runSimulation: vi.fn(() => runRequest.promise),
+      getSimulationStatus: vi.fn(() => new Promise(() => {})),
+      getBackendLogs: vi.fn(async () => ({ success: true, logs: [] }))
+    }
+    const { controller, projectData, stop } = createController(api)
+    projectData.value.net.nodes.push({ id: 'node-1', data: { slots: [] } })
+    controller.state.value = {
+      ...controller.state.value,
+      phase: 'prepared',
+      isParsed: true,
+      isPrepared: true
+    }
+
+    const pending = controller.runSimulationWithSteps()
+    expect(controller.foregroundRequest.value).toMatchObject({ action: 'run' })
+    expect(await controller.runSimulationWithSteps()).toBe(false)
+    expect(api.runSimulation).toHaveBeenCalledTimes(1)
+
+    runRequest.resolve({
+      success: true,
+      state: { simulation: { simulation_running: true, simulation_time: 1 } }
+    })
+    expect(await pending).toBe(true)
+    expect(controller.pollingActive.value).toBe(true)
+    expect(controller.foregroundRequest.value).toBeNull()
+    stop()
+  })
+
+  it('sets and clears Pause and Resume pending around their foreground requests', async () => {
+    const pauseRequest = deferred()
+    const resumeStatus = deferred()
+    const api = {
+      pauseSimulation: vi.fn(() => pauseRequest.promise),
+      getSimulationStatus: vi.fn()
+        .mockImplementationOnce(() => resumeStatus.promise)
+        .mockImplementation(() => new Promise(() => {})),
+      runSimulation: vi.fn(async () => ({
+        success: true,
+        state: { simulation: { simulation_running: true, simulation_time: 2 } }
+      })),
+      getBackendLogs: vi.fn(async () => ({ success: true, logs: [] }))
+    }
+    const { controller, stop } = createController(api)
+    controller.state.value = {
+      ...controller.state.value,
+      phase: 'running',
+      isParsed: true,
+      isPrepared: true
+    }
+
+    const pausing = controller.pauseSimulation()
+    expect(controller.foregroundRequest.value).toMatchObject({ action: 'pause' })
+    expect(await controller.pauseSimulation()).toBe(false)
+    pauseRequest.resolve({
+      success: true,
+      state: { simulation: { simulation_running: false, simulation_paused: true, simulation_time: 2 } }
+    })
+    expect(await pausing).toBe(true)
+    expect(controller.foregroundRequest.value).toBeNull()
+    expect(controller.phase.value).toBe('paused')
+
+    const resuming = controller.resumeSimulation()
+    expect(controller.foregroundRequest.value).toMatchObject({ action: 'resume' })
+    expect(await controller.resumeSimulation()).toBe(false)
+    resumeStatus.resolve({
+      success: true,
+      state: {
+        simulation: {
+          simulation_running: false,
+          simulation_paused: true,
+          simulation_progress: 1,
+          simulation_time: 2
+        }
+      }
+    })
+    expect(await resuming).toBe(true)
+    expect(controller.foregroundRequest.value).toBeNull()
+    stop()
+  })
+
+  it('clears pending work on reset and prevents stale completion from clearing a newer request', async () => {
+    const firstRequest = deferred()
+    const secondRequest = deferred()
+    const api = {
+      parseNetworkGraph: vi.fn()
+        .mockImplementationOnce(() => firstRequest.promise)
+        .mockImplementationOnce(() => secondRequest.promise)
+    }
+    const { controller, projectData, stop } = createController(api)
+    projectData.value.net.nodes.push({ id: 'node-1', data: { slots: [] } })
+
+    const first = controller.prepareNetworkGraph(false)
+    const firstId = controller.foregroundRequest.value.id
+    controller.resetSimulation()
+    expect(controller.foregroundRequest.value).toBeNull()
+
+    const second = controller.prepareNetworkGraph(false)
+    const secondId = controller.foregroundRequest.value.id
+    expect(secondId).toBeGreaterThan(firstId)
+
+    firstRequest.resolve({ success: true, state: { status: 'created' } })
+    expect(await first).toBe(false)
+    expect(controller.foregroundRequest.value).toMatchObject({ id: secondId, action: 'parse' })
+
+    secondRequest.resolve({ success: true, state: { status: 'created' } })
+    expect(await second).toBe(true)
+    expect(controller.foregroundRequest.value).toBeNull()
+    stop()
+  })
+
+  it('clears a pending foreground request when its scope is disposed', async () => {
+    const parseRequest = deferred()
+    const api = { parseNetworkGraph: vi.fn(() => parseRequest.promise) }
+    const { controller, projectData, stop } = createController(api)
+    projectData.value.net.nodes.push({ id: 'node-1', data: { slots: [] } })
+
+    const pending = controller.prepareNetworkGraph(false)
+    expect(controller.foregroundRequest.value).not.toBeNull()
+    stop()
+    expect(controller.foregroundRequest.value).toBeNull()
+
+    parseRequest.resolve({ success: true, state: { status: 'created' } })
+    expect(await pending).toBe(false)
+  })
+
   it('ignores a response from an obsolete polling generation', async () => {
     vi.useFakeTimers()
     const first = deferred()

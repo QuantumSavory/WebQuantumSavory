@@ -24,6 +24,7 @@ import {
   FolderOpen,
   Info,
   Library,
+  LoaderCircle,
   Menu as MenuIcon,
   PanelRightClose,
   PanelRightOpen,
@@ -60,6 +61,7 @@ import { useImportExport } from './composables/useImportExport.js'
 import { useAppState } from './composables/useAppState.js'
 import { useUnsavedChanges } from './composables/useUnsavedChanges.js'
 import { useShellGeometry } from './composables/useShellGeometry.js'
+import { applicationLoadingMessage } from './composables/applicationLoading.js'
 
 // Import utils
 import { validatePayload } from './utils/projectHelpers.js'
@@ -89,6 +91,8 @@ import demo2 from './demos/2.Entangler.Example.with.consumer.json'
 
 const baseMapInstance = ref(null);
 const menuButtonRef = ref(null)
+const applicationMetadataPending = ref(true)
+const mapInitializationPending = ref(true)
 
 const TIME_STEP = 0.1;
 
@@ -305,6 +309,7 @@ function showSimulationPanic(panic) {
 
 const {
   phase: simulationPhase,
+  foregroundRequest,
   capabilities: simulationCapabilities,
   simulationState,
   simulationStatus,
@@ -397,6 +402,7 @@ const markAsSavedRef = ref(null)
 // Project session owns project identity, persistence, and transition teardown.
 const {
   transitionGeneration: projectTransitionGeneration,
+  transitionPhase: projectTransitionPhase,
   open: openProject,
   openDemo: loadDemoProject,
   create: createNewProject,
@@ -442,6 +448,23 @@ const {
   }),
   showError: message => showAlert('Project Error', message)
 })
+
+const applicationShellPendingMessage = computed(() => applicationLoadingMessage({
+  applicationMetadataPending: applicationMetadataPending.value,
+  mapInitializationPending: mapInitializationPending.value,
+  projectTransitionPhase: projectTransitionPhase.value,
+  foregroundRequest: foregroundRequest.value
+}))
+const applicationShellPending = computed(() => Boolean(applicationShellPendingMessage.value))
+
+function handleMapReady() {
+  mapInitializationPending.value = false
+}
+
+function handleMapInitializationError(error) {
+  mapInitializationPending.value = false
+  console.error('Map initialization failed:', error)
+}
 
 function serializePanicProject() {
   return serializeProjectData()
@@ -958,8 +981,13 @@ onMounted( async () => {
   const startupRecentProjectName = ProjectStore.getRecentProjectName()
   const startupTransitionGeneration = projectTransitionGeneration.value
 
-  // fetch platform info
-  await api.fetchPlatformInfo()
+  // Fetch application catalogs and platform metadata together. Their loading
+  // state is shell-owned so simulation polling never drives the global spinner.
+  await Promise.allSettled([
+    api.init(),
+    api.fetchPlatformInfo()
+  ])
+  applicationMetadataPending.value = false
   // One-time migration: ensure metadata index exists for existing projects
   const metadataIndex = ProjectStore.getMetadataIndex()
   const existingProjects = ProjectStore.listProjects()
@@ -1013,6 +1041,15 @@ onUnmounted(() => {
         <img src="./assets/logo.png" alt="WebQuantumSavory Logo" class="topbar-logo">
         WebQuantumSavory Simulation Builder
         <span class="version-badge">v{{ appVersion }}</span>
+        <span
+          v-if="applicationShellPending"
+          class="topbar-loading-indicator"
+          role="status"
+          aria-live="polite"
+        >
+          <LoaderCircle class="app-loading-spinner" :size="16" aria-hidden="true" />
+          <span class="visually-hidden">{{ applicationShellPendingMessage }}</span>
+        </span>
       </div>
       <div class="topbar-right">
         <div class="topbar-menu">
@@ -1050,6 +1087,8 @@ onUnmounted(() => {
           @map-click="handleMapClickComposable"
           @edge-created="handleEdgeCreated"
           @map-state-change="handleMapStateChangeComposable"
+          @map-ready="handleMapReady"
+          @map-initialization-error="handleMapInitializationError"
           @delete="deleteSelected"
           :style="'https://tiles.stadiamaps.com/styles/alidade_smooth.json'"
         />
@@ -1084,6 +1123,7 @@ onUnmounted(() => {
                 :backendSimulation="backendSimulation"
                 :targetSimulationTime="targetSimulationTime"
                 :pollingActive="pollingActive"
+                :foregroundRequest="foregroundRequest"
                 :phase="simulationPhase"
                 :capabilities="simulationCapabilities"
                 @run="runSimulationWithSteps" 

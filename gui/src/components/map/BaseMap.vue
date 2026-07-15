@@ -44,7 +44,15 @@ const props = defineProps({
   selectedType: {    type: String,  default: null }
 })
 
-const emit = defineEmits(['select', 'map-click', 'edge-created', 'map-state-change', 'delete'])
+const emit = defineEmits([
+  'select',
+  'map-click',
+  'edge-created',
+  'map-state-change',
+  'delete',
+  'map-ready',
+  'map-initialization-error'
+])
 
 // MapLibre moves each marker element outside Vue's normal DOM tree. Keep the
 // component render order stable when simulator IDs change so Vue updates the
@@ -259,21 +267,43 @@ onMounted(() => {
   window.addEventListener('blur', onBlur);
   document.addEventListener('visibilitychange', onVisibilityChange);
   if (mapContainer.value) {
-    map.value = new maplibregl.Map({
-      container: mapContainer.value,
-      style: props.style,
-      center: props.center,
-      zoom: props.zoom,
-    })
+    const handleInitializationError = (event) => {
+      emit('map-initialization-error', event?.error)
+    }
 
-    // Add navigation controls
-    map.value.addControl(new maplibregl.NavigationControl(), 'bottom-left')
+    try {
+      map.value = new maplibregl.Map({
+        container: mapContainer.value,
+        style: props.style,
+        center: props.center,
+        zoom: props.zoom,
+      })
+
+      // Register initialization failures before another MapLibre operation can throw.
+      map.value.on('error', handleInitializationError)
+
+      // Add navigation controls
+      map.value.addControl(new maplibregl.NavigationControl(), 'bottom-left')
+    } catch (error) {
+      emit('map-initialization-error', error)
+      try {
+        map.value?.remove()
+      } catch (cleanupError) {
+        console.warn('Failed to clean up map after initialization error:', cleanupError)
+      }
+      map.value = null
+      return
+    }
 
     // Wait for map to load before allowing markers and edges
     map.value.on('load', () => {
       isMapLoaded.value = true
+      // Once initialization succeeds, remove our listener so MapLibre retains
+      // its default reporting for later tile and style errors.
+      map.value.off('error', handleInitializationError)
       // Apply any pending prop updates that may have occurred before map was loaded
       applyMapStateFromProps()
+      emit('map-ready')
     })
 
     // Clear selection when clicking the map background

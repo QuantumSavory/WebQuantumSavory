@@ -101,7 +101,8 @@ test.describe('Export Script panel', () => {
 
     await expect.poll(() => requests.length).toBe(0)
     await page.locator('#bottom-panel-export-script-tab').click()
-    await expect(page.getByRole('status')).toContainText('Generating Julia script')
+    const panel = page.locator('#bottom-panel-export-script-content')
+    await expect(panel.getByRole('status')).toContainText('Generating Julia script')
     await expect.poll(() => requests.length).toBe(1)
 
     expect(requests[0].name).toBe('Export Demo')
@@ -113,7 +114,6 @@ test.describe('Export Script panel', () => {
       value: 0.9,
     }])
 
-    const panel = page.locator('#bottom-panel-export-script-content')
     await expect(panel.getByRole('heading', { name: 'About this generated script' })).toBeVisible()
     await expect(panel).toContainText('The GUI simulator does not use this script')
     await expect(panel).toContainText('some GUI features might not be completely translated')

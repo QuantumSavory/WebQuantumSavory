@@ -63,6 +63,13 @@
   font-size: 0.8rem;
 }
 
+.topbar-loading-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--app-color-primary);
+}
+
 .sidebar-toggle-btn {
   position: fixed;
   left: calc(100vw - var(--app-shell-sidebar-width) - var(--app-shell-sidebar-toggle-offset));

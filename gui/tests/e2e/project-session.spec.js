@@ -209,6 +209,9 @@ test('a late startup restore cannot replace a user-created session', async ({ pa
   await page.goto('/')
   await platformRequested
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
+  const loadingIndicator = page.locator('.topbar-loading-indicator')
+  await expect(loadingIndicator).toBeVisible()
+  await expect(loadingIndicator).toContainText('Loading application metadata')
   await page.evaluate(() => {
     const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
     setup.createNewProject('New Session')
@@ -219,6 +222,7 @@ test('a late startup restore cannot replace a user-created session', async ({ pa
   releasePlatform()
   await platformResponse
   await expect(page.locator('.project-name-label')).toHaveText('New Session')
+  await expect(loadingIndicator).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => {
     const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
     return setup.projectData.description

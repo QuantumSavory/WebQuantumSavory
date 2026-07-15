@@ -3,7 +3,6 @@ import './css/style.css'
 import './css/quantumSavory.css'
 import './assets/app.css'
 import App from './App.vue'
-import { api } from './utils/ApiConnector'
 import PrimeVue from 'primevue/config';
 import { definePreset } from '@primeuix/themes';
 import Aura from '@primeuix/themes/aura';
@@ -30,8 +29,6 @@ const MyPreset = definePreset(Aura, {
     }
 });
 
-
-api.init()
 
 const app = createApp(App);
 app.directive('tooltip', MarkdownTooltip);

@@ -2,7 +2,6 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import Slot from '../../models/Slot'
-import Tooltip from 'primevue/tooltip';
 import SlotIcon from './SlotIcon.vue';
 import { useUiServices } from '../../composables/uiServices'
 
