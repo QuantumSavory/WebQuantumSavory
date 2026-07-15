@@ -140,6 +140,50 @@ _to_vector(x) = isa(x, AbstractVector) ? collect(x) : x
 """Return whether a parsed JSON value behaves like an object."""
 _is_object_like(x) = x isa AbstractDict || startswith(string(typeof(x)), "JSON3.Object")
 
+"""Return whether an edge represents a virtual (logic-only) connection."""
+_is_virtual_edge(edge) = get(edge, "isLogic", false) === true
+
+"""Return a validated propagation delay for a physical edge.
+
+Legacy payloads predate physical propagation metadata and therefore retain a
+zero-delay default. Frontend payloads include only the resolved value; route
+geometry and manual overrides are storage concerns and never reach the backend.
+"""
+function _physical_edge_delay(edge, context::String="Physical edge")
+  edge_data = get(edge, "data", Dict{String,Any}())
+  _is_object_like(edge_data) || throw(validation_error("$context data must be an object"))
+  value = get(edge_data, "propagationDelaySeconds", 0.0)
+  if !(value isa Real) || value isa Bool
+    throw(validation_error("$context propagation delay must be a number"))
+  end
+  delay = try
+    Float64(value)
+  catch
+    throw(validation_error("$context propagation delay must be representable as Float64"))
+  end
+  if !isfinite(delay) || delay < 0
+    throw(validation_error("$context propagation delay must be finite and nonnegative"))
+  end
+  return delay
+end
+
+"""Build the symmetric per-link delay map used by `RegisterNet`."""
+function _physical_delay_map(data)
+  nodes = data["graph_info"]["nodes"]
+  edges = data["graph_info"]["edges"]
+  id_to_idx = Dict(String(node["id"]) => index for (index, node) in enumerate(nodes))
+  delays = Dict{Tuple{Int,Int},Float64}()
+  for edge in edges
+    _is_virtual_edge(edge) && continue
+    endpoints = minmax(
+      id_to_idx[string(edge["source"])],
+      id_to_idx[string(edge["target"])],
+    )
+    delays[endpoints] = _physical_edge_delay(edge, "Physical edge $(edge["id"])")
+  end
+  return delays
+end
+
 function _required_nonempty_string(object, field::String, context::String)
   haskey(object, field) || throw(validation_error("$context missing required field: '$field'"))
   raw_value = object[field]
@@ -607,6 +651,7 @@ function validate_payload(payload)
 
     # Validate each edge structure
     edge_connections = []
+    physical_endpoint_pairs = Set{Tuple{String,String}}()
     for (i, edge) in enumerate(edges)
       # Check required edge fields
       if !haskey(edge, "id")
@@ -621,6 +666,10 @@ function validate_payload(payload)
         throw(validation_error("Edge $i missing required field: 'target'"))
       end
 
+      if haskey(edge, "isLogic") && !(edge["isLogic"] isa Bool)
+        throw(validation_error("Edge $i field 'isLogic' must be a boolean"))
+      end
+
       # Validate source and target reference existing nodes
       source = string(edge["source"])
       target = string(edge["target"])
@@ -631,6 +680,43 @@ function validate_payload(payload)
 
       if !(target in node_ids)
         throw(validation_error("Edge $i references non-existent target node: '$target'"))
+      end
+
+      if _is_virtual_edge(edge)
+        edge_data = get(edge, "data", Dict{String,Any}())
+        _is_object_like(edge_data) || throw(validation_error(
+          "Virtual edge $i data must be an object",
+        ))
+        protocols = get(edge_data, "protocols", Any[])
+        protocols isa AbstractVector || throw(validation_error(
+          "Virtual edge $i protocols must be an array",
+        ))
+        for (protocol_index, protocol) in enumerate(protocols)
+          _is_object_like(protocol) || throw(validation_error(
+            "Virtual edge $i protocol $protocol_index must be an object",
+          ))
+          type_name = _required_nonempty_string(
+            protocol,
+            "type",
+            "Virtual edge $i protocol $protocol_index",
+          )
+          protocol_type = _resolve_protocol_type_from_string(type_name)
+          protocol_type === nothing && throw(validation_error(
+            "Virtual edge $i protocol $protocol_index has unknown type '$type_name'",
+          ))
+          if !QuantumSavory.ProtocolZoo.permits_virtual_edge(protocol_type)
+            throw(validation_error(
+              "Protocol '$type_name' is not permitted on a virtual edge",
+            ))
+          end
+        end
+      else
+        endpoint_pair = minmax(source, target)
+        endpoint_pair in physical_endpoint_pairs && throw(validation_error(
+          "Duplicate physical edge endpoints: '$source' and '$target'",
+        ))
+        push!(physical_endpoint_pairs, endpoint_pair)
+        _physical_edge_delay(edge, "Physical edge $i")
       end
 
       push!(edge_connections, Dict("source" => source, "target" => target))
@@ -679,6 +765,7 @@ function build_graph(data)
 
   g = SimpleGraph(length(nodes))
   for edge in edges
+    _is_virtual_edge(edge) && continue
     add_edge!(g, id_to_idx[edge["source"]], id_to_idx[edge["target"]])
   end
 
@@ -1275,7 +1362,15 @@ function parse_network_graph(data)
   registers, slot_mapping, slot_reverse_mapping = create_registers_from_nodes(data)
 
   # Create the RegisterNet from the graph and registers
-  net = RegisterNet(g, registers; names=_register_names(data["graph_info"]["nodes"]))
+  delays = _physical_delay_map(data)
+  link_delay(src, dst) = delays[minmax(src, dst)]
+  net = RegisterNet(
+    g,
+    registers;
+    names=_register_names(data["graph_info"]["nodes"]),
+    classical_delay=link_delay,
+    quantum_delay=link_delay,
+  )
 
   simulation_name = data["data"]["name"]
   action_is_valid(simulation_name)
