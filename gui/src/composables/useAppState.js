@@ -23,6 +23,7 @@ export function useAppState({
   const projectNameDialogMode = ref('new')
   const projectNameDialogInitialValue = ref('')
   const showAboutModal = ref(false)
+  const showSystemInformation = ref(false)
 
   // Computed
   const selectedNodeIndex = computed(() => {
@@ -47,6 +48,7 @@ export function useAppState({
     projectNameDialogMode,
     projectNameDialogInitialValue,
     showAboutModal,
+    showSystemInformation,
     
     // Computed
     selectedNodeIndex

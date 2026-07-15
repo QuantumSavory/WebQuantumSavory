@@ -1,3 +1,5 @@
+import { normalizeSystemInformation } from './systemInformation.js'
+
 export const PANIC_ISSUE_URL = 'https://github.com/QuantumSavory/WebQuantumSavory/issues/new'
 
 const UNKNOWN_VALUE = 'Unknown'
@@ -51,29 +53,34 @@ export function normalizePanic(panic = {}) {
   }
 }
 
-export function normalizePlatformVersions(platformInfo = {}) {
-  const source = platformInfo && typeof platformInfo === 'object' ? platformInfo : {}
-  const versions = source.versions && typeof source.versions === 'object'
-    ? source.versions
-    : source
-
-  return {
-    webQuantumSavory: firstString(
-      versions.app,
-      versions.webQuantumSavory,
-      versions.webquantumsavory,
-    ) || UNKNOWN_VALUE,
-    quantumSavory: firstString(
-      versions.quantumSavory,
-      versions.quantumsavory,
-    ) || UNKNOWN_VALUE,
-    julia: firstString(versions.julia) || UNKNOWN_VALUE,
-  }
+function dependencyReportSection(title, dependencies) {
+  return [
+    `### ${title}`,
+    '',
+    ...(dependencies.length
+      ? dependencies.map(({ name, version }) => `- ${markdownText(name)}: ${markdownText(version)}`)
+      : ['- Not available']),
+    '',
+  ]
 }
 
 export function buildPanicReport(panic, platformInfo = {}) {
   const details = normalizePanic(panic)
-  const versions = normalizePlatformVersions(platformInfo)
+  const system = normalizeSystemInformation(platformInfo)
+  const quantumSavoryDetails = [
+    system.quantumSavory.trackedSource
+      ? `- QuantumSavory tracked source: ${markdownText(system.quantumSavory.trackedSource)}`
+      : null,
+    system.quantumSavory.trackedRevision
+      ? `- QuantumSavory tracked revision: ${markdownText(system.quantumSavory.trackedRevision)}`
+      : null,
+    system.quantumSavory.treeHash
+      ? `- QuantumSavory Pkg tree hash: ${markdownText(system.quantumSavory.treeHash)}`
+      : null,
+    system.quantumSavory.commit
+      ? `- QuantumSavory commit: ${markdownText(system.quantumSavory.commit)}`
+      : null,
+  ].filter(Boolean)
 
   return [
     '# WebQuantumSavory simulator panic report',
@@ -96,10 +103,14 @@ export function buildPanicReport(panic, platformInfo = {}) {
     '',
     '## Environment',
     '',
-    `- WebQuantumSavory: ${markdownText(versions.webQuantumSavory)}`,
-    `- QuantumSavory: ${markdownText(versions.quantumSavory)}`,
-    `- Julia: ${markdownText(versions.julia)}`,
+    `- WebQuantumSavory: ${markdownText(system.webQuantumSavory)}`,
+    `- QuantumSavory: ${markdownText(system.quantumSavory.version)}`,
+    `- Julia: ${markdownText(system.julia)}`,
+    `- Genie: ${markdownText(system.genie)}`,
+    ...quantumSavoryDetails,
     '',
+    ...dependencyReportSection('Frontend runtime dependencies', system.frontend.runtime),
+    ...dependencyReportSection('Frontend development dependencies', system.frontend.development),
     '## Reproduction',
     '',
     '1. Attach the downloaded panic project JSON to this issue.',

@@ -2,8 +2,6 @@ using Genie.Router
 using SwagUI
 using SwaggerMarkdown
 using Genie.Renderer.Json
-using Pkg
-using TOML
 
 """Safe route wrappers: use `sroute(args...) do ... end` or `@sroute args... do ... end`"""
 function _derive_route_name(args...; kwargs...)
@@ -2065,6 +2063,11 @@ end
                       type: string
                       description: Julia version string
                       example: "1.10.4"
+                    genie:
+                      type: string
+                      nullable: true
+                      description: Installed Genie version or null if not found
+                      example: "5.35.15"
                     quantumsavory:
                       type: string
                       nullable: true
@@ -2075,6 +2078,35 @@ end
                       nullable: true
                       description: Application version from Project.toml
                       example: "1.0.0"
+                quantumsavory:
+                  type: object
+                  description: Installed QuantumSavory package and tracked-source information
+                  properties:
+                    version:
+                      type: string
+                      nullable: true
+                      description: Installed QuantumSavory version
+                      example: "0.7.0"
+                    tracked_revision:
+                      type: string
+                      nullable: true
+                      description: Revision tracked by Pkg, such as a branch, tag, or commit SHA
+                      example: "master"
+                    tracked_source:
+                      type: string
+                      nullable: true
+                      description: Repository source tracked by Pkg
+                      example: "https://github.com/QuantumSavory/QuantumSavory.jl.git"
+                    tree_hash:
+                      type: string
+                      nullable: true
+                      description: Pkg source-tree hash; this is not a commit SHA
+                      example: "2592869d777da86ae854f738e23e64f99124876f"
+                    commit:
+                      type: string
+                      nullable: true
+                      description: Full commit SHA only when Pkg's tracked revision is a full SHA
+                      example: null
                 capabilities:
                   type: object
                   properties:
@@ -2083,42 +2115,7 @@ end
                       description: Whether raw Julia code and symbolic evaluation are enabled
 """
 route("/platform_info") do
-  julia_version = string(VERSION)
-
-  quantumsavory_version = try
-    deps = Pkg.dependencies()
-    found = nothing
-    for (_, pkg) in deps
-      if pkg.name == "QuantumSavory"
-        found = string(pkg.version)
-        break
-      end
-    end
-
-    found
-  catch
-    nothing
-  end
-
-  app_version = try
-    proj = TOML.parsefile(joinpath(@__DIR__, "Project.toml"))
-    get(proj, "version", nothing)
-  catch
-    nothing
-  end
-
-  json(
-    Dict(
-      :versions => Dict(
-        :julia => julia_version,
-        :quantumsavory => quantumsavory_version,
-        :app => app_version,
-      ),
-      :capabilities => Dict(
-        :unsafe_code_evaluation => unsafe_code_evaluation_enabled(),
-      ),
-    )
-  )
+  json(WebQuantumSavory.get_platform_info())
 end
 
 ########################################################
@@ -2378,7 +2375,7 @@ end
 
 info = Dict{String,Any}()
 info["title"] = "WebQuantumSavory API"
-info["version"] = "1.7.1"
+info["version"] = something(WebQuantumSavory._application_version(), "unknown")
 openApi = OpenAPI("3.0.0", info)
 swagger_document = build(openApi)
 

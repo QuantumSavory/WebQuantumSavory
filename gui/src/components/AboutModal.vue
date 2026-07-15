@@ -51,6 +51,27 @@
           </p>
         </section>
 
+        <section class="about-section" aria-labelledby="local-run-title">
+          <h4 id="local-run-title">Run WebQuantumSavory locally</h4>
+          <p>
+            After cloning the repository, run the remaining commands from its
+            <code>WebQuantumSavory</code> directory.
+          </p>
+          <ol class="local-run-steps">
+            <li>
+              Install Juliaup through the
+              <a href="https://julialang.org/install/" target="_blank" rel="noopener noreferrer">
+                Julia installation page</a>.
+            </li>
+            <li><code>git clone https://github.com/QuantumSavory/WebQuantumSavory.git</code></li>
+            <li><code>julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'</code></li>
+            <li><code>GENIE_ENV=dev WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true ./bin/server</code></li>
+          </ol>
+          <p class="unsafe-evaluation-note">
+            The final command enables unsafe evaluation. Use it only with projects and code you trust.
+          </p>
+        </section>
+
         <section class="about-section">
           <h4>Created and supported by</h4>
           <p>
@@ -214,6 +235,36 @@ const emit = defineEmits(['close'])
 
 .about-section p + p {
   margin-top: 10px;
+}
+
+.local-run-steps {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding-left: 24px;
+  color: #555;
+}
+
+.local-run-steps code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--app-color-border);
+  border-radius: var(--app-radius-control);
+  background: var(--app-color-surface-subtle);
+  color: var(--app-color-text);
+  font: 0.82rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: nowrap;
+}
+
+.about-section p code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.about-section .unsafe-evaluation-note {
+  margin-top: 12px;
+  font-size: 0.9rem;
 }
 
 .about-section p a {

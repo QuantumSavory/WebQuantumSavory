@@ -59,6 +59,47 @@ describe('ApiConnector project namespaces', () => {
     })
   })
 
+  it('preserves expanded platform metadata while adding legacy client aliases', async () => {
+    const response = {
+      versions: {
+        julia: '1.12.1',
+        genie: '5.33.8',
+        quantumsavory: '0.7.0',
+        app: '1.8.0',
+      },
+      quantumsavory: {
+        version: '0.7.0',
+        tracked_revision: 'master',
+        tracked_source: 'https://github.com/QuantumSavory/QuantumSavory.jl.git',
+        tree_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        commit: null,
+      },
+      capabilities: {
+        unsafe_code_evaluation: true,
+        another_capability: 'retained',
+      },
+    }
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => response,
+    }))
+    const connector = new ApiConnector('http://api.test')
+
+    await expect(connector.fetchPlatformInfo()).resolves.toEqual(response)
+    expect(connector.getPlatformInfo()).toEqual({
+      ...response,
+      versions: {
+        ...response.versions,
+        quantumSavory: '0.7.0',
+      },
+      capabilities: {
+        ...response.capabilities,
+        unsafeCodeEvaluation: true,
+      },
+    })
+    expect(connector.isUnsafeCodeEvaluationEnabled()).toBe(true)
+  })
+
   it('keeps tag explorer simulation names and external IDs at the HTTP boundary', async () => {
     const connector = new ApiConnector('http://api.test')
     const tag = {

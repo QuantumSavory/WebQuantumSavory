@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 
 const MOCK_PROTOCOL = 'WebQuantumSavory.MockBrokenProtocol'
+const packageLockUrl = new URL('../../package-lock.json', import.meta.url)
 
 async function importBrokenProject(page) {
   const demoUrl = new URL('../../src/demos/1.Entangler.Example.json', import.meta.url)
@@ -160,6 +161,34 @@ test('reports a diagnostic protocol panic without uploading the project', async 
   expect(copiedReport).toContain(`- WebQuantumSavory: ${platformInfo.versions.app}`)
   expect(copiedReport).toContain(`- QuantumSavory: ${platformInfo.versions.quantumsavory}`)
   expect(copiedReport).toContain(`- Julia: ${platformInfo.versions.julia}`)
+  expect(copiedReport).toContain(`- Genie: ${platformInfo.versions.genie}`)
+  expect(copiedReport).toContain(
+    `- QuantumSavory tracked source: ${platformInfo.quantumsavory.tracked_source}`,
+  )
+  expect(copiedReport).toContain(
+    `- QuantumSavory tracked revision: ${platformInfo.quantumsavory.tracked_revision}`,
+  )
+  expect(copiedReport).toContain(
+    `- QuantumSavory Pkg tree hash: ${platformInfo.quantumsavory.tree_hash}`,
+  )
+  if (platformInfo.quantumsavory.commit) {
+    expect(copiedReport).toContain(`- QuantumSavory commit: ${platformInfo.quantumsavory.commit}`)
+  } else {
+    expect(copiedReport).not.toContain('- QuantumSavory commit:')
+  }
+
+  const packageLock = JSON.parse(await readFile(packageLockUrl, 'utf8'))
+  const dependencySections = [
+    ['Frontend runtime dependencies', 'dependencies'],
+    ['Frontend development dependencies', 'devDependencies'],
+  ]
+  for (const [section, lockGroup] of dependencySections) {
+    expect(copiedReport).toContain(`### ${section}`)
+    for (const name of Object.keys(packageLock.packages[''][lockGroup])) {
+      const version = packageLock.packages[`node_modules/${name}`].version
+      expect(copiedReport).toContain(`- ${name}: ${version}`)
+    }
+  }
   expect(copiedReport).toContain('## Reproduction')
   expect(requestsAfterReport.some(request => (
     request.method !== 'GET' && request.postData?.includes(MOCK_PROTOCOL)

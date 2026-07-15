@@ -60,7 +60,27 @@
 }
 
 .version-badge {
+  appearance: none;
+  padding: 1px 5px;
+  border: 1px solid var(--app-color-border);
+  border-radius: var(--app-radius-control);
+  background: var(--app-color-surface-subtle);
+  color: var(--app-color-text-muted);
+  font-family: inherit;
   font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.version-badge:hover {
+  border-color: var(--app-color-primary);
+  color: var(--app-color-primary);
+}
+
+.version-badge:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--app-color-focus);
+  outline-offset: var(--app-focus-ring-offset);
 }
 
 .topbar-loading-indicator {

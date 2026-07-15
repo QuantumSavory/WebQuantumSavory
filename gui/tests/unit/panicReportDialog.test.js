@@ -58,7 +58,16 @@ function mountDialog(browserActions) {
       panic,
       projectName: project.name,
       platformInfo: {
-        versions: { app: '1.6.0', quantumSavory: '0.7.2', julia: '1.12.1' },
+        versions: {
+          app: '1.6.0',
+          quantumSavory: '0.7.2',
+          julia: '1.12.1',
+          genie: '5.33.8',
+        },
+        quantumsavory: {
+          tracked_revision: 'master',
+          tree_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        },
       },
       serializeProject: vi.fn(() => project),
       browserActions,
@@ -107,6 +116,11 @@ describe('PanicReportDialog', () => {
     expect(report).toContain('- WebQuantumSavory: 1.6.0')
     expect(report).toContain('- QuantumSavory: 0.7.2')
     expect(report).toContain('- Julia: 1.12.1')
+    expect(report).toContain('- Genie: 5.33.8')
+    expect(report).toContain('- QuantumSavory tracked revision: master')
+    expect(report).toContain('- QuantumSavory Pkg tree hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(report).toContain('### Frontend runtime dependencies')
+    expect(report).toContain('### Frontend development dependencies')
 
     expect(downloadText).toHaveBeenCalledOnce()
     const [content, filename, mimeType] = downloadText.mock.calls[0]
