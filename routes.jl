@@ -180,6 +180,9 @@ end
                             type:
                               oneOf:
                                 - type: string
+                                - type: array
+                                  items:
+                                    type: string
                                 - type: object
                                   properties:
                                     name:
@@ -191,7 +194,14 @@ end
                                     ub:
                                       type: string
                                       description: The upper bound type
-                              description: "The parameter type (can be a string or complex type object)"
+                              description: The existing parameter type wire value; unions are arrays of member names.
+                            kind:
+                              type: string
+                              enum: [named_tag_type]
+                              description: Semantic editor kind, present for fields declared as Type{<:AbstractTag}.
+                            nullable:
+                              type: boolean
+                              description: Whether a named-tag-type field also permits Nothing.
                             doc:
                               type: string
                               description: Documentation describing the parameter
@@ -206,7 +216,7 @@ end
 /tag_types:
   get:
     summary: List runtime-discovered tag definitions and signatures
-    description: Returns named Tag converters, general Symbol/DataType signatures, allowlisted DataType heads, field documentation, and the unsafe-evaluation capability.
+    description: Returns concrete AbstractTag named definitions, general Symbol/DataType signatures, allowlisted DataType heads (including safe converters outside AbstractTag), field documentation, and the unsafe-evaluation capability.
     responses:
       '200':
         description: Tag metadata catalog
@@ -218,6 +228,7 @@ end
               properties:
                 named_tags:
                   type: array
+                  description: Concrete one-argument Tag converter types that subtype QuantumSavory.AbstractTag and are valid for named-tag protocol fields.
                   items:
                     type: object
                     required: [type_id, display_name, fields]

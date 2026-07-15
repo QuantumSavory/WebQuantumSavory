@@ -18,7 +18,7 @@
             class="param-name"
           >
             {{ param.name }}
-            <span v-if="paramUnknownTypes(param.type).length > 0" class="unknown-type-indicator">
+            <span v-if="paramUnknownTypes(param).length > 0" class="unknown-type-indicator">
               <TriangleAlert :size="13" aria-hidden="true" />
             </span>
             <template v-if="parameterTypeChoices(param)">
@@ -91,6 +91,15 @@
                 </option>
               </select>
             </div>
+            <NamedTagTypeAutocomplete
+              v-else-if="isNamedTagTypeParameter(param)"
+              :model-value="param.value"
+              :nullable="namedTagTypeIsNullable(param)"
+              :disabled="parameterDisabled(param)"
+              :parameter-name="param.name"
+              :aria-describedby="controlledDescriptionId(param)"
+              @update:model-value="updateNamedTagTypeValue(param, $event)"
+            />
             <TypedValueInput
               v-else
               :parameter="param"
@@ -151,6 +160,7 @@ import {
   parseJuliaType,
   unknownParameterTypes
 } from '../../utils/parameterTypes'
+import NamedTagTypeAutocomplete from './NamedTagTypeAutocomplete.vue'
 import TypedValueInput from './TypedValueInput.vue'
 
 const props = defineProps({
@@ -200,7 +210,7 @@ const filteredParameters = computed(() => {
 })
 
 function isGrayedParameter(param) {
-  return param.type === 'Any'
+  return !isNamedTagTypeParameter(param) && param.type === 'Any'
 }
 
 function hasControlledParameter(param) {
@@ -230,12 +240,8 @@ function parameterDisabled(param) {
 }
 
 function protocolParameterDefinitionText(param) {
-  let result = api.getProtocolParameterDefinition(
-    props.category,
-    props.protocol.type,
-    param.name
-  )?.doc || 'NO DOC'
-  const unknownTypes = paramUnknownTypes(param.type)
+  let result = runtimeParameterDefinition(param)?.doc || 'NO DOC'
+  const unknownTypes = paramUnknownTypes(param)
   if (unknownTypes.length > 0) {
     result += '\n\n**Unsupported:** '
       + unknownTypes.map(type => `\`${type}\``).join(', ')
@@ -243,8 +249,32 @@ function protocolParameterDefinitionText(param) {
   return result
 }
 
-function paramUnknownTypes(type) {
-  return unknownParameterTypes(type)
+function runtimeParameterDefinition(param) {
+  return api.getProtocolParameterDefinition(
+    props.category,
+    props.protocol.type,
+    param.name
+  )
+}
+
+function isNamedTagTypeParameter(param) {
+  return runtimeParameterDefinition(param)?.kind === 'named_tag_type'
+}
+
+function namedTagTypeIsNullable(param) {
+  return isNamedTagTypeParameter(param)
+    && runtimeParameterDefinition(param)?.nullable === true
+}
+
+function paramUnknownTypes(param) {
+  return isNamedTagTypeParameter(param) ? [] : unknownParameterTypes(param.type)
+}
+
+function updateNamedTagTypeValue(param, value) {
+  if (parameterDisabled(param) || isVariableAssigned(param)) return
+  param.value = value
+  delete param.error
+  delete param.latex
 }
 
 function onSelectedTypeChanged(param) {
@@ -261,11 +291,13 @@ function onSelectedTypeChanged(param) {
 }
 
 function parameterTypeChoices(param) {
+  if (isNamedTagTypeParameter(param)) return null
   const parsedType = parseJuliaType(param.type)
   return Array.isArray(parsedType) ? parsedType : null
 }
 
 function effectiveParameterType(param) {
+  if (isNamedTagTypeParameter(param)) return 'named_tag_type'
   return parameterTypeChoices(param) ? (param.selectedType || '') : param.type
 }
 
@@ -279,12 +311,11 @@ function assignedVariable(param) {
 }
 
 function declaredParameterType(param) {
-  const protocolDefinition = api.getProtocolDefinition(props.category, props.protocol.type)
-  return protocolDefinition?.parameters?.find(definition => definition.field === param.name)?.type
-    ?? param.type
+  return runtimeParameterDefinition(param)?.type ?? param.type
 }
 
 function variableIsCompatible(param, variable) {
+  if (isNamedTagTypeParameter(param)) return false
   return !!variable && parameterTypeSupportsVariableType(
     declaredParameterType(param),
     variable.type
@@ -292,6 +323,7 @@ function variableIsCompatible(param, variable) {
 }
 
 function compatibleVariables(param) {
+  if (isNamedTagTypeParameter(param)) return []
   return props.variables.filter(variable => variableIsCompatible(param, variable))
 }
 
@@ -328,14 +360,19 @@ function toggleVariableAssignment(param) {
 }
 
 function variableButtonDisabled(param) {
-  return parameterDisabled(param)
-    || (!isVariableAssigned(param) && compatibleVariables(param).length === 0)
+  if (parameterDisabled(param)) return true
+  if (isVariableAssigned(param)) return false
+  if (isNamedTagTypeParameter(param)) return true
+  return compatibleVariables(param).length === 0
 }
 
 function variableButtonTitle(param) {
   if (isControlledParameter(param)) return controlledReason(param)
   if (isEditingDisabled.value) return 'Reset the simulation to edit protocol parameters'
   if (isVariableAssigned(param)) return 'Use a direct value'
+  if (isNamedTagTypeParameter(param)) {
+    return 'Named tag type parameters cannot use Variables yet'
+  }
   if (isVariablePickerOpen(param)) return 'Cancel choosing a variable'
   if (compatibleVariables(param).length === 0) {
     return props.variables.length === 0

@@ -13,6 +13,30 @@ const KNOWN_FUNCTIONS = [
 ]
 
 const SELF_FUNCTIONS = KNOWN_FUNCTIONS.filter(name => name.endsWith('(self)'))
+const TAG_ALPHA = 'Example.Alpha.ReadyTag'
+const TAG_BETA = 'Example.Beta.ReadyTag'
+const TAG_UNIQUE = 'QuantumSavory.EntanglementCounterpart'
+const TAG_CATALOG = {
+  named_tags: [{
+    type_id: TAG_ALPHA,
+    display_name: 'ReadyTag',
+    doc: 'Alpha ready tag.',
+    fields: [],
+  }, {
+    type_id: TAG_BETA,
+    display_name: 'ReadyTag',
+    doc: 'Beta ready tag.',
+    fields: [],
+  }, {
+    type_id: TAG_UNIQUE,
+    display_name: 'EntanglementCounterpart',
+    doc: 'Counterpart tag.',
+    fields: [],
+  }],
+  general_signatures: [],
+  allowed_data_types: [],
+  unsafe_evaluation: false,
+}
 
 const SWAPPER_TYPE = {
   type: 'QuantumSavory.ProtocolZoo.SwapperProt',
@@ -51,10 +75,32 @@ const ENTANGLER_TYPE = {
     field: 'retry_lock_time',
     type: ['Nothing', 'Float64'],
     doc: 'Optional delay before retrying.',
+  }, {
+    field: 'tag',
+    type: 'Union{Nothing, Type{<:QuantumSavory.AbstractTag}}',
+    kind: 'named_tag_type',
+    nullable: true,
+    doc: 'Named tag head for generated entanglement.',
+  }],
+}
+
+const CONSUMER_TYPE = {
+  type: 'QuantumSavory.ProtocolZoo.EntanglementConsumer',
+  doc: 'Consume entanglement between two nodes.',
+  group: 'edge',
+  virtual: false,
+  parameters: [{
+    field: 'tag',
+    type: 'Type{<:QuantumSavory.AbstractTag}',
+    kind: 'named_tag_type',
+    nullable: false,
+    doc: 'Named tag head to consume.',
   }],
 }
 
 async function mockConfiguration(page) {
+  const tagCatalogState = { requests: 0, fail: false }
+  page.tagCatalogState = tagCatalogState
   await page.route('**/known_functions', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -68,8 +114,20 @@ async function mockConfiguration(page) {
   await page.route('**/protocol_types', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    json: { protocol_types: [SWAPPER_TYPE, ENTANGLER_TYPE] },
+    json: { protocol_types: [SWAPPER_TYPE, ENTANGLER_TYPE, CONSUMER_TYPE] },
   }))
+  await page.route('**/tag_types', route => {
+    tagCatalogState.requests += 1
+    return route.fulfill(tagCatalogState.fail ? {
+      status: 503,
+      contentType: 'application/json',
+      json: { error: 'Named tag catalog unavailable' },
+    } : {
+      status: 200,
+      contentType: 'application/json',
+      json: TAG_CATALOG,
+    })
+  })
   await page.route('**/platform_info', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -108,7 +166,7 @@ async function createProjectWithEdge(page) {
   await firstNode.locator('.connector.output').dragTo(page.locator('.node-marker').nth(1))
   await expect(page.locator('.edge-list-item')).toHaveCount(1)
 
-  await page.evaluate(() => {
+  await page.evaluate(({ savedTag }) => {
     const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
     const projectData = setupState?.projectData
     if (!projectData?.net?.nodes?.[0] || !projectData.net.edges?.[0]) {
@@ -142,9 +200,23 @@ async function createProjectWithEdge(page) {
       }, {
         name: 'retry_lock_time',
         type: ['Nothing', 'Float64'],
+      }, {
+        name: 'tag',
+        type: ['Nothing', 'DataType'],
+        selectedType: 'DataType',
+        value: savedTag,
       }],
     })
-  })
+    projectData.net.edges[0].data.protocols.push({
+      id: 'protocol_consumer_parameter_options',
+      type: 'QuantumSavory.ProtocolZoo.EntanglementConsumer',
+      parameters: [{
+        name: 'tag',
+        type: 'Any',
+        value: null,
+      }],
+    })
+  }, { savedTag: TAG_BETA })
 }
 
 function parameterRow(editor, name) {
@@ -170,15 +242,18 @@ async function serializedNodeParameter(page, name) {
   }, name)
 }
 
-async function serializedEdgeParameter(page, name) {
-  return page.evaluate(parameterName => {
+async function serializedEdgeParameter(page, name, protocolType = ENTANGLER_TYPE.type) {
+  return page.evaluate(({ parameterName, resolvedProtocolType }) => {
     const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
     const minimized = setupState?.minimizedProjectData
     const payload = minimized?.value ?? minimized
-    return payload?.net?.edges?.[0]?.data?.protocols?.[0]?.parameters?.find(
+    const protocol = payload?.net?.edges?.[0]?.data?.protocols?.find(
+      candidate => candidate.type === resolvedProtocolType,
+    )
+    return protocol?.parameters?.find(
       parameter => parameter.name === parameterName,
     )
-  }, name)
+  }, { parameterName: name, resolvedProtocolType: protocolType })
 }
 
 test.describe('Protocol parameter options', () => {
@@ -279,5 +354,90 @@ test.describe('Protocol parameter options', () => {
 
     await chooseLTypeSelector.selectOption('Lambda')
     await expect(chooseLRow.locator('.code-editor-with-symbols')).toBeVisible()
+  })
+
+  test('edits old tag snapshots through live nullable metadata and caches exact catalog IDs', async ({ page }) => {
+    await page.locator('.edge-list-item').first().click()
+    const panel = page.locator('#edgePanel')
+    const entangler = await openProtocolEditor(panel, 'EntanglerProt')
+    const tagRow = parameterRow(entangler, 'tag')
+    const tagInput = tagRow.getByRole('combobox', { name: 'tag named tag type' })
+
+    await expect(tagRow.locator('.complexTypeSelector')).toHaveCount(0)
+    await expect(tagRow.locator('.unknown-type-indicator')).toHaveCount(0)
+    await expect(tagInput).toHaveValue(`ReadyTag — ${TAG_BETA}`)
+    await expect(tagRow.getByRole('button', { name: 'Set tag from a variable' })).toBeDisabled()
+
+    await tagInput.fill('Nothing')
+    await page.locator('.named-tag-type-overlay')
+      .getByRole('option', { name: 'Nothing', exact: true }).click()
+    await expect.poll(() => serializedEdgeParameter(page, 'tag')).toMatchObject({
+      name: 'tag',
+      type: 'DataType',
+      value: 'nothing',
+    })
+
+    await tagInput.fill('Example.Alpha')
+    await page.locator('.named-tag-type-overlay')
+      .getByRole('option', { name: /ReadyTag.*Example\.Alpha/ }).click()
+    await expect(tagInput).toHaveValue(`ReadyTag — ${TAG_ALPHA}`)
+    await expect.poll(() => serializedEdgeParameter(page, 'tag')).toMatchObject({
+      name: 'tag',
+      type: 'DataType',
+      value: TAG_ALPHA,
+    })
+
+    await tagInput.fill('ReadyTag')
+    await tagInput.press('Tab')
+    await expect(tagInput).toHaveValue('Default')
+    await expect.poll(() => serializedEdgeParameter(page, 'tag')).toBeUndefined()
+
+    const consumer = await openProtocolEditor(panel, 'EntanglementConsumer')
+    const consumerRow = parameterRow(consumer, 'tag')
+    const consumerInput = consumerRow.getByRole('combobox', { name: 'tag named tag type' })
+    await expect(consumerInput).toHaveValue('Default')
+    await consumerInput.click()
+    await expect(page.locator('.named-tag-type-overlay')
+      .getByRole('option', { name: 'Nothing', exact: true })).toHaveCount(0)
+    await consumerInput.fill('counterpart')
+    await page.locator('.named-tag-type-overlay')
+      .getByRole('option', { name: 'EntanglementCounterpart', exact: true }).click()
+    await expect.poll(() => serializedEdgeParameter(
+      page,
+      'tag',
+      CONSUMER_TYPE.type,
+    )).toEqual({
+      name: 'tag',
+      type: 'Any',
+      value: TAG_UNIQUE,
+    })
+
+    expect(page.tagCatalogState.requests).toBe(1)
+
+    await page.evaluate(() => {
+      const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      const state = setupState?.simulationState?.value ?? setupState?.simulationState
+      state.phase = 'parsed'
+    })
+    await expect(consumerInput).toBeDisabled()
+    await expect(consumerRow.getByRole('button', { name: 'Set tag from a variable' })).toBeDisabled()
+  })
+
+  test('keeps catalog failures local and force-retries the named-tag field', async ({ page }) => {
+    page.tagCatalogState.fail = true
+    await page.locator('.edge-list-item').first().click()
+    const entangler = await openProtocolEditor(page.locator('#edgePanel'), 'EntanglerProt')
+    const tagRow = parameterRow(entangler, 'tag')
+
+    await expect(tagRow.getByRole('alert')).toContainText('Named tag catalog unavailable')
+    const input = tagRow.getByRole('combobox', { name: 'tag named tag type' })
+    const errorId = await tagRow.getByRole('alert').getAttribute('id')
+    await expect(input).toHaveAttribute('aria-describedby', new RegExp(errorId))
+
+    page.tagCatalogState.fail = false
+    await tagRow.getByRole('button', { name: 'Retry loading named tag types' }).click()
+    await expect(input).toHaveValue(`ReadyTag — ${TAG_BETA}`)
+    await expect(tagRow.getByRole('alert')).toHaveCount(0)
+    expect(page.tagCatalogState.requests).toBe(2)
   })
 })

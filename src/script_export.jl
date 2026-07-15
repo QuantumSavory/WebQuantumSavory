@@ -96,14 +96,10 @@ function _script_declared_type(raw_type)
 end
 
 function _script_special_type(raw_type)
+  _is_symbolic_parameter_type(raw_type) && return "Symbolic"
   for type_name in _script_declared_types(raw_type)
     if type_name in ("Function", "Lambda")
       return type_name
-    elseif type_name == "Symbolic" ||
-           startswith(type_name, "SymbolicUtils.Symbolic{") ||
-           type_name == "QuantumSymbolics.SymQObj" ||
-           startswith(type_name, "QuantumSymbolics.SymQObj{")
-      return "Symbolic"
     end
   end
   return nothing
@@ -487,11 +483,32 @@ function _script_variable_bindings(payload, lines::Vector{String}, used::Set{Str
   return bindings
 end
 
-function _script_protocol_parameter_expression(parameter, variable_bindings, context::String; node_index=nothing)
+function _script_protocol_parameter_expression(
+  parameter,
+  variable_bindings,
+  context::String;
+  node_index=nothing,
+  declared_type=nothing,
+)
   name = _required_nonempty_string(parameter, "name", "$context parameter")
   value = get(parameter, "value", nothing)
   value === nothing && return name, nothing
   value isa AbstractString && isempty(strip(String(value))) && return name, nothing
+
+  named_tag_semantics = _named_tag_parameter_semantics(declared_type)
+  if named_tag_semantics !== nothing
+    _parse_variable_reference(value; context="$context parameter '$name'") === nothing ||
+      throw(validation_error(
+        "$context parameter '$name' cannot use a variable for a named tag type",
+        Dict{String,Any}("parameter_name" => name),
+      ))
+    tag_type = _resolve_named_abstract_tag_type(
+      value;
+      nullable=named_tag_semantics.nullable,
+      context="$context parameter '$name'",
+    )
+    return name, tag_type === nothing ? "nothing" : _qualified_tag_type_id(tag_type)
+  end
 
   reference = _parse_variable_reference(value; context="$context parameter '$name'")
   if reference !== nothing
@@ -514,7 +531,12 @@ function _script_protocol_parameter_expression(parameter, variable_bindings, con
     return name, binding.name
   end
 
-  expression = _script_value_expression(get(parameter, "type", nothing), value, "$context parameter '$name'"; node_index=node_index)
+  handling_type = _protocol_parameter_handling_type(
+    declared_type,
+    get(parameter, "type", nothing),
+    value,
+  )
+  expression = _script_value_expression(handling_type, value, "$context parameter '$name'"; node_index=node_index)
   return name, expression
 end
 
@@ -533,6 +555,7 @@ function _script_protocol!(
   raw_type = _required_nonempty_string(protocol_definition, "type", context)
   protocol_type = _resolve_type_from_string(raw_type, :protocol)
   protocol_type === nothing && throw(validation_error("$context has unknown type '$raw_type'"))
+  declared_parameter_types = _protocol_constructor_parameter_types(protocol_type)
   parameters = get(protocol_definition, "parameters", Any[])
   parameters isa AbstractVector || throw(validation_error("$context parameters must be an array"))
 
@@ -545,15 +568,29 @@ function _script_protocol!(
 
   for parameter in parameters
     _is_object_like(parameter) || throw(validation_error("$context parameter must be an object"))
+    submitted_name = _required_nonempty_string(parameter, "name", "$context parameter")
+    submitted_name in ("sim", "net", "node", "nodeA", "nodeB") && continue
+    constructor_name = get(PROTOCOL_KEYWORD_MAPPINGS, submitted_name, submitted_name)
+    value = get(parameter, "value", nothing)
+    if value === nothing || (value isa AbstractString && isempty(strip(String(value))))
+      continue
+    end
+    haskey(declared_parameter_types, constructor_name) || throw(validation_error(
+      "$context has unknown parameter '$submitted_name'",
+      Dict{String,Any}(
+        "parameter_name" => submitted_name,
+        "protocol_type" => string(protocol_type),
+      ),
+    ))
     name, expression = _script_protocol_parameter_expression(
       parameter,
       variable_bindings,
       context;
       node_index=node_index,
+      declared_type=declared_parameter_types[constructor_name],
     )
-    name in ("sim", "net", "node", "nodeA", "nodeB") && continue
     expression === nothing && continue
-    keyword = name == "log" ? "_log" : name
+    keyword = get(PROTOCOL_KEYWORD_MAPPINGS, name, name)
     Base.isidentifier(keyword) || throw(validation_error("$context parameter '$name' is not a valid Julia keyword"))
     push!(keywords, "$keyword = $expression")
   end

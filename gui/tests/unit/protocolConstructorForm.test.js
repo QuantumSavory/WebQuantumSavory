@@ -9,6 +9,9 @@ import { UI_SERVICES_KEY } from '../../src/composables/uiServices'
 import { api } from '../../src/utils/ApiConnector'
 
 const PROTOCOL_TYPE = 'QuantumSavory.ProtocolZoo.TestNodeProtocol'
+const ENTANGLER_TYPE = 'QuantumSavory.ProtocolZoo.EntanglerProt'
+const CONSUMER_TYPE = 'QuantumSavory.ProtocolZoo.EntanglementConsumer'
+const NAMED_TAG_ID = 'QuantumSavory.EntanglementCounterpart'
 const protocolDefinition = {
   type: PROTOCOL_TYPE,
   group: 'node',
@@ -34,10 +37,20 @@ const tooltip = {
   }
 }
 
-function mountForm(props) {
+const NamedTagTypeAutocompleteStub = {
+  name: 'NamedTagTypeAutocomplete',
+  props: ['modelValue', 'nullable', 'disabled', 'parameterName', 'ariaDescribedby'],
+  emits: ['update:modelValue'],
+  template: '<button type="button" class="named-tag-type-stub" :disabled="disabled" :data-value="String(modelValue)" :data-nullable="String(nullable)">Named tag type</button>'
+}
+
+function mountForm(props, { stubs = {} } = {}) {
   return mount(ProtocolConstructorForm, {
     props,
-    global: { directives: { tooltip } }
+    global: {
+      directives: { tooltip },
+      stubs
+    }
   })
 }
 
@@ -221,6 +234,178 @@ describe('ProtocolConstructorForm', () => {
 
     expect(wrapper.find('.variable-selector').exists()).toBe(false)
     expect(wrapper.get('input[type="number"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('uses live semantic metadata for old nullable tag snapshots and persists exact IDs', async () => {
+    api._config.value = {
+      protocolTypes: {
+        node: [],
+        floating: [],
+        edge: [{
+          type: ENTANGLER_TYPE,
+          group: 'edge',
+          parameters: [{
+            field: 'tag',
+            type: 'Union{Nothing, Type{<:QuantumSavory.AbstractTag}}',
+            kind: 'named_tag_type',
+            nullable: true,
+            doc: 'Tag head used for generated entanglement.'
+          }]
+        }]
+      }
+    }
+    const parameter = {
+      name: 'tag',
+      type: ['Nothing', 'DataType'],
+      selectedType: 'DataType',
+      value: null
+    }
+    const wrapper = mountForm({
+      protocol: { type: ENTANGLER_TYPE, parameters: [parameter] },
+      category: 'edge',
+      variables: [{ id: 'tag-variable', name: 'legacy tag', type: 'DataType' }]
+    }, {
+      stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
+    })
+    const control = wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' })
+
+    expect(control.props()).toMatchObject({
+      modelValue: null,
+      nullable: true,
+      disabled: false,
+      parameterName: 'tag'
+    })
+    expect(wrapper.find('.complexTypeSelector').exists()).toBe(false)
+    expect(wrapper.find('.unknown-type-indicator').exists()).toBe(false)
+    expect(wrapper.get('.param-item-row').classes()).not.toContain('grayed-parameter')
+    expect(wrapper.get('[aria-label="Set tag from a variable"]').attributes('disabled'))
+      .toBeDefined()
+    expect(wrapper.get('.variable-binding-control').attributes('data-tooltip'))
+      .toContain('cannot use Variables yet')
+
+    control.vm.$emit('update:modelValue', NAMED_TAG_ID)
+    await nextTick()
+    expect(parameter.value).toBe(NAMED_TAG_ID)
+    expect(parameter.type).toEqual(['Nothing', 'DataType'])
+
+    control.vm.$emit('update:modelValue', 'nothing')
+    await nextTick()
+    expect(parameter.value).toBe('nothing')
+
+    control.vm.$emit('update:modelValue', null)
+    await nextTick()
+    expect(parameter.value).toBeNull()
+
+    await wrapper.setProps({ editingLocked: true })
+    expect(control.props('disabled')).toBe(true)
+    control.vm.$emit('update:modelValue', NAMED_TAG_ID)
+    await nextTick()
+    expect(parameter.value).toBeNull()
+  })
+
+  it('uses non-nullable live Consumer metadata instead of a saved Any type', () => {
+    api._config.value = {
+      protocolTypes: {
+        node: [],
+        floating: [],
+        edge: [{
+          type: CONSUMER_TYPE,
+          group: 'edge',
+          parameters: [{
+            field: 'tag',
+            type: 'Type{<:QuantumSavory.AbstractTag}',
+            kind: 'named_tag_type',
+            nullable: false,
+            doc: 'Tag head to consume.'
+          }]
+        }]
+      }
+    }
+    const wrapper = mountForm({
+      protocol: {
+        type: CONSUMER_TYPE,
+        parameters: [{ name: 'tag', type: 'Any', value: NAMED_TAG_ID }]
+      },
+      category: 'edge'
+    }, {
+      stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
+    })
+
+    expect(wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' }).props('nullable')).toBe(false)
+    expect(wrapper.get('.param-item-row').classes()).not.toContain('grayed-parameter')
+    expect(wrapper.find('.unknown-type-indicator').exists()).toBe(false)
+  })
+
+  it('does not trust forged saved semantic metadata or parse Julia type strings', () => {
+    api._config.value = {
+      protocolTypes: {
+        node: [],
+        floating: [],
+        edge: [{
+          type: ENTANGLER_TYPE,
+          group: 'edge',
+          parameters: [{
+            field: 'tag',
+            type: 'DataType',
+            doc: 'A legacy unclassified field.'
+          }]
+        }]
+      }
+    }
+    const wrapper = mountForm({
+      protocol: {
+        type: ENTANGLER_TYPE,
+        parameters: [{
+          name: 'tag',
+          type: 'Type{<:QuantumSavory.AbstractTag}',
+          kind: 'named_tag_type',
+          nullable: true,
+          value: NAMED_TAG_ID
+        }]
+      },
+      category: 'edge'
+    }, {
+      stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
+    })
+
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
+    expect(wrapper.get('.unknown-type-indicator').exists()).toBe(true)
+  })
+
+  it('allows unlinking a legacy variable reference from a newly semantic tag field', async () => {
+    api._config.value = {
+      protocolTypes: {
+        node: [],
+        floating: [],
+        edge: [{
+          type: ENTANGLER_TYPE,
+          group: 'edge',
+          parameters: [{
+            field: 'tag',
+            type: 'Type{<:QuantumSavory.AbstractTag}',
+            kind: 'named_tag_type',
+            nullable: true
+          }]
+        }]
+      }
+    }
+    const parameter = { name: 'tag', type: 'Any', value: new VariableReference('legacy-tag') }
+    const wrapper = mountForm({
+      protocol: { type: ENTANGLER_TYPE, parameters: [parameter] },
+      category: 'edge',
+      variables: [{ id: 'legacy-tag', name: 'legacy tag', type: 'DataType' }]
+    }, {
+      stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
+    })
+
+    expect(wrapper.get('.variable-selector').text()).toContain('Incompatible variable: legacy tag')
+    const unlink = wrapper.get('[aria-label="Use a direct value for tag"]')
+    expect(unlink.attributes('disabled')).toBeUndefined()
+    await unlink.trigger('click')
+
+    expect(parameter.value).toBeNull()
+    expect(wrapper.find('.variable-selector').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
   })
 
   it('keeps the existing ProtocolEditor chrome and parameter selectors', async () => {

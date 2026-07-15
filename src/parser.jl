@@ -302,48 +302,154 @@ function get_slot_types()
   [Dict("type" => string(nameof(st.type)), "doc" => string(st.doc)) for st in slot_types]
 end
 
+const NAMED_TAG_PARAMETER_KIND = "named_tag_type"
+const PROTOCOL_KEYWORD_MAPPINGS = Dict(
+  "chooseA" => "chooseslotA",
+  "chooseB" => "chooseslotB",
+  "log" => "_log",
+)
+
+"""Recognize current and legacy symbolic protocol type identities."""
+function _is_symbolic_parameter_type(type)
+  members = try
+    Base.uniontypes(type)
+  catch
+    Any[type]
+  end
+  symbolic_type = isdefined(QuantumSavory, :SymQObj) ?
+    getfield(QuantumSavory, :SymQObj) : nothing
+
+  return any(members) do member
+    if symbolic_type !== nothing
+      is_current_symbolic = try
+        member === symbolic_type || member <: symbolic_type
+      catch
+        false
+      end
+      is_current_symbolic && return true
+    end
+
+    type_string = string(member)
+    return type_string in ("Symbolic", "SymQObj", "QuantumSymbolics.SymQObj") ||
+      startswith(type_string, "SymbolicUtils.Symbolic{") ||
+      startswith(type_string, "QuantumSymbolics.SymQObj{")
+  end
+end
+
+"""Describe a protocol field declared as `Type{<:AbstractTag}`, optionally with `Nothing`."""
+function _named_tag_parameter_semantics(type)
+  members = try
+    Base.uniontypes(type)
+  catch
+    return nothing
+  end
+  abstract_tag_member = Type{<:QuantumSavory.AbstractTag}
+  any(member -> member == abstract_tag_member, members) || return nothing
+  all(member -> member == abstract_tag_member || member === Nothing, members) || return nothing
+  return (; nullable=any(member -> member === Nothing, members))
+end
+
+"""Return authoritative constructor field types, including supported private keyword aliases."""
+function _protocol_constructor_parameter_types(protocol_type)
+  declared = Dict(
+    string(parameter.field) => parameter.type
+    for parameter in QuantumSavory.constructor_metadata(protocol_type)
+  )
+  reflected_fields = Dict(string(name) => type for (name, type) in zip(
+    fieldnames(protocol_type),
+    fieldtypes(protocol_type),
+  ))
+  for keyword in values(PROTOCOL_KEYWORD_MAPPINGS)
+    haskey(reflected_fields, keyword) && (declared[keyword] = reflected_fields[keyword])
+  end
+  return declared
+end
+
+"""Choose a value-compatible member while staying inside an authoritative union type."""
+function _declared_parameter_value_type(declared_type, value)
+  members = try
+    Base.uniontypes(declared_type)
+  catch
+    Any[declared_type]
+  end
+  length(members) == 1 && return only(members)
+
+  if value isa AbstractString
+    stripped = strip(value)
+    stripped == "nothing" && Nothing in members && return Nothing
+    stripped == "Wildcard" && QuantumSavory.Wildcard in members && return QuantumSavory.Wildcard
+    Function in members && return Function
+    String in members && return String
+  elseif value isa Function && Function in members
+    return Function
+  end
+
+  for member in members
+    member isa Type && value isa member && return member
+  end
+  for member in members
+    ok, _ = _convert_parameter_value(string(member), value)
+    ok && return member
+  end
+  return declared_type
+end
+
+"""Refine a union member only within the authoritative constructor declaration."""
+function _protocol_parameter_handling_type(declared_type, client_type, value)
+  members = Base.uniontypes(declared_type)
+  if client_type isa AbstractString
+    client_type_name = String(client_type)
+    client_type_name == "Lambda" && Function in members && return "Lambda"
+    if client_type_name == "Symbolic"
+      symbolic_member = findfirst(_is_symbolic_parameter_type, members)
+      symbolic_member === nothing || return members[symbolic_member]
+    end
+    selected_member = findfirst(member -> string(member) == client_type_name, members)
+    selected_member === nothing || return members[selected_member]
+  end
+  return _declared_parameter_value_type(declared_type, value)
+end
+
 function parse_pt_type(parameters::AbstractVector)
   result = []
 
   for p in parameters
     t = getfield(p, :type)
 
-    # Normalize symbolic protocol values to the UI's stable symbolic type.
-    # QuantumSavory metadata has used both SymbolicUtils.Symbolic and
-    # QuantumSymbolics.SymQObj across releases.
-    type_string = string(t)
-    if startswith(type_string, "SymbolicUtils.Symbolic{") ||
-       type_string == "QuantumSymbolics.SymQObj" ||
-       startswith(type_string, "QuantumSymbolics.SymQObj{")
-      push!(result, (field = p.field, type = "Symbolic", doc = p.doc))
+    named_tag_semantics = _named_tag_parameter_semantics(t)
+    if named_tag_semantics !== nothing
+      members = Base.uniontypes(t)
+      wire_members = [
+        member == Type{<:QuantumSavory.AbstractTag} ? "Type{<:AbstractTag}" : string(member)
+        for member in members
+      ]
+      wire_type = length(wire_members) == 1 ? only(wire_members) : wire_members
+      push!(result, merge(p, (
+        type=wire_type,
+        kind=NAMED_TAG_PARAMETER_KIND,
+        nullable=named_tag_semantics.nullable,
+      )))
       continue
     end
 
-    # Prefer metadata-driven union detection to avoid string parsing
-    try
-      if t isa Type && Base.isuniontype(t)
-        utypes = Base.uniontypes(t)
-        push!(result, (field = p.field, type = [string(ut) for ut in utypes], doc = p.doc))
-        continue
-      end
-    catch
-      # Fall back to string-based check only if metadata access fails
+    # Normalize symbolic protocol values to the UI's stable symbolic type.
+    # QuantumSavory metadata has used both SymbolicUtils.Symbolic and
+    # QuantumSymbolics.SymQObj across releases.
+    if _is_symbolic_parameter_type(t)
+      push!(result, merge(p, (type="Symbolic",)))
+      continue
     end
 
-    # Fallback: legacy string detection for unions if type metadata wasn't a Type
-    try
-      s = string(t)
-      if startswith(s, "Union{")
-        m = match(r"^Union\{(.*)\}$", s)
-        if m !== nothing
-          inner = m.captures[1]
-          parts = split(inner, ",")
-          push!(result, (field = p.field, type = [strip(pp) for pp in parts], doc = p.doc))
-          continue
-        end
-      end
+    # Julia 1.12 has `Base.uniontypes` but no `Base.isuniontype`. A real union
+    # has multiple flattened members; direct types return a singleton vector.
+    union_members = try
+      Base.uniontypes(t)
     catch
-      # Ignore and fall through to pushing original param
+      Any[t]
+    end
+    if length(union_members) > 1
+      push!(result, merge(p, (type=string.(union_members),)))
+      continue
     end
 
     # Non-union or unrecognized type format: pass through
@@ -921,10 +1027,7 @@ function _special_parameter_type(p_raw_type)
     type_string = string(declared_type)
     if type_string in ("Function", "Lambda")
       return type_string
-    elseif type_string == "Symbolic" ||
-           startswith(type_string, "SymbolicUtils.Symbolic{") ||
-           type_string == "QuantumSymbolics.SymQObj" ||
-           startswith(type_string, "QuantumSymbolics.SymQObj{")
+    elseif _is_symbolic_parameter_type(declared_type)
       return "Symbolic"
     end
   end
@@ -942,6 +1045,11 @@ function _handle_typed_parameter!(kwargs, name, p_raw_type, value, ctx, state=no
       @log_event state Logging.Debug debug_msg
     else
       @debug debug_msg
+    end
+
+    if p_raw_type isa Type && value isa p_raw_type
+      kwargs[name] = value
+      return true
     end
 
     if special_type == "Function" || special_type == "Lambda"
@@ -988,13 +1096,11 @@ function _instantiate_protocol(
   T = _resolve_type_from_string(String(tstr), :protocol)
   T === nothing && return nothing
 
+  declared_parameter_types = _protocol_constructor_parameter_types(T)
+
   params = Vector{Any}(get(prot_def, "parameters", Any[]))
 
   # Keyword name mappings for exceptions
-  keyword_mappings = Dict(
-    "log" => "_log"
-  )
-
   # Build keyword arguments from all parameters
   kwargs = Dict{Symbol, Any}()
   variable_assignments = Dict{String,Any}[]
@@ -1022,8 +1128,37 @@ function _instantiate_protocol(
     end
 
     # Apply keyword name mapping if it exists
-    if haskey(keyword_mappings, original_name)
-      name = Symbol(keyword_mappings[original_name])
+    constructor_name = get(PROTOCOL_KEYWORD_MAPPINGS, original_name, original_name)
+    name = Symbol(constructor_name)
+
+    if value === nothing || (value isa AbstractString && isempty(strip(value)))
+      continue
+    end
+    haskey(declared_parameter_types, constructor_name) || throw(validation_error(
+      "Unknown protocol parameter '$original_name'",
+      Dict{String,Any}(
+        "parameter_name" => original_name,
+        "protocol_type" => string(T),
+      ),
+    ))
+    declared_type = declared_parameter_types[constructor_name]
+    named_tag_semantics = _named_tag_parameter_semantics(declared_type)
+
+    # AbstractTag type fields are a safe, catalog-backed protocol contract.
+    # Classify them only from authoritative constructor metadata; old or forged
+    # client parameter type snapshots have no influence here.
+    if named_tag_semantics !== nothing
+      _parse_variable_reference(value; context="Protocol parameter '$original_name'") === nothing ||
+        throw(validation_error(
+          "Named tag type parameters cannot use variables",
+          Dict{String,Any}("parameter_name" => original_name),
+        ))
+      kwargs[name] = _resolve_named_abstract_tag_type(
+        value;
+        nullable=named_tag_semantics.nullable,
+        context="Protocol parameter '$original_name'",
+      )
+      continue
     end
 
     # Variable references are intentionally resolved before the literal-value
@@ -1071,17 +1206,12 @@ function _instantiate_protocol(
       continue
     end
 
-    # Preserve existing literal semantics: absent and empty values leave the
-    # constructor keyword unset.
-    if value === nothing
-      @warn "Parameter has no value, skipping" parameter_name=name
-      continue
-    elseif isa(value, String) && isempty(strip(value))
-      @warn "Parameter has empty value, skipping" parameter_name=name
-      continue
-    end
-
-    _handle_typed_parameter!(kwargs, name, get(p, "type", nothing), value, ctx, state)
+    handling_type = _protocol_parameter_handling_type(
+      declared_type,
+      get(p, "type", nothing),
+      value,
+    )
+    _handle_typed_parameter!(kwargs, name, handling_type, value, ctx, state)
   end
 
   # Instantiate with all keyword arguments

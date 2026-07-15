@@ -40,6 +40,7 @@
   --app-color-disabled-surface: #e0e0e0;
   --app-color-disabled-text: #9e9e9e;
   --app-overlay-background: rgba(0, 0, 0, 0.18);
+  --app-z-popup: 3000;
   --app-z-tooltip: 10000;
   --app-shadow-dialog: 0 2px 16px rgba(0, 0, 0, 0.13);
   --app-radius-control: 4px;
@@ -275,6 +276,10 @@ h1 {
 
 .p-menu, .p-tieredmenu{
   z-index: 2001 !important;
+}
+
+.p-autocomplete-overlay.named-tag-type-overlay {
+  z-index: var(--app-z-popup) !important;
 }
 
 .p-tooltip {
