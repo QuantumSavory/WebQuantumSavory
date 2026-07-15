@@ -243,5 +243,4 @@ onUnmounted(() => {
 
 watch(renderedLine, updateLine, { deep: true })
 watch(() => props.isSelected, selected => updateStyle(selected, isHovered.value))
-watch(() => props.edge.isLogic, () => updateStyle(props.isSelected, isHovered.value))
 </script>

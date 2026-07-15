@@ -11,9 +11,13 @@
           type="number"
           min="0"
           step="any"
-          :value="resolved.distanceMeters"
+          :value="displayValue('distanceMeters', resolved.distanceMeters)"
           :disabled="editingLocked"
-          @change="setOverride('distanceMeters', $event, resolved.distanceMeters)"
+          @change="setOverride(
+            'distanceMeters',
+            $event,
+            displayValue('distanceMeters', resolved.distanceMeters),
+          )"
         >
         <span class="unit">m</span>
         <button
@@ -41,9 +45,14 @@
           type="number"
           min="0"
           step="any"
-          :value="resolved.refractiveIndex"
+          :value="displayValue('refractiveIndex', resolved.refractiveIndex)"
           :disabled="editingLocked"
-          @change="setOverride('refractiveIndex', $event, resolved.refractiveIndex, true)"
+          @change="setOverride(
+            'refractiveIndex',
+            $event,
+            displayValue('refractiveIndex', resolved.refractiveIndex),
+            true,
+          )"
         >
         <button
           v-if="hasOverride('refractiveIndex')"
@@ -66,9 +75,13 @@
         type="number"
         min="0"
         step="any"
-        :value="resolved.propagationDelaySeconds"
+        :value="displayValue('delaySeconds', resolved.propagationDelaySeconds)"
         :disabled="editingLocked"
-        @change="setOverride('delaySeconds', $event, resolved.propagationDelaySeconds)"
+        @change="setOverride(
+          'delaySeconds',
+          $event,
+          displayValue('delaySeconds', resolved.propagationDelaySeconds),
+        )"
       >
       <span class="unit">s</span>
       <button
@@ -118,6 +131,14 @@ function ensureOverrides() {
 
 function hasOverride(field) {
   return props.edge.data.physicalOverrides?.[field] != null
+}
+
+function displayValue(field, resolvedValue) {
+  const override = props.edge.data.physicalOverrides?.[field]
+  if (override != null) return override
+  return typeof resolvedValue === 'number' && Number.isFinite(resolvedValue)
+    ? Number(resolvedValue.toPrecision(3))
+    : resolvedValue
 }
 
 function setOverride(field, event, fallback, positive = false) {

@@ -14,6 +14,10 @@ export const CURVE_POINT_TYPES = Object.freeze(['smooth', 'sharp'])
 
 const MIN_CURVE_SAMPLES = 8
 const MAX_CURVE_SAMPLES = 4096
+const MIN_PROJECTED_X = 0
+const MAX_PROJECTED_X = 1
+const MIN_PROJECTED_Y = -1
+const MAX_PROJECTED_Y = 0
 
 function coordinatePair(point) {
   return [point.x, point.y]
@@ -123,6 +127,27 @@ function lineFeature(coordinates) {
   }
 }
 
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, value))
+}
+
+/**
+ * Bézier control points can legitimately overshoot their anchors. Keep that
+ * finite overshoot renderable without weakening strict persisted-position and
+ * layout-generator validation.
+ */
+function unprojectCurvePosition(position) {
+  if (!Array.isArray(position)
+    || position.length !== 2
+    || !position.every(Number.isFinite)) {
+    throw new Error('The edge curve produced an invalid projected map position.')
+  }
+  return unprojectMapPosition([
+    clamp(position[0], MIN_PROJECTED_X, MAX_PROJECTED_X),
+    clamp(position[1], MIN_PROJECTED_Y, MAX_PROJECTED_Y),
+  ])
+}
+
 function sampleSegments(segments, sampleCount) {
   const projectedPoints = []
   segments.forEach((segment, segmentIndex) => {
@@ -132,7 +157,7 @@ function sampleSegments(segments, sampleCount) {
       projectedPoints.push(coordinatePair(point))
     })
   })
-  return projectedPoints.map(unprojectMapPosition)
+  return projectedPoints.map(unprojectCurvePosition)
 }
 
 function threeSignificantDigitKey(value) {
@@ -220,7 +245,7 @@ export function projectPointOntoEdge(edge, mapPosition) {
         segmentIndex,
         t: projection.t,
         distance: projection.d,
-        position: unprojectMapPosition([projection.x, projection.y]),
+        position: unprojectCurvePosition([projection.x, projection.y]),
       }
     }
   })

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import PhysicalEdgeControls from '../../src/components/panels/PhysicalEdgeControls.vue'
 import Edge from '../../src/models/Edge'
 import Node from '../../src/models/Node'
+import { resolveEdgePhysicalProperties } from '../../src/utils/edgeGeometry'
 
 function makeEdge() {
   const source = new Node({ id: 'a', name: 'A', position: [-72, 42] })
@@ -13,6 +14,31 @@ function makeEdge() {
 }
 
 describe('physical edge controls', () => {
+  it('shows automatic values at three significant digits and preserves typed overrides', async () => {
+    const edge = makeEdge()
+    const physicalConfig = { refractiveIndex: 1.468 }
+    const wrapper = mount(PhysicalEdgeControls, {
+      props: { edge, physicalConfig },
+    })
+    const automatic = resolveEdgePhysicalProperties(edge, physicalConfig)
+
+    expect(wrapper.get('#edge-distance-meters').element.value)
+      .toBe(String(Number(automatic.distanceMeters.toPrecision(3))))
+    expect(wrapper.get('#edge-refractive-index').element.value).toBe('1.47')
+    expect(wrapper.get('#edge-delay-seconds').element.value)
+      .toBe(String(Number(automatic.propagationDelaySeconds.toPrecision(3))))
+
+    await wrapper.get('#edge-distance-meters').setValue('1234.56789')
+    await nextTick()
+    expect(edge.data.physicalOverrides.distanceMeters).toBe(1234.56789)
+    expect(wrapper.get('#edge-distance-meters').element.value).toBe('1234.56789')
+
+    await wrapper.get('#edge-delay-seconds').setValue('0.000123456')
+    await nextTick()
+    expect(edge.data.physicalOverrides.delaySeconds).toBe(0.000123456)
+    expect(wrapper.get('#edge-delay-seconds').element.value).toBe('0.000123456')
+  })
+
   it('edits, resets, and restores dormant overrides around a manual delay', async () => {
     const edge = makeEdge()
     const wrapper = mount(PhysicalEdgeControls, {

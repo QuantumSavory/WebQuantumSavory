@@ -14,9 +14,15 @@ import {
 } from '../../src/utils/edgeGeometry'
 import { projectMapPosition } from '../../src/utils/layoutTemplates'
 
-function makeEdge({ curvePoints = [], physicalOverrides = null, isLogic = false } = {}) {
-  const source = new Node({ id: 'source', position: [-72, 42] })
-  const target = new Node({ id: 'target', position: [-70, 42] })
+function makeEdge({
+  sourcePosition = [-72, 42],
+  targetPosition = [-70, 42],
+  curvePoints = [],
+  physicalOverrides = null,
+  isLogic = false,
+} = {}) {
+  const source = new Node({ id: 'source', position: sourcePosition })
+  const target = new Node({ id: 'target', position: targetPosition })
   return new Edge({
     id: 'edge',
     source,
@@ -90,6 +96,30 @@ describe('edge geometry adapter', () => {
     expect(projection.t).toBeGreaterThan(0)
     expect(projection.t).toBeLessThan(1)
     expect(projectMapPosition(projection.position).every(Number.isFinite)).toBe(true)
+  })
+
+  it('clamps finite Bézier overshoot at Web Mercator boundaries', () => {
+    const edge = makeEdge({
+      sourcePosition: [179, 84],
+      targetPosition: [-170, -80],
+      curvePoints: [{ id: 'boundary', position: [179.9, 85], type: 'smooth' }],
+    })
+
+    const sampled = sampleEdgeRoute(edge)
+    expect(sampled.line.geometry.coordinates.every(([longitude, latitude]) => (
+      longitude >= -180
+      && longitude <= 180
+      && latitude >= -90
+      && latitude <= 90
+    ))).toBe(true)
+    expect(sampled.line.geometry.coordinates.some(([longitude]) => longitude === 180))
+      .toBe(true)
+
+    const projection = projectPointOntoEdge(edge, [180, 85])
+    expect(projection.position[0]).toBeGreaterThanOrEqual(-180)
+    expect(projection.position[0]).toBeLessThanOrEqual(180)
+    expect(projection.position[1]).toBeGreaterThanOrEqual(-90)
+    expect(projection.position[1]).toBeLessThanOrEqual(90)
   })
 
   it('resolves automatic and manual propagation while retaining dormant overrides', () => {

@@ -8,6 +8,7 @@ import {
   DEFAULT_REFRACTIVE_INDEX,
   resolveEdgePhysicalProperties,
 } from './edgeGeometry'
+import { isMapPosition } from './layoutTemplates'
 
 export const PROJECT_SCHEMA_VERSION = 1
 
@@ -53,16 +54,6 @@ function omitFields(value, fields) {
 
 function finiteNumber(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-function isMapPosition(value) {
-  return Array.isArray(value)
-    && value.length === 2
-    && value.every(Number.isFinite)
-    && value[0] >= -180
-    && value[0] <= 180
-    && value[1] >= -90
-    && value[1] <= 90
 }
 
 function validateOptionalNumber(value, name, { positive = false } = {}) {
