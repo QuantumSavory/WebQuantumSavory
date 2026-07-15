@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { Pause, Play, Settings2, Square } from '@lucide/vue'
+import { LoaderCircle, Pause, Play, Settings2, Square } from '@lucide/vue'
 import { SimulationPhase } from '../../composables/simulationLifecycle.js'
 
 const props = defineProps({
@@ -27,6 +27,10 @@ const props = defineProps({
   capabilities: {
     type: Object,
     required: true
+  },
+  foregroundRequest: {
+    type: Object,
+    default: null
   }
 })
 
@@ -66,6 +70,15 @@ const canRunSimulation = computed(() => props.capabilities.canRun)
 const canPauseSimulation = computed(() => props.capabilities.canPause)
 const canResumeSimulation = computed(() => props.capabilities.canResume)
 const canStopSimulation = computed(() => props.capabilities.canStop)
+const foregroundAction = computed(() => props.foregroundRequest?.action || null)
+const foregroundPending = computed(() => Boolean(foregroundAction.value))
+const foregroundStatus = computed(() => ({
+  parse: 'Parsing network graph',
+  prepare: 'Preparing simulation',
+  run: 'Starting simulation',
+  pause: 'Pausing simulation',
+  resume: 'Resuming simulation'
+})[foregroundAction.value] || '')
 
 function handleRun() {
   emit('run')
@@ -130,19 +143,25 @@ function toggleAdvancedControls() {
             step="0.001"
             min="0"
             class="duration-input"
-            :disabled="isSimulationRunning || isSimulationPaused || pollingActive"
+            :disabled="isSimulationRunning || isSimulationPaused || pollingActive || foregroundPending"
           />
           <span class="unit">sec</span>
         </div>
       </div>
       
       <div class="main-buttons">
+        <span
+          v-if="foregroundStatus"
+          class="visually-hidden"
+          role="status"
+          aria-live="polite"
+        >{{ foregroundStatus }}</span>
         <button 
           class="settings-toggle-btn" 
           @click="toggleAdvancedControls"
           :class="{ active: showAdvancedControls }"
           title="Toggle advanced controls"
-          :disabled="isSimulationRunning || isSimulationPaused || pollingActive"
+          :disabled="isSimulationRunning || isSimulationPaused || pollingActive || foregroundPending"
         >
           <Settings2 :size="16" aria-hidden="true" />
         </button>
@@ -153,27 +172,57 @@ function toggleAdvancedControls() {
           class="run-btn" 
           :disabled="!canRunSimulation"
           @click="handleRun"
-          :title="canRunSimulation ? 'Run simulation' : 'Define the simulation network before running it'"
+          :aria-busy="foregroundAction === 'run'"
+          :aria-label="foregroundAction === 'run' ? 'Starting simulation' : 'Run simulation'"
+          :title="foregroundAction === 'run'
+            ? 'Starting simulation'
+            : canRunSimulation
+              ? 'Run simulation'
+              : 'Define the simulation network before running it'"
         >
-          <Play :size="16" aria-hidden="true" />
+          <LoaderCircle
+            v-if="foregroundAction === 'run'"
+            class="app-loading-spinner"
+            :size="16"
+            aria-hidden="true"
+          />
+          <Play v-else :size="16" aria-hidden="true" />
         </button>
         
         <button 
-          v-if="canPauseSimulation"
+          v-if="isSimulationRunning"
           class="pause-btn" 
+          :disabled="!canPauseSimulation"
           @click="handlePause"
-          title="Pause simulation"
+          :aria-busy="foregroundAction === 'pause'"
+          :aria-label="foregroundAction === 'pause' ? 'Pausing simulation' : 'Pause simulation'"
+          :title="foregroundAction === 'pause' ? 'Pausing simulation' : 'Pause simulation'"
         >
-          <Pause :size="16" aria-hidden="true" />
+          <LoaderCircle
+            v-if="foregroundAction === 'pause'"
+            class="app-loading-spinner"
+            :size="16"
+            aria-hidden="true"
+          />
+          <Pause v-else :size="16" aria-hidden="true" />
         </button>
         
         <button 
-          v-if="canResumeSimulation"
+          v-if="isSimulationPaused"
           class="resume-btn" 
+          :disabled="!canResumeSimulation"
           @click="handleResume"
-          title="Resume simulation"
+          :aria-busy="foregroundAction === 'resume'"
+          :aria-label="foregroundAction === 'resume' ? 'Resuming simulation' : 'Resume simulation'"
+          :title="foregroundAction === 'resume' ? 'Resuming simulation' : 'Resume simulation'"
         >
-          <Play :size="16" aria-hidden="true" />
+          <LoaderCircle
+            v-if="foregroundAction === 'resume'"
+            class="app-loading-spinner"
+            :size="16"
+            aria-hidden="true"
+          />
+          <Play v-else :size="16" aria-hidden="true" />
         </button>
         
         <!-- Stop button hidden - behavior TBD with backend developer -->
@@ -192,21 +241,21 @@ function toggleAdvancedControls() {
     <div class="advanced-controls" :class="{ visible: showAdvancedControls }">
       <div class="advanced-buttons">
         <button 
-          :disabled="!props.capabilities.canPrepare || pollingActive"
+          :disabled="!props.capabilities.canPrepare || pollingActive || foregroundPending"
           class="prepare-network-graph-btn" 
           @click="handlePrepareNetworkGraph"
         >
           Parse
         </button>
         <button 
-          :disabled="props.phase !== SimulationPhase.PARSED || pollingActive"
+          :disabled="props.phase !== SimulationPhase.PARSED || pollingActive || foregroundPending"
           class="prepare-simulation-btn" 
           @click="handlePrepareSimulation"
         >
           Prepare
         </button>
         <button 
-          :disabled="!props.capabilities.canPrepare || pollingActive"
+          :disabled="!props.capabilities.canPrepare || pollingActive || foregroundPending"
           class="reset-btn" 
           @click="handlePrepareNetworkGraph"
           title="Reset simulation (re-parse network graph)"

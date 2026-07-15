@@ -43,6 +43,7 @@ export function useSimulationController({
 }) {
   const state = ref(createSimulationState())
   let lifecycleGeneration = 0
+  let foregroundRequestId = 0
   let pollingGeneration = 0
   let stateTimer = null
   let logTimer = null
@@ -60,6 +61,7 @@ export function useSimulationController({
   const simulationStatus = computed(() => legacySimulationStatus(state.value))
   const backendSimulation = computed(() => state.value.backendState?.simulation || {})
   const phase = computed(() => state.value.phase)
+  const foregroundRequest = computed(() => state.value.foregroundRequest)
   const graphEmpty = computed(() => {
     const net = projectData.value?.net
     return !net || ((net.nodes?.length || 0) === 0 && (net.edges?.length || 0) === 0)
@@ -75,7 +77,8 @@ export function useSimulationController({
   const capabilities = computed(() => simulationCapabilities(
     state.value.phase,
     graphEmpty.value,
-    liveNetwork.value
+    liveNetwork.value,
+    state.value.foregroundRequest
   ))
   const isSimulationRunning = computed(() => state.value.phase === SimulationPhase.RUNNING)
   const isSimulationPaused = computed(() => state.value.phase === SimulationPhase.PAUSED)
@@ -93,6 +96,18 @@ export function useSimulationController({
 
   function dispatch(event) {
     state.value = reduceSimulationState(state.value, event)
+  }
+
+  function startForegroundRequest(action, message) {
+    if (disposed || state.value.foregroundRequest) return null
+    const request = { id: ++foregroundRequestId, action }
+    dispatch({ type: 'FOREGROUND_REQUEST_STARTED', request, message })
+    return request
+  }
+
+  function finishForegroundRequest(request) {
+    if (!request) return
+    dispatch({ type: 'FOREGROUND_REQUEST_FINISHED', requestId: request.id })
   }
 
   function currentContext() {
@@ -250,47 +265,64 @@ export function useSimulationController({
   }
 
   async function prepareNetworkGraph(showSuccessLogs = true) {
-    const payload = validatedPayload()
-    if (!payload) return false
-    stopPolling()
-    const context = currentContext()
-    resetSlotStates()
-    hideSlotState?.()
-    dispatch({ type: 'RESET', message: 'Parsing network graph...' })
+    const foreground = startForegroundRequest('parse', 'Parsing network graph...')
+    if (!foreground) return false
+    let context = null
     try {
+      const payload = validatedPayload()
+      if (!payload) return false
+      stopPolling()
+      context = currentContext()
+      resetSlotStates()
+      hideSlotState?.()
+      dispatch({
+        type: 'RESET',
+        message: 'Parsing network graph...',
+        foregroundRequest: foreground
+      })
       return await ensureParsed(payload, context, showSuccessLogs)
     } catch (error) {
-      if (!contextIsCurrent(context) || isAbortError(error)) return false
+      if ((context && !contextIsCurrent(context)) || isAbortError(error)) return false
       dispatch({ type: 'ERROR', error, message: error.message })
       addLog('error', 'Failed to parse network graph', 'Web API', JSON.stringify(error.response || {}, null, 2))
       return false
+    } finally {
+      finishForegroundRequest(foreground)
     }
   }
 
   async function prepareSimulation() {
-    const payload = validatedPayload()
-    if (!payload) return false
-    const context = currentContext()
+    const foreground = startForegroundRequest('prepare', 'Preparing simulation...')
+    if (!foreground) return false
+    let context = null
     try {
+      const payload = validatedPayload()
+      if (!payload) return false
+      context = currentContext()
       return await ensurePrepared(payload, context)
     } catch (error) {
-      if (!contextIsCurrent(context) || isAbortError(error)) return false
+      if ((context && !contextIsCurrent(context)) || isAbortError(error)) return false
       dispatch({ type: 'ERROR', error, message: error.message })
       addLog('error', 'Failed to prepare simulation', 'Web API', JSON.stringify(error.response || {}, null, 2))
       return false
+    } finally {
+      finishForegroundRequest(foreground)
     }
   }
 
   async function runSimulationWithSteps() {
-    const payload = validatedPayload()
-    if (!payload) return false
-    const context = currentContext()
-    const additionalTime = Number(projectData.value?.simulationConfig?.time || 1)
-    const target = state.value.cumulativeTargetTime + additionalTime
-    dispatch({ type: 'REQUEST', message: 'Initializing simulation...' })
-    addLog('info', `Starting simulation: adding ${additionalTime}s (total target: ${target}s)`, 'Web API')
-
+    const foreground = startForegroundRequest('run', 'Initializing simulation...')
+    if (!foreground) return false
+    let context = null
     try {
+      const payload = validatedPayload()
+      if (!payload) return false
+      context = currentContext()
+      const additionalTime = Number(projectData.value?.simulationConfig?.time || 1)
+      const target = state.value.cumulativeTargetTime + additionalTime
+      dispatch({ type: 'REQUEST', message: 'Initializing simulation...' })
+      addLog('info', `Starting simulation: adding ${additionalTime}s (total target: ${target}s)`, 'Web API')
+
       if (!(await ensurePrepared(payload, context)) || !contextIsCurrent(context)) return false
       const response = await api.runSimulation(context.projectName, target)
       if (!contextIsCurrent(context)) return false
@@ -303,17 +335,22 @@ export function useSimulationController({
       startPolling()
       return true
     } catch (error) {
-      if (!contextIsCurrent(context) || isAbortError(error)) return false
+      if ((context && !contextIsCurrent(context)) || isAbortError(error)) return false
       stopPolling()
       dispatch({ type: 'ERROR', error, message: error.message })
       addLog('error', `Simulation failed: ${error.message}`, 'Web API', error.response ? JSON.stringify(error.response, null, 2) : null)
       return false
+    } finally {
+      finishForegroundRequest(foreground)
     }
   }
 
   async function pauseSimulation() {
-    const context = currentContext()
+    const foreground = startForegroundRequest('pause', 'Pausing simulation...')
+    if (!foreground) return false
+    let context = null
     try {
+      context = currentContext()
       const response = await api.pauseSimulation(context.projectName)
       if (!contextIsCurrent(context)) return false
       if (!response || response.success === false) throw responseError(response, 'Failed to pause simulation')
@@ -328,16 +365,21 @@ export function useSimulationController({
       addLog('info', 'Simulation paused', 'Web API')
       return true
     } catch (error) {
-      if (!contextIsCurrent(context) || isAbortError(error)) return false
+      if ((context && !contextIsCurrent(context)) || isAbortError(error)) return false
       dispatch({ type: 'ERROR', error, message: error.message })
       addLog('error', `Failed to pause: ${error.message}`, 'Web API', error.response ? JSON.stringify(error.response, null, 2) : null)
       return false
+    } finally {
+      finishForegroundRequest(foreground)
     }
   }
 
   async function resumeSimulation() {
-    const context = currentContext()
+    const foreground = startForegroundRequest('resume', 'Resuming simulation...')
+    if (!foreground) return false
+    let context = null
     try {
+      context = currentContext()
       const current = await api.getSimulationStatus(context.projectName)
       if (!contextIsCurrent(context)) return false
       if (!current?.success || !current.state?.simulation) throw responseError(current, 'Could not get current simulation status')
@@ -360,11 +402,13 @@ export function useSimulationController({
       addLog('info', 'Simulation resumed', 'Web API')
       return true
     } catch (error) {
-      if (!contextIsCurrent(context) || isAbortError(error)) return false
+      if ((context && !contextIsCurrent(context)) || isAbortError(error)) return false
       stopPolling()
       dispatch({ type: 'ERROR', error, message: error.message })
       addLog('error', `Failed to resume: ${error.message}`, 'Web API', error.response ? JSON.stringify(error.response, null, 2) : null)
       return false
+    } finally {
+      finishForegroundRequest(foreground)
     }
   }
 
@@ -623,6 +667,7 @@ export function useSimulationController({
     lifecycleGeneration += 1
     stopPolling()
     stopAlivePolling()
+    dispatch({ type: 'FOREGROUND_REQUEST_FINISHED' })
   }
 
   onScopeDispose(dispose)
@@ -630,6 +675,7 @@ export function useSimulationController({
   return {
     state,
     phase,
+    foregroundRequest,
     capabilities,
     simulationState,
     simulationStatus,

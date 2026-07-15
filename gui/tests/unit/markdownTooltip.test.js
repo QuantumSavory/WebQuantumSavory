@@ -21,6 +21,16 @@ const TooltipHost = defineComponent({
   template: '<button v-tooltip.top.focus="tooltip" :title="title">Target</button>'
 })
 
+const BottomTooltipHost = defineComponent({
+  props: {
+    tooltip: {
+      type: String,
+      default: ''
+    }
+  },
+  template: '<button v-tooltip.bottom.focus="tooltip">Bottom target</button>'
+})
+
 function mountTooltip(props) {
   return mount(TooltipHost, {
     props,
@@ -43,6 +53,25 @@ describe('Markdown tooltip directive', () => {
     expect(target.$_ptooltipEscape).toBe(false)
     expect(target.$_ptooltipModifiers).toMatchObject({ top: true, focus: true })
     expect(target.getAttribute('title')).toBe('**Native title stays plain**')
+  })
+
+  it('preserves bottom placement through the same global Markdown wrapper', async () => {
+    const wrapper = mount(BottomTooltipHost, {
+      props: { tooltip: '**Bottom Markdown**' },
+      global: {
+        plugins: [PrimeVue],
+        directives: { tooltip: MarkdownTooltip }
+      }
+    })
+    const target = wrapper.get('button')
+
+    expect(target.element.$_ptooltipModifiers).toMatchObject({ bottom: true, focus: true })
+    await target.trigger('focus')
+    await vi.waitFor(() => {
+      expect(document.body.querySelector('.p-tooltip-bottom')).not.toBeNull()
+    })
+    expect(document.body.querySelector('.p-tooltip-text strong')?.textContent).toBe('Bottom Markdown')
+    wrapper.unmount()
   })
 
   it('preserves object options without mutating the caller binding', () => {

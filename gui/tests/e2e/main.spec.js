@@ -179,6 +179,9 @@ test.describe.serial('Main Workflow', () => {
       await actionButton.hover();
       await expect(page.locator('.p-tooltip-text')).toHaveText(name);
       await expect(page.locator('.p-tooltip-text').locator('p')).toHaveText(name);
+      const topTooltip = page.locator('.p-tooltip:visible');
+      await expect(topTooltip).toHaveClass(/p-tooltip-top/);
+      expect(Number(await topTooltip.evaluate(element => getComputedStyle(element).zIndex))).toBeGreaterThan(2200);
     }
 
     const toggleDetailsButton = slotActions.getByRole('button', { name: 'Toggle details' });
@@ -234,6 +237,7 @@ test.describe.serial('Main Workflow', () => {
     );
     await runButton.click();
     await runAccepted;
+    await expect(page.locator('.topbar-loading-indicator')).toHaveCount(0);
 
     // Click as soon as the accepted-running response makes the real control
     // actionable, before status polling can replace it with a completed state.
@@ -309,6 +313,12 @@ test.describe.serial('Main Workflow', () => {
     await expect(attachedTag.getByRole('button', { name: /Delete tag/ }).locator('.lucide-trash-2')).toBeVisible();
     await expect(attachedTag.locator('.tag-result-details')).toHaveCount(0);
 
+    // Give the requested bottom placement room to render instead of triggering
+    // PrimeVue's viewport-aware flip to the top.
+    const heightResizeTarget = page.getByRole('separator', { name: 'Resize Tools panel height' });
+    await heightResizeTarget.focus();
+    await page.keyboard.press('End');
+
     const identityBadge = attachedTag.locator('.tag-badge-identity');
     await identityBadge.hover();
     const markdownTooltip = page.locator('.p-tooltip-text');
@@ -316,6 +326,9 @@ test.describe.serial('Main Workflow', () => {
     await expect(markdownTooltip.locator('p')).toHaveCount(2);
     await expect(markdownTooltip.locator('strong')).toHaveText('Head');
     await expect(markdownTooltip.locator('code')).toHaveText('Symbol');
+    const bottomTooltip = page.locator('.p-tooltip:visible');
+    await expect(bottomTooltip).toHaveClass(/p-tooltip-bottom/);
+    expect(Number(await bottomTooltip.evaluate(element => getComputedStyle(element).zIndex))).toBeGreaterThan(2200);
 
     await attachedTag.getByRole('button', { name: 'Show rendered tag details' }).click();
     await expect(attachedTag).toContainText('Tag ID');

@@ -58,6 +58,11 @@ export function useProjectSession({
   const transitionGeneration = ref(0)
   const transitionPhase = ref('idle')
 
+  function cancelTransition(nextPhase = 'idle') {
+    transitionGeneration.value += 1
+    transitionPhase.value = nextPhase
+  }
+
   function canonicalName(value) {
     const name = normalizeProjectName(value, '')
     if (!name) throw new Error('Project name cannot be empty')
@@ -293,7 +298,7 @@ export function useProjectSession({
       if (targetIsDifferentProject && !overwrite) {
         throw new Error(`A project named "${name}" already exists`)
       }
-      transitionGeneration.value += 1
+      cancelTransition()
       const encoded = encodeStoredProject(projectData.value, {
         name,
         map: { position: [...mapCenter.value], zoom: mapZoom.value },
@@ -328,7 +333,7 @@ export function useProjectSession({
 
     store.deleteProject(name)
     if (currentProjectName.value === name) {
-      transitionGeneration.value += 1
+      cancelTransition()
       stopSessionActivity()
       projectData.value = createEmptyProject()
       currentProjectName.value = ''
@@ -382,8 +387,7 @@ export function useProjectSession({
   }
 
   function dispose() {
-    transitionGeneration.value += 1
-    transitionPhase.value = 'disposed'
+    cancelTransition('disposed')
   }
 
   return {

@@ -184,6 +184,65 @@ describe('project session', () => {
     expect(harness.mapCenter.value).toEqual([8, 9])
   })
 
+  it('exposes preparing and committing phases for application loading feedback', async () => {
+    let resolveDestroy
+    const destroySimulation = vi.fn(() => new Promise(resolve => { resolveDestroy = resolve }))
+    const stored = encodeStoredProject(createEmptyProject('B'), { name: 'B' })
+    const harness = createHarness({ projects: { B: stored }, destroySimulation })
+
+    const pending = harness.session.open('B')
+    expect(harness.session.transitionPhase.value).toBe('preparing')
+    await vi.waitFor(() => {
+      expect(harness.session.transitionPhase.value).toBe('committing')
+    })
+
+    resolveDestroy({ success: true })
+    expect(await pending).toBe(true)
+    expect(harness.session.transitionPhase.value).toBe('idle')
+
+    harness.session.dispose()
+    expect(harness.session.transitionPhase.value).toBe('disposed')
+  })
+
+  it('clears a canceled transition phase when Save As supersedes an open', async () => {
+    let resolveDestroy
+    const destroySimulation = vi.fn(() => new Promise(resolve => { resolveDestroy = resolve }))
+    const stored = encodeStoredProject(createEmptyProject('B'), { name: 'B' })
+    const harness = createHarness({ projects: { B: stored }, destroySimulation })
+
+    const pendingOpen = harness.session.open('B')
+    await vi.waitFor(() => {
+      expect(harness.session.transitionPhase.value).toBe('committing')
+    })
+
+    expect(harness.session.saveAs('C')).toBe(true)
+    expect(harness.session.transitionPhase.value).toBe('idle')
+    resolveDestroy({ success: true })
+    expect(await pendingOpen).toBe(false)
+    expect(harness.session.transitionPhase.value).toBe('idle')
+    expect(harness.currentProjectName.value).toBe('C')
+  })
+
+  it('clears a canceled transition phase when deleting the active project', async () => {
+    let resolveDestroy
+    const destroySimulation = vi.fn(() => new Promise(resolve => { resolveDestroy = resolve }))
+    const stored = encodeStoredProject(createEmptyProject('B'), { name: 'B' })
+    const active = encodeStoredProject(createEmptyProject('A'), { name: 'A' })
+    const harness = createHarness({ projects: { A: active, B: stored }, destroySimulation })
+
+    const pendingOpen = harness.session.open('B')
+    await vi.waitFor(() => {
+      expect(harness.session.transitionPhase.value).toBe('committing')
+    })
+
+    expect(await harness.session.delete('A', { confirmed: true })).toBe(true)
+    expect(harness.session.transitionPhase.value).toBe('idle')
+    resolveDestroy({ success: true })
+    expect(await pendingOpen).toBe(false)
+    expect(harness.session.transitionPhase.value).toBe('idle')
+    expect(harness.currentProjectName.value).toBe('')
+  })
+
   it('logs simulation cleanup only when the backend reports success', async () => {
     const stored = encodeStoredProject(createEmptyProject('B'), { name: 'B' })
     const success = createHarness({ projects: { B: stored } })

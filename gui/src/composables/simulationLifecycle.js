@@ -18,6 +18,7 @@ export function createSimulationState() {
     isPrepared: false,
     cumulativeTargetTime: 0,
     pollingActive: false,
+    foregroundRequest: null,
     error: null
   }
 }
@@ -91,7 +92,27 @@ export function reduceSimulationState(previous, event) {
     case 'RESET':
       return {
         ...createSimulationState(),
-        message: event.message || 'Simulation reset'
+        message: event.message || 'Simulation reset',
+        foregroundRequest: event.foregroundRequest ?? null
+      }
+    case 'FOREGROUND_REQUEST_STARTED':
+      return {
+        ...state,
+        foregroundRequest: event.request,
+        message: event.message || state.message,
+        error: null
+      }
+    case 'FOREGROUND_REQUEST_FINISHED':
+      if (
+        event.requestId !== undefined
+        && event.requestId !== null
+        && state.foregroundRequest?.id !== event.requestId
+      ) {
+        return state
+      }
+      return {
+        ...state,
+        foregroundRequest: null
       }
     case 'REQUEST':
       return {
@@ -160,9 +181,15 @@ export function reduceSimulationState(previous, event) {
   }
 }
 
-export function simulationCapabilities(phase, graphEmpty, liveNetwork = undefined) {
+export function simulationCapabilities(
+  phase,
+  graphEmpty,
+  liveNetwork = undefined,
+  foregroundRequest = null
+) {
   const running = phase === SimulationPhase.RUNNING
   const paused = phase === SimulationPhase.PAUSED
+  const foregroundPending = Boolean(foregroundRequest)
   const networkPhase = [
     SimulationPhase.PARSED,
     SimulationPhase.PREPARED,
@@ -174,14 +201,14 @@ export function simulationCapabilities(phase, graphEmpty, liveNetwork = undefine
     networkPhase || (phase === SimulationPhase.ERROR && liveNetwork === true)
   )
   return {
-    canRun: !graphEmpty && !running && !paused,
-    canPause: running,
-    canResume: paused,
-    canStop: !graphEmpty && phase !== SimulationPhase.EMPTY,
-    canPrepare: !graphEmpty && !running && !paused,
+    canRun: !graphEmpty && !running && !paused && !foregroundPending,
+    canPause: running && !foregroundPending,
+    canResume: paused && !foregroundPending,
+    canStop: !graphEmpty && phase !== SimulationPhase.EMPTY && !foregroundPending,
+    canPrepare: !graphEmpty && !running && !paused && !foregroundPending,
     // Once a backend graph exists, edits must wait for Reset/Stop so Run can
     // never reuse a parsed snapshot that differs from the visible project.
-    editingDisabled: phase !== SimulationPhase.EMPTY,
+    editingDisabled: phase !== SimulationPhase.EMPTY || foregroundPending,
     canExploreTags
   }
 }
