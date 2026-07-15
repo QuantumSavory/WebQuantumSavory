@@ -4,6 +4,8 @@
 
 - Added immediate, accessible loading feedback for simulation setup and application-shell initialization while keeping ordinary execution, polling, tag previews, plots, and script export on their existing local indicators.
 - Made Markdown tooltips stack consistently above application overlays for both top and bottom placements.
+- Added documented local-run steps and an accessible System Information dialog with Julia, Genie, QuantumSavory provenance, WebQuantumSavory, and exact frontend dependency versions; copied panic reports now include the same normalized diagnostics.
+- Clarified startup warmup as precompilation work and kept its internal simulator logs out of server output.
 
 ## 1.7.1
 

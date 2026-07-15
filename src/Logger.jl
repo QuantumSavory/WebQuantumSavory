@@ -145,8 +145,8 @@ function _add_extra_fields!(event::Dict{String,Any}, fields)
 end
 
 # Custom logger that captures logs into state while also displaying them.
-struct CapturingLogger <: Logging.AbstractLogger
-  console::Logging.ConsoleLogger
+struct CapturingLogger{L<:Logging.AbstractLogger} <: Logging.AbstractLogger
+  console::L
   state::Any
 end
 
@@ -175,11 +175,27 @@ function Logging.handle_message(logger::CapturingLogger, level, message, _module
     println(stderr, "LOGGER ERROR: Failed to capture log event: ", error)
   end
 
-  Logging.handle_message(logger.console, level, message, _module, group, id, filepath, line; kwargs...)
+  if level >= Logging.min_enabled_level(logger.console) &&
+     Logging.shouldlog(logger.console, level, _module, group, id)
+    Logging.handle_message(
+      logger.console,
+      level,
+      message,
+      _module,
+      group,
+      id,
+      filepath,
+      line;
+      kwargs...,
+    )
+  end
 end
 
-function make_logger(state)
-  return CapturingLogger(Logging.ConsoleLogger(stderr, MIN_LEVEL), state)
+function make_logger(
+  state;
+  console::Logging.AbstractLogger=Logging.ConsoleLogger(stderr, MIN_LEVEL),
+)
+  return CapturingLogger(console, state)
 end
 
 """Append one JSON-safe structured Simulator record to `state.log_events`."""

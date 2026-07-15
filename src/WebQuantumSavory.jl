@@ -33,6 +33,7 @@ Base.showerror(io::IO, e::APIError) = print(io, "APIError: $(e.message) (status:
 # include("constructors.jl")
 include("errors.jl")
 include("evaluation_policy.jl")
+include("platform_info.jl")
 include("types.jl")
 include("Sandbox.jl")
 include("Logger.jl")
@@ -740,8 +741,11 @@ function _record_run_error!(state::State, error, backtrace=catch_backtrace())
   return state
 end
 
-function _run_simulation(state::State)
-  Logging.with_logger(Logger.make_logger(state)) do
+function _run_simulation(
+  state::State,
+  simulation_logger::Logging.AbstractLogger=Logger.make_logger(state),
+)
+  Logging.with_logger(simulation_logger) do
     while state.simulation_progress < state.simulation_time
       if state.pause_requested
         @log_event state Logging.Info "Simulation paused by user request"
@@ -780,7 +784,12 @@ function _run_simulation(state::State)
   return state
 end
 
-function run_simulation(state::State, time_units::Float64, simulation_name::String)
+function run_simulation(
+  state::State,
+  time_units::Float64,
+  simulation_name::String;
+  simulation_logger::Logging.AbstractLogger=Logger.make_logger(state),
+)
   action_is_valid(simulation_name, false)  # This already checks if blocked
 
   if state.simulation === nothing
@@ -826,7 +835,7 @@ function run_simulation(state::State, time_units::Float64, simulation_name::Stri
     try
       # Let the request task hand its accepted response back to the HTTP server.
       sleep(0)
-      _run_simulation(state)
+      _run_simulation(state, simulation_logger)
     catch e
       _record_run_error!(state, e, catch_backtrace())
     finally

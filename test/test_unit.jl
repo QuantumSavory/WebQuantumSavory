@@ -1088,6 +1088,69 @@
       @test abs(LinearAlgebra.tr(density_operator)) ≈ 1
   end
 
+  @testset "Platform Information" begin
+      tree_hash = repeat("1", 40)
+      tracked_source = "https://github.com/QuantumSavory/QuantumSavory.jl.git"
+      quantumsavory_package = (
+        version=v"0.7.0",
+        tree_hash,
+        git_revision="master",
+        git_source=tracked_source,
+      )
+      genie_package = (version=v"5.35.15",)
+      dependencies = Dict{Base.UUID,Any}(
+        Base.PkgId(WebQuantumSavory.Genie).uuid => genie_package,
+        Base.PkgId(QuantumSavory).uuid => quantumsavory_package,
+      )
+
+      mktemp() do project_file, project_io
+        write(project_io, "version = \"9.8.7\"\n")
+        flush(project_io)
+        info = WebQuantumSavory.get_platform_info(
+          dependencies_provider=() -> dependencies,
+          project_file=project_file,
+        )
+
+        @test all(haskey(info["versions"], key) for key in ("julia", "quantumsavory", "app"))
+        @test info["versions"]["julia"] == string(VERSION)
+        @test info["versions"]["genie"] == "5.35.15"
+        @test info["versions"]["quantumsavory"] == "0.7.0"
+        @test info["versions"]["app"] == "9.8.7"
+        @test info["capabilities"]["unsafe_code_evaluation"] isa Bool
+
+        details = info["quantumsavory"]
+        @test details["version"] == info["versions"]["quantumsavory"]
+        @test details["tracked_revision"] == "master"
+        @test details["tracked_source"] == tracked_source
+        @test details["tree_hash"] == tree_hash
+        @test details["commit"] === nothing
+      end
+
+      full_sha = uppercase(repeat("a1", 20))
+      committed = WebQuantumSavory._quantumsavory_platform_info(merge(
+        quantumsavory_package,
+        (git_revision=full_sha,),
+      ))
+      @test committed["commit"] == lowercase(full_sha)
+      @test committed["tree_hash"] == tree_hash
+      @test committed["commit"] != committed["tree_hash"]
+
+      full_sha_256 = repeat("b2", 32)
+      @test WebQuantumSavory._full_commit_sha(full_sha_256) == full_sha_256
+      for revision in (nothing, "", "master", "v0.7.0", "deadbeef", repeat("c", 39))
+        @test WebQuantumSavory._full_commit_sha(revision) === nothing
+      end
+
+      unavailable = WebQuantumSavory.get_platform_info(
+        dependencies_provider=() -> error("Pkg introspection failed"),
+        project_file="/missing/WebQuantumSavory/Project.toml",
+      )
+      @test unavailable["versions"]["genie"] === nothing
+      @test unavailable["versions"]["quantumsavory"] === nothing
+      @test unavailable["versions"]["app"] === nothing
+      @test all(value === nothing for value in values(unavailable["quantumsavory"]))
+  end
+
   @testset "Server Startup Warmup" begin
       @test WebQuantumSavory.start_startup_warmup!() === nothing
       @test !WebQuantumSavory.STARTUP_WARMUP_COMPLETE[]
@@ -1101,11 +1164,21 @@
       end
 
       state_names_before = Set(keys(WebQuantumSavory.STATE))
-      report = WebQuantumSavory._run_startup_warmup!()
+      report, warmup_stderr = mktemp() do _, stderr_io
+        report = redirect_stderr(stderr_io) do
+          WebQuantumSavory._run_startup_warmup!()
+        end
+        flush(stderr_io)
+        seekstart(stderr_io)
+        return report, read(stderr_io, String)
+      end
       @test report.demo == "2.Entangler.Example.with.consumer.json"
       @test report.protocol_count == 2
       @test report.generated_state_count > 0
       @test report.states_zoo_type == "BarrettKokBellPair"
+      @test !occursin("QuantumSavory.ProtocolZoo", warmup_stderr)
+      @test !occursin("EntanglerProt", warmup_stderr)
+      @test !occursin("EntanglementConsumer", warmup_stderr)
       @test Set(keys(WebQuantumSavory.STATE)) == state_names_before
 
       # Failure after parsing and preparing must still remove the private state.
@@ -2143,6 +2216,23 @@
     @test all(log["source"] == "Simulator" for log in structured_state.log_events)
     @test length(unique(log["id"] for log in structured_state.log_events)) == 2
     @test JSON.parse(JSON.json(structured_state.log_events)) isa Vector
+
+    silent_state = WebQuantumSavory.State(name="silent_structured_logs")
+    silent_logger = WebQuantumSavory.Logger.make_logger(
+      silent_state;
+      console=Logging.NullLogger(),
+    )
+    Logging.handle_message(
+      silent_logger,
+      Logging.Debug,
+      "captured without console output",
+      QuantumSavory,
+      :unit,
+      :silent_debug,
+      @__FILE__,
+      @__LINE__,
+    )
+    @test only(silent_state.log_events)["message"] == "captured without console output"
 
     # Create a test state with log events
     test_logs = [

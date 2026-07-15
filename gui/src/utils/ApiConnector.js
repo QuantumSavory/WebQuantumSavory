@@ -299,15 +299,23 @@ export class ApiConnector {
       })
       if (!res.ok) throw new Error(`Platform info fetch failed: ${res.status}`)
       const result = await res.json()
+      const versions = result?.versions && typeof result.versions === 'object'
+        ? result.versions
+        : {}
+      const capabilities = result?.capabilities && typeof result.capabilities === 'object'
+        ? result.capabilities
+        : {}
       this._platformInfo.value = {
+        ...result,
         versions: {
-          julia: result.versions.julia, 
-          quantumSavory: result.versions.quantumsavory, 
-          app: result.versions.app
+          ...versions,
+          quantumSavory: versions.quantumSavory ?? versions.quantumsavory,
         },
         capabilities: {
-          unsafeCodeEvaluation: result.capabilities?.unsafe_code_evaluation === true
-        }
+          ...capabilities,
+          unsafeCodeEvaluation: capabilities.unsafeCodeEvaluation === true
+            || capabilities.unsafe_code_evaluation === true,
+        },
       }
       return result
     } catch (e) {

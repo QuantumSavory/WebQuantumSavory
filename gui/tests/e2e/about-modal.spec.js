@@ -35,6 +35,23 @@ test('About describes the project, its support, and ways to participate', async 
     'https://maplibre.org/maplibre-gl-js/docs/'
   )
 
+  await expect(dialog.getByRole('link', { name: 'Julia installation page' })).toHaveAttribute(
+    'href',
+    'https://julialang.org/install/'
+  )
+  const localSteps = dialog.locator('.local-run-steps > li')
+  await expect(localSteps).toHaveCount(4)
+  await expect(localSteps.nth(0)).toContainText('Install Juliaup through the Julia installation page.')
+  await expect(localSteps.nth(1).locator('code')).toHaveText(
+    'git clone https://github.com/QuantumSavory/WebQuantumSavory.git'
+  )
+  await expect(localSteps.nth(2).locator('code')).toHaveText(
+    "julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'"
+  )
+  await expect(localSteps.nth(3).locator('code')).toHaveText(
+    'GENIE_ENV=dev WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true ./bin/server'
+  )
+
   await expect(dialog.getByRole('link', { name: 'Krastanov Lab' })).toHaveAttribute(
     'href',
     'https://lab.krastanov.org/'

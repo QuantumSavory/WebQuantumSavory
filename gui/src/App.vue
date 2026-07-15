@@ -38,13 +38,13 @@ import ProjectNameDialog from './components/ProjectNameDialog.vue'
 import ImportConflictDialog from './components/ImportConflictDialog.vue'
 import OpenProjectDialog from './components/OpenProjectDialog.vue'
 import AboutModal from './components/AboutModal.vue'
+import SystemInformationDialog from './components/SystemInformationDialog.vue'
 import UnsavedChangesDialog from './components/UnsavedChangesDialog.vue'
 import AlertModal from './components/AlertModal.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
 import RepeaterChainDialog from './components/RepeaterChainDialog.vue'
 import StarNetworkDialog from './components/StarNetworkDialog.vue'
 import GraphNetworkDialog from './components/GraphNetworkDialog.vue'
-import packageJson from '../package.json'
 import VoidPanel from './components/panels/VoidPanel.vue'
 import ResultsView from './components/panels/ResultsView.vue'
 import LucideMenuIcon from './components/LucideMenuIcon.vue'
@@ -78,6 +78,7 @@ import { registerLegacyBridge, syncLegacyProjectData } from './utils/legacyBridg
 import { generateRepeaterChain } from './utils/repeaterChain.js'
 import { generateStarNetwork } from './utils/starNetwork.js'
 import { generateGraphNetwork, GRAPH_TOPOLOGIES } from './utils/graphNetwork.js'
+import { frontendBuildInfo } from './utils/frontendBuildInfo.js'
 import {
   normalizeLogSeverity,
   normalizeLogSource,
@@ -186,9 +187,9 @@ function addLog(level, message, source = 'App', extendedInfo = null, options = {
 }
 
 const activePanic = ref(null)
-const panicPlatformInfo = computed(() => {
-  const platformInfo = api.getPlatformInfo()
-  return platformInfo && typeof platformInfo === 'object' ? platformInfo : {}
+const platformInfo = computed(() => {
+  const cachedPlatformInfo = api.getPlatformInfo()
+  return cachedPlatformInfo && typeof cachedPlatformInfo === 'object' ? cachedPlatformInfo : {}
 })
 const showRepeaterChainDialog = ref(false)
 const showStarNetworkDialog = ref(false)
@@ -393,6 +394,7 @@ const {
   projectNameDialogMode,
   projectNameDialogInitialValue,
   showAboutModal,
+  showSystemInformation,
   selectedNodeIndex
 } = useAppState({ projectData, selectedItem, selectedType })
 
@@ -629,8 +631,8 @@ const demoProjects = [
   { name: demo2.name, data: demo2 }
 ]
 
-// App version from package.json
-const appVersion = ref(packageJson.version)
+// The exact frontend version is injected from package-lock.json at build time.
+const appVersion = frontendBuildInfo.appVersion
 
 function clearLogs() {
   applicationLogs.value = []
@@ -1040,7 +1042,15 @@ onUnmounted(() => {
       <div class="topbar-title">
         <img src="./assets/logo.png" alt="WebQuantumSavory Logo" class="topbar-logo">
         WebQuantumSavory Simulation Builder
-        <span class="version-badge">v{{ appVersion }}</span>
+        <button
+          type="button"
+          class="version-badge"
+          :aria-label="`WebQuantumSavory version ${appVersion}. Open System Information`"
+          title="Open System Information"
+          @click="showSystemInformation = true"
+        >
+          v{{ appVersion }}
+        </button>
         <span
           v-if="applicationShellPending"
           class="topbar-loading-indicator"
@@ -1322,6 +1332,12 @@ onUnmounted(() => {
       @close="showAboutModal = false"
     />
 
+    <SystemInformationDialog
+      :show="showSystemInformation"
+      :platform-info="platformInfo"
+      @close="showSystemInformation = false"
+    />
+
     <!-- Alert Modal Component -->
     <AlertModal
       :show="showAlertModal"
@@ -1335,7 +1351,7 @@ onUnmounted(() => {
       :panic="activePanic || {}"
       :serialize-project="serializePanicProject"
       :project-name="currentProjectName || projectData.name"
-      :platform-info="panicPlatformInfo"
+      :platform-info="platformInfo"
       @close="activePanic = null"
     />
 

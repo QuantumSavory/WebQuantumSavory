@@ -147,7 +147,13 @@ function _run_startup_warmup!(;
       )
       warmup_state = parse_network_graph(validate_payload(payload))
       prepare_simulation(warmup_state, STARTUP_WARMUP_STATE_NAME)
-      run_simulation(warmup_state, Float64(simulation_target), STARTUP_WARMUP_STATE_NAME)
+      warmup_logger = Logger.make_logger(warmup_state; console=Logging.NullLogger())
+      run_simulation(
+        warmup_state,
+        Float64(simulation_target),
+        STARTUP_WARMUP_STATE_NAME;
+        simulation_logger=warmup_logger,
+      )
 
       run_task = warmup_state.run_task
       run_task === nothing && error("Startup warmup simulation did not create a run task")
@@ -191,7 +197,7 @@ function start_startup_warmup!()
   return lock(STARTUP_WARMUP_LOCK) do
     STARTUP_WARMUP_COMPLETE[] && return nothing
     started_at = time()
-    @info "Starting server warmup"
+    @info "Running startup warmup precompilation"
 
     report = try
       _run_startup_warmup!()

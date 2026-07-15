@@ -111,7 +111,31 @@
   @testset "Platform Info" begin
       @test platform_info_response.status == 200
       @test haskey(platform_info, "versions")
+      @test haskey(platform_info, "quantumsavory")
       @test haskey(platform_info, "capabilities")
+      versions = platform_info["versions"]
+      @test all(haskey(versions, key) for key in ("julia", "genie", "quantumsavory", "app"))
+      @test all(versions[key] isa String && !isempty(versions[key]) for key in (
+        "julia",
+        "genie",
+        "quantumsavory",
+        "app",
+      ))
+
+      quantumsavory = platform_info["quantumsavory"]
+      @test quantumsavory["version"] == versions["quantumsavory"]
+      @test quantumsavory["tracked_revision"] isa String
+      @test !isempty(quantumsavory["tracked_revision"])
+      @test quantumsavory["tracked_source"] isa String
+      @test !isempty(quantumsavory["tracked_source"])
+      @test quantumsavory["tree_hash"] isa String
+      @test !isempty(quantumsavory["tree_hash"])
+      revision = quantumsavory["tracked_revision"]
+      if occursin(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$", revision)
+        @test quantumsavory["commit"] == lowercase(revision)
+      else
+        @test quantumsavory["commit"] === nothing
+      end
       @test unsafe_evaluation_enabled isa Bool
   end
 

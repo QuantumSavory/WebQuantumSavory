@@ -38,7 +38,17 @@ describe('panic report data', () => {
 
   it('builds complete Markdown with panic, version, and reproduction details', () => {
     const report = buildPanicReport(panic, {
-      versions: { app: '1.6.0', quantumSavory: '0.7.2', julia: '1.12.1' },
+      versions: {
+        app: '1.6.0',
+        quantumSavory: '0.7.2',
+        julia: '1.12.1',
+        genie: '5.33.8',
+      },
+      quantumsavory: {
+        tracked_source: 'https://github.com/QuantumSavory/QuantumSavory.jl.git',
+        tracked_revision: 'master',
+        tree_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      },
     })
 
     expect(report).toContain('# WebQuantumSavory simulator panic report')
@@ -49,6 +59,15 @@ describe('panic report data', () => {
     expect(report).toContain('- WebQuantumSavory: 1.6.0')
     expect(report).toContain('- QuantumSavory: 0.7.2')
     expect(report).toContain('- Julia: 1.12.1')
+    expect(report).toContain('- Genie: 5.33.8')
+    expect(report).toContain('- QuantumSavory tracked source: https://github.com/QuantumSavory/QuantumSavory.jl.git')
+    expect(report).toContain('- QuantumSavory tracked revision: master')
+    expect(report).toContain('- QuantumSavory Pkg tree hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(report).not.toContain('- QuantumSavory commit:')
+    expect(report).toContain('### Frontend runtime dependencies')
+    expect(report).toContain('- vue: 3.5.21')
+    expect(report).toContain('### Frontend development dependencies')
+    expect(report).toContain('- vite: 6.4.3')
     expect(report).toContain('## Reproduction')
     expect(report).toContain('not uploaded automatically')
   })
@@ -60,6 +79,19 @@ describe('panic report data', () => {
 
     expect(report).toContain('- WebQuantumSavory: 2.0')
     expect(report).toContain('- QuantumSavory: 1.0')
+  })
+
+  it('includes a commit only when the backend provides a full commit SHA', () => {
+    const commit = '0123456789abcdef0123456789abcdef01234567'
+    const report = buildPanicReport(panic, {
+      quantumsavory: {
+        tree_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        commit,
+      },
+    })
+
+    expect(report).toContain(`- QuantumSavory commit: ${commit}`)
+    expect(report).not.toContain('- QuantumSavory commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
   })
 })
 
