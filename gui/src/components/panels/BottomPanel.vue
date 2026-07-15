@@ -213,6 +213,12 @@
           >
             <LayoutToolsPanel
               :disabled="helpersDisabled"
+              :physical-config="projectData.net.physicalConfig"
+              :curve-editing-enabled="curveEditingEnabled"
+              :show-physical-badges="showPhysicalBadges"
+              @update:refractive-index="emit('update:refractive-index', $event)"
+              @update:curve-editing-enabled="emit('update:curve-editing-enabled', $event)"
+              @update:show-physical-badges="emit('update:show-physical-badges', $event)"
               @open-repeater-chain-generator="emit('open-repeater-chain-generator')"
               @open-star-network-generator="emit('open-star-network-generator')"
               @open-graph-network-generator="emit('open-graph-network-generator')"
@@ -317,6 +323,14 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  curveEditingEnabled: {
+    type: Boolean,
+    default: false
+  },
+  showPhysicalBadges: {
+    type: Boolean,
+    default: true
+  },
   variables: {
     type: Array,
     default: () => []
@@ -368,6 +382,9 @@ const emit = defineEmits([
   'open-repeater-chain-generator',
   'open-star-network-generator',
   'open-graph-network-generator',
+  'update:refractive-index',
+  'update:curve-editing-enabled',
+  'update:show-physical-badges',
   'update:collapsed'
 ])
 
