@@ -2,6 +2,8 @@
 
 ## 1.8.0
 
+- Added dependency-backed Bézier routing for physical links with typed smooth/sharp anchors, geodesic distance and propagation-delay badges, editable physical defaults and per-edge overrides, and schema-v1 legacy normalization.
+- Applied each resolved physical-link delay to both directed classical and quantum simulator channels and generated scripts, while excluding virtual links from physical graphs and retaining their permitted protocols.
 - Added immediate, accessible loading feedback for simulation setup and application-shell initialization while keeping ordinary execution, polling, tag previews, plots, and script export on their existing local indicators.
 - Made Markdown tooltips stack consistently above application overlays for both top and bottom placements.
 - Added documented local-run steps and an accessible System Information dialog with Julia, Genie, QuantumSavory provenance, WebQuantumSavory, and exact frontend dependency versions; copied panic reports now include the same normalized diagnostics.
