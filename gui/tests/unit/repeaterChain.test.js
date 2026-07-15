@@ -333,6 +333,33 @@ describe('Swapper predicate source generation', () => {
 })
 
 describe('repeater-chain protocol automation', () => {
+  it('starts generated physical links straight and retains only template refractive index', () => {
+    const { net, templateEdge } = makeNetwork()
+    templateEdge.data.curvePoints = [
+      { id: 'template-curve-point', position: [-71, 43], type: 'smooth' }
+    ]
+    templateEdge.data.physicalOverrides = {
+      distanceMeters: 42,
+      refractiveIndex: 1.5,
+      delaySeconds: 0.25
+    }
+    templateEdge.data.propagationDelaySeconds = 0.25
+
+    const result = generateRepeaterChain(net, baseOptions({ repeaterCount: 2 }))
+
+    result.chainEdges.forEach(edge => {
+      expect(edge.data.curvePoints).toEqual([])
+      expect(edge.data.physicalOverrides).toEqual({
+        distanceMeters: null,
+        refractiveIndex: 1.5,
+        delaySeconds: null
+      })
+      expect(edge.data).not.toHaveProperty('propagationDelaySeconds')
+    })
+    expect(result.virtualEdge.data).not.toHaveProperty('curvePoints')
+    expect(result.virtualEdge.data).not.toHaveProperty('physicalOverrides')
+  })
+
   it('preserves the original cloning behavior when automation is absent', () => {
     const startTracker = protocol('start-tracker', TRACKER_TYPE)
     const endTracker = protocol('end-tracker', TRACKER_TYPE)

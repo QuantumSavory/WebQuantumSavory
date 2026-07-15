@@ -129,7 +129,12 @@ describe('createEmptyProject', () => {
       description: '',
       variables: [],
       simulationConfig: { time: 1, timeStep: 0.1 },
-      net: { nodes: [], edges: [], protocols: [] },
+      net: {
+        nodes: [],
+        edges: [],
+        protocols: [],
+        physicalConfig: { refractiveIndex: 1.468 },
+      },
     })
     expect(second.name).toBe('Second')
     expect(first.net).not.toBe(second.net)
@@ -175,6 +180,9 @@ describe('decodeStoredProject', () => {
     expect(edge.target).toBe(nodeA)
     expect(edge.futureEdgeField).toBe('preserve me')
     expect(edge.data.protocols[0]).toBeInstanceOf(FloatingProtocol)
+    expect(edge.data.curvePoints).toEqual([])
+    expect(edge.data.physicalOverrides).toBeNull()
+    expect(decoded.project.net.physicalConfig).toEqual({ refractiveIndex: 1.468 })
     expect(decoded.project.net.protocols[0]).toBeInstanceOf(FloatingProtocol)
 
     expect(decoded.project.variables[0]).toBeInstanceOf(Variable)
@@ -209,7 +217,12 @@ describe('decodeStoredProject', () => {
       description: '',
       variables: [],
       simulationConfig: { time: 1, timeStep: 0.1 },
-      net: { nodes: [], edges: [], protocols: [] },
+      net: {
+        nodes: [],
+        edges: [],
+        protocols: [],
+        physicalConfig: { refractiveIndex: 1.468 },
+      },
     })
     expect(decoded.map).toEqual({ position: [1, 2], zoom: 3 })
   })
@@ -263,6 +276,58 @@ describe('decodeStoredProject', () => {
     dangling.net.edges[0].target = 'missing_node'
     expect(() => decodeStoredProject(dangling)).toThrow(/references a missing node/)
   })
+
+  it('normalizes physical routes and overrides while rejecting ambiguous or invalid data', () => {
+    const raw = legacyProject()
+    raw.net.physicalConfig = { refractiveIndex: 1.5 }
+    raw.net.edges[0].data.curvePoints = [{
+      id: 'curve_1',
+      position: [-72, 43],
+      type: 'smooth',
+    }]
+    raw.net.edges[0].data.physicalOverrides = {
+      distanceMeters: 1200,
+      refractiveIndex: null,
+      delaySeconds: null,
+    }
+
+    const { project } = decodeStoredProject(raw)
+    // Node-order normalization reverses route anchors with the endpoints.
+    expect(project.net.edges[0].data.curvePoints).toEqual([{
+      id: 'curve_1',
+      position: [-72, 43],
+      type: 'smooth',
+    }])
+    expect(project.net.edges[0].data.physicalOverrides).toEqual({
+      distanceMeters: 1200,
+      refractiveIndex: null,
+      delaySeconds: null,
+    })
+    expect(project.net.physicalConfig).toEqual({ refractiveIndex: 1.5 })
+
+    const duplicate = legacyProject()
+    duplicate.net.edges.push({
+      ...structuredClone(duplicate.net.edges[0]),
+      id: 'duplicate',
+      source: 'node_b',
+      target: 'node_a',
+    })
+    expect(() => decodeStoredProject(duplicate)).toThrow(/duplicate physical edge endpoints/)
+    duplicate.net.edges[1].isLogic = true
+    expect(() => decodeStoredProject(duplicate)).not.toThrow()
+
+    const invalid = legacyProject()
+    invalid.net.edges[0].data.curvePoints = [{
+      id: 'bad', position: [-72, 43], type: 'rounded',
+    }]
+    expect(() => decodeStoredProject(invalid)).toThrow(/smooth or sharp/)
+    invalid.net.edges[0].data.curvePoints = []
+    invalid.net.edges[0].data.physicalOverrides = { delaySeconds: -1 }
+    expect(() => decodeStoredProject(invalid)).toThrow(/nonnegative/)
+    invalid.net.edges[0].data.physicalOverrides = null
+    invalid.net.edges[0].isLogic = 'true'
+    expect(() => decodeStoredProject(invalid)).toThrow(/isLogic must be a boolean/)
+  })
 })
 
 describe('encodeStoredProject', () => {
@@ -302,6 +367,7 @@ describe('encodeStoredProject', () => {
       target: 'node_a',
       futureEdgeField: 'preserve me',
     })
+    expect(encoded.net.physicalConfig).toEqual({ refractiveIndex: 1.468 })
     expect(encoded.variables[0].value.kind).toBe('states_zoo')
     expect(encoded.net.nodes[0]).not.toBeInstanceOf(Node)
     expect(encoded.net.edges[0]).not.toBeInstanceOf(Edge)
@@ -436,6 +502,10 @@ describe('backend payload codecs', () => {
       },
     ])
     expect(payload.net.edges[0]).toMatchObject({ source: 'node_b', target: 'node_a' })
+    expect(payload.net).not.toHaveProperty('physicalConfig')
+    expect(payload.net.edges[0].data).not.toHaveProperty('curvePoints')
+    expect(payload.net.edges[0].data).not.toHaveProperty('physicalOverrides')
+    expect(payload.net.edges[0].data.propagationDelaySeconds).toBeGreaterThan(0)
 
     expect(slot.isLocked).toBe(true)
     expect(slot.backgroundNoise.doc).toBe('Editor documentation')

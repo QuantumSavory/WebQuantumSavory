@@ -21,6 +21,16 @@ export default class Edge {
     this.target = target
     this.data = { ...data }
     this.isLogic = isLogic
+    if (this.isLogic) {
+      delete this.data.curvePoints
+      delete this.data.physicalOverrides
+      delete this.data.propagationDelaySeconds
+    } else {
+      this.data.curvePoints = Array.isArray(this.data.curvePoints)
+        ? this.data.curvePoints
+        : []
+      this.data.physicalOverrides = this.data.physicalOverrides ?? null
+    }
   }
 
   /**
@@ -68,4 +78,4 @@ export default class Edge {
       data: { ...this.data }
     }
   }
-} 
+}
