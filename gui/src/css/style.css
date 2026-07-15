@@ -22,6 +22,21 @@
   --app-color-panic-soft: #ffe5ef;
   --app-color-warning: #f16938;
   --app-color-warning-hover: #fb835f;
+  --app-color-tag-named: #3730a3;
+  --app-color-tag-named-soft: #e8e8ff;
+  --app-color-tag-general: #0f5f57;
+  --app-color-tag-general-soft: #dcf5f0;
+  --app-color-tag-symbol: #7a3e00;
+  --app-color-tag-symbol-soft: #fff0d6;
+  --app-color-tag-datatype: #075985;
+  --app-color-tag-datatype-soft: #e0f2fe;
+  --app-color-tag-number: #166534;
+  --app-color-tag-number-soft: #dcfce7;
+  --app-color-tag-value-soft: #eef0f3;
+  --app-color-tag-wildcard: #6b3d00;
+  --app-color-tag-wildcard-soft: #fff1c2;
+  --app-color-tag-predicate: #7e225e;
+  --app-color-tag-predicate-soft: #fce7f3;
   --app-color-disabled-surface: #e0e0e0;
   --app-color-disabled-text: #9e9e9e;
   --app-overlay-background: rgba(0, 0, 0, 0.18);
@@ -260,6 +275,76 @@ h1 {
   box-shadow: 1px 2px 10px #00003090 !important;
   max-width: 300px !important;
   font-size: 0.9rem !important;
+  overflow-wrap: anywhere;
+}
+
+.p-tooltip-text > :first-child {
+  margin-top: 0;
+}
+
+.p-tooltip-text > :last-child {
+  margin-bottom: 0;
+}
+
+.p-tooltip-text p,
+.p-tooltip-text ul,
+.p-tooltip-text ol,
+.p-tooltip-text pre {
+  margin: 0 0 var(--app-space-2);
+}
+
+.p-tooltip-text ul,
+.p-tooltip-text ol {
+  padding-left: var(--app-space-6);
+}
+
+.p-tooltip-text li + li {
+  margin-top: 2px;
+}
+
+.p-tooltip-text code {
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: var(--app-color-surface-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.p-tooltip-text pre {
+  max-height: 200px;
+  overflow: auto;
+  padding: var(--app-space-2);
+  border-radius: var(--app-radius-control);
+  color: var(--app-color-danger);
+  background: var(--app-color-danger-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.p-tooltip-text pre code {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  white-space: inherit;
+}
+
+.p-tooltip-text a {
+  color: var(--app-color-primary);
+  text-decoration: underline;
+}
+
+.p-tooltip-text img {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+}
+
+.p-tooltip-text .katex-display {
+  max-width: 100%;
+  margin: var(--app-space-2) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .TL_word{
@@ -279,12 +364,6 @@ h1 {
 /* HighCode overlays its textarea on highlighted code; both layers need the same inset. */
 .code-editor-with-symbols .code_area pre code.hljs{
   padding: 0;
-}
-
-.p-tooltip-text > pre{
-  color: #f00;
-  overflow: auto;
-  max-height: 200px;
 }
 
 .reduce-y-tooltip{

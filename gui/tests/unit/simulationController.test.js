@@ -240,4 +240,38 @@ describe('simulation controller polling ownership', () => {
     expect(showPanic).toHaveBeenCalledWith(expect.objectContaining({ id: panic.id }))
     stop()
   })
+
+  it('keeps tag exploration live for recoverable errors but disables it after timeout cleanup', async () => {
+    const api = {
+      parseNetworkGraph: vi.fn(async () => ({ success: true, state: { status: 'created' } })),
+      getSimulationStatus: vi.fn()
+        .mockResolvedValueOnce({
+          success: true,
+          state: { simulation: { simulation_error: 'protocol failed' } }
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          state: { simulation: { simulation_execution_time_exceeded: true } }
+        })
+    }
+    const { controller, projectData, stop } = createController(api)
+    projectData.value.net.nodes.push({
+      id: 'node-1',
+      data: { slots: [{ id: 'slot-1', isLocked: false, assignment: false }] }
+    })
+
+    await controller.prepareNetworkGraph(false)
+    expect(controller.capabilities.value.canExploreTags).toBe(true)
+
+    await controller.getSimulationStatus(false)
+    expect(controller.phase.value).toBe('error')
+    expect(controller.capabilities.value.canExploreTags).toBe(true)
+
+    await controller.getSimulationStatus(false)
+    expect(controller.capabilities.value.canExploreTags).toBe(false)
+
+    controller.resetSimulation()
+    expect(controller.capabilities.value.canExploreTags).toBe(false)
+    stop()
+  })
 })

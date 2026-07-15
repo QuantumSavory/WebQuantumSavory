@@ -64,9 +64,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { PencilLine, Save, X } from '@lucide/vue'
-import MarkdownIt from 'markdown-it'
-import markdownItKatexModule from '@vscode/markdown-it-katex'
-import { SAFE_KATEX_OPTIONS } from '../../utils/katexOptions'
+import { renderMarkdown } from '../../utils/markdown.js'
 import { getClipboardImageFiles, imageFilesToMarkdown } from '../../utils/markdownImagePaste'
 
 const props = defineProps({
@@ -78,18 +76,12 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 
-const markdownItKatex = markdownItKatexModule.default ?? markdownItKatexModule
-const markdown = new MarkdownIt({
-  html: false,
-  linkify: true
-}).use(markdownItKatex, SAFE_KATEX_OPTIONS)
-
 const isEditing = ref(false)
 const draft = ref(props.modelValue)
 const editor = ref(null)
 const pasteError = ref('')
 const isEmbeddingImage = ref(false)
-const renderedDescription = computed(() => markdown.render(props.modelValue))
+const renderedDescription = computed(() => renderMarkdown(props.modelValue))
 let pasteOperation = 0
 
 function resetPasteState() {

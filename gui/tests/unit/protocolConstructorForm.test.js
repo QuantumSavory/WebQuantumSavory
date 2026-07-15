@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import ProtocolConstructorForm from '../../src/components/panels/ProtocolConstructorForm.vue'
 import ProtocolEditor from '../../src/components/panels/ProtocolEditor.vue'
@@ -74,6 +74,20 @@ describe('ProtocolConstructorForm', () => {
     expect(wrapper.get('.param-name').attributes('data-tooltip')).toBe('Number of rounds.')
     expect(wrapper.get('input[type="number"]').element.value).toBe('3')
     expect(wrapper.get('input[type="number"]').attributes('step')).toBe('1')
+  })
+
+  it('adds unsupported parameter types to documentation as Markdown', () => {
+    const wrapper = mountForm({
+      protocol: {
+        type: PROTOCOL_TYPE,
+        parameters: [{ name: 'rounds', type: 'UnknownType', value: '' }]
+      },
+      category: 'node'
+    })
+
+    expect(wrapper.get('.param-name').attributes('data-tooltip')).toBe(
+      'Number of rounds.\n\n**Unsupported:** `UnknownType`'
+    )
   })
 
   it('renders an explicit empty constructor panel when no configurable fields remain', () => {
@@ -283,6 +297,38 @@ describe('TypedValueInput disabled code values', () => {
 
     await editor.trigger('dblclick')
     expect(parameter.value).toBe('x -> x < self')
+  })
+
+  it('passes raw validator responses and transport errors as Markdown code blocks', async () => {
+    vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
+    const validate = vi.spyOn(api, 'validateFunction').mockResolvedValue({
+      success: false,
+      error: 'bad <lambda> & "quote" \'single\'\\nnext'
+    })
+    const parameter = { name: 'nodeL', value: 'x -> true' }
+    const wrapper = mount(TypedValueInput, {
+      props: { parameter, type: 'Lambda', category: 'node' },
+      global: {
+        stubs: {
+          CodeEditorWithSymbols: {
+            props: ['errorMessage'],
+            emits: ['validate'],
+            template: '<button class="validate-code-stub" @click="$emit(\'validate\')">Validate</button>'
+          }
+        }
+      }
+    })
+
+    await wrapper.get('.validate-code-stub').trigger('click')
+    await flushPromises()
+    expect(parameter.error).toBe(
+      '```\nbad <lambda> & "quote" \'single\'\\nnext\n```'
+    )
+
+    validate.mockRejectedValueOnce(new Error('<transport> & "down"'))
+    await wrapper.get('.validate-code-stub').trigger('click')
+    await flushPromises()
+    expect(parameter.error).toBe('```\n<transport> & "down"\n```')
   })
 })
 

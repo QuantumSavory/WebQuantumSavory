@@ -39,6 +39,21 @@ describe('custom-function contextual help', () => {
     expect(wrapper.findComponent(CustomFunctionContextHelp).exists()).toBe(false)
   })
 
+  it('keeps editor actions from submitting an enclosing constructor form', () => {
+    const wrapper = shallowMount(CodeEditorWithSymbols, {
+      props: { evaluationEnabled: true },
+      global: {
+        directives: { tooltip: () => {} }
+      }
+    })
+
+    expect(wrapper.get('.validate-button').attributes('type')).toBe('button')
+    expect(wrapper.findAll('.symbol-button')).not.toHaveLength(0)
+    expect(wrapper.findAll('.symbol-button').every(button => (
+      button.attributes('type') === 'button'
+    ))).toBe(true)
+  })
+
   it('explains name lookup beside the one-based node indices', () => {
     const wrapper = mount(NodeListPanel, {
       props: {

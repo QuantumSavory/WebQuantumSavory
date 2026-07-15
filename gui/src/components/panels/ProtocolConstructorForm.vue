@@ -13,7 +13,6 @@
           <div
             v-tooltip.top="{
               value: protocolParameterDefinitionText(param),
-              escape: false,
               pt: { arrow: { style: { borderTopColor: '#fff' } } }
             }"
             class="param-name"
@@ -238,10 +237,8 @@ function protocolParameterDefinitionText(param) {
   )?.doc || 'NO DOC'
   const unknownTypes = paramUnknownTypes(param.type)
   if (unknownTypes.length > 0) {
-    result += '<br/><br/>'
-    result += '<span style="color: #ff0000;"><b>Unsupported:</b> '
-      + unknownTypes.join(', ')
-      + '</span>'
+    result += '\n\n**Unsupported:** '
+      + unknownTypes.map(type => `\`${type}\``).join(', ')
   }
   return result
 }

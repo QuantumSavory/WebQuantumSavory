@@ -122,6 +122,22 @@
             >
               Export Script
             </button>
+            <button
+              id="bottom-panel-tags-queries-tab"
+              type="button"
+              role="tab"
+              class="bottom-tab"
+              :class="{ active: activeTab === 'tags-queries' }"
+              :aria-selected="activeTab === 'tags-queries'"
+              aria-controls="bottom-panel-tags-queries-content"
+              :aria-disabled="!tagsExplorerEnabled"
+              :disabled="!tagsExplorerEnabled"
+              :tabindex="activeTab === 'tags-queries' && tagsExplorerEnabled ? 0 : -1"
+              @click="activeTab = 'tags-queries'"
+              @keydown="handleTabKeydown($event, 6)"
+            >
+              Tags &amp; Queries
+            </button>
           </div>
 
           <section
@@ -216,6 +232,22 @@
               :payload="exportScriptPayload"
             />
           </section>
+
+          <section
+            v-show="activeTab === 'tags-queries'"
+            id="bottom-panel-tags-queries-content"
+            class="bottom-tab-panel tags-queries-tab-panel"
+            role="tabpanel"
+            aria-labelledby="bottom-panel-tags-queries-tab"
+            tabindex="0"
+          >
+            <TagsQueriesPanel
+              :active="activeTab === 'tags-queries'"
+              :enabled="tagsExplorerEnabled"
+              :project-name="projectName"
+              :project-data="projectData"
+            />
+          </section>
         </div>
       </template>
     </BasePanel>
@@ -261,6 +293,7 @@ import LayoutToolsPanel from './LayoutToolsPanel.vue'
 import LogsPanel from './LogsPanel.vue'
 import StatesZooPanel from './StatesZooPanel.vue'
 import VariablesPanel from './VariablesPanel.vue'
+import TagsQueriesPanel from '../tags/TagsQueriesPanel.vue'
 import { normalizeLogSeverity } from '../../utils/logRecords.js'
 
 const props = defineProps({
@@ -300,6 +333,14 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  tagsExplorerEnabled: {
+    type: Boolean,
+    default: false
+  },
+  projectName: {
+    type: String,
+    default: ''
+  },
   collapsable: {
     type: Boolean,
     default: true
@@ -331,7 +372,15 @@ const emit = defineEmits([
 ])
 
 const activeTab = ref('logs')
-const tabNames = ['logs', 'description', 'variables', 'states-zoo', 'layout-tools', 'export-script']
+const tabNames = [
+  'logs',
+  'description',
+  'variables',
+  'states-zoo',
+  'layout-tools',
+  'export-script',
+  'tags-queries'
+]
 
 const PANEL_SIZE_STORAGE_KEY = 'bottomPanel_size'
 const DEFAULT_PANEL_WIDTH = 800
@@ -392,6 +441,13 @@ watch([maxPanelWidth, maxPanelHeight], () => {
   panelHeight.value = nextHeight
   if (dimensionsChanged) persistPanelSize()
 })
+
+watch(
+  () => props.tagsExplorerEnabled,
+  enabled => {
+    if (!enabled && activeTab.value === 'tags-queries') activeTab.value = 'logs'
+  }
+)
 
 const logCounts = computed(() => {
   const counts = {
@@ -491,16 +547,21 @@ function handleResizeKeydown(dimension, event) {
 }
 
 function handleTabKeydown(event, currentIndex) {
+  const enabledIndexes = tabNames
+    .map((name, index) => ({ name, index }))
+    .filter(({ name }) => name !== 'tags-queries' || props.tagsExplorerEnabled)
+    .map(({ index }) => index)
+  const enabledPosition = enabledIndexes.indexOf(currentIndex)
   let nextIndex = currentIndex
 
   if (event.key === 'ArrowRight') {
-    nextIndex = (currentIndex + 1) % tabNames.length
+    nextIndex = enabledIndexes[(enabledPosition + 1) % enabledIndexes.length]
   } else if (event.key === 'ArrowLeft') {
-    nextIndex = (currentIndex - 1 + tabNames.length) % tabNames.length
+    nextIndex = enabledIndexes[(enabledPosition - 1 + enabledIndexes.length) % enabledIndexes.length]
   } else if (event.key === 'Home') {
-    nextIndex = 0
+    nextIndex = enabledIndexes[0]
   } else if (event.key === 'End') {
-    nextIndex = tabNames.length - 1
+    nextIndex = enabledIndexes[enabledIndexes.length - 1]
   } else {
     return
   }
@@ -648,6 +709,11 @@ onMounted(() => {
 
 .export-script-tab-panel {
   padding-right: 4px;
+}
+
+.tags-queries-tab-panel {
+  padding-right: 4px;
+  padding-bottom: 4px;
 }
 
 .variables-tab-panel,

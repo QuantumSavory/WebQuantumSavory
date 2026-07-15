@@ -645,6 +645,37 @@
         @test validation_error isa UndefVarError
       end
 
+      success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+        "x -> x > 1";
+        placement="query",
+      )
+      @test success
+      @test results isa Dict
+      @test validation_error === nothing
+
+      success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+        "candidate -> let nodeid = _ -> 1\n  candidate == nodeid(\"Amherst\")\nend";
+        placement="query",
+      )
+      @test success
+      @test results isa Dict
+      @test validation_error === nothing
+
+      for contextual_source in (
+        "<(self)",
+        "==(nodeid(\"Amherst\"))",
+        "candidate -> candidate == self",
+        "candidate -> candidate == nodeid(\"Amherst\")",
+      )
+        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+          contextual_source;
+          placement="query",
+        )
+        @test !success
+        @test results === nothing
+        @test validation_error isa UndefVarError
+      end
+
       success, results, validation_error = WebQuantumSavory.Sandbox.test_code("42")
       @test !success
       @test results === nothing
@@ -1709,6 +1740,18 @@
     registers, slot_mapping, slot_reverse_mapping = WebQuantumSavory.create_registers_from_nodes(validation_result)
     state = WebQuantumSavory.State(name="test", slot_mapping=slot_mapping)
 
+    reverse_mapping = WebQuantumSavory.ensure_slot_reverse_mapping!(state)
+    @test reverse_mapping === state.slot_reverse_mapping
+    @test length(reverse_mapping) == length(slot_mapping)
+    @test all(reverse_mapping[slot] == slot_id for (slot_id, slot) in slot_mapping)
+    @test WebQuantumSavory.ensure_slot_reverse_mapping!(state) === reverse_mapping
+
+    if !isempty(slot_mapping)
+      missing_slot_id, missing_slot = first(slot_mapping)
+      delete!(reverse_mapping, missing_slot)
+      @test WebQuantumSavory.ensure_slot_reverse_mapping!(state)[missing_slot] == missing_slot_id
+    end
+
     # Test get_slot_state with existing slot
     if !isempty(slot_mapping)
       slot_id = first(keys(slot_mapping))
@@ -2652,5 +2695,487 @@
     # Cleanup
     WebQuantumSavory.destroy_simulation(simulation_name)
     @test !haskey(WebQuantumSavory.STATE, simulation_name)
+  end
+
+  @testset "Tag Metadata Catalog and Codec" begin
+    WebQuantumSavory._invalidate_tag_catalog_cache!()
+    cached_snapshot = WebQuantumSavory._tag_catalog_snapshot()
+    @test WebQuantumSavory._tag_catalog_snapshot() === cached_snapshot
+
+    @eval begin
+      struct TagCatalogCacheProbe
+        value::Int
+      end
+      QuantumSavory.Tag(probe::TagCatalogCacheProbe) =
+        QuantumSavory.Tag(:catalog_cache_probe, probe.value)
+    end
+    method_invalidated_snapshot = WebQuantumSavory._tag_catalog_snapshot()
+    @test method_invalidated_snapshot !== cached_snapshot
+    @test any(definition -> definition.type === TagCatalogCacheProbe, method_invalidated_snapshot.named)
+
+    WebQuantumSavory._invalidate_tag_catalog_cache!()
+    @test WebQuantumSavory._tag_catalog_snapshot() !== method_invalidated_snapshot
+
+    catalog = WebQuantumSavory.tag_type_catalog()
+    @test Set(keys(catalog)) == Set([
+      "named_tags",
+      "general_signatures",
+      "allowed_data_types",
+      "unsafe_evaluation",
+    ])
+    @test catalog["unsafe_evaluation"] isa Bool
+
+    function method_argument_types(method)
+      signature = Base.unwrap_unionall(method.sig)
+      signature isa DataType || return Any[]
+      Any[signature.parameters[2:end]...]
+    end
+
+    function qualified_type_id(type::DataType)
+      base_id = join((string.(Base.fullname(parentmodule(type)))..., string(nameof(type))), ".")
+      isempty(type.parameters) && return base_id
+      parameter_ids = map(type.parameters) do parameter
+        parameter isa DataType ? qualified_type_id(parameter) : string(parameter)
+      end
+      "$base_id{$(join(parameter_ids, ","))}"
+    end
+
+    expected_named_ids = Set{String}()
+    expected_general_shapes = Set{Tuple{String,Tuple}}()
+    for method in methods(QuantumSavory.Tag)
+      arguments = method_argument_types(method)
+      if length(arguments) == 1
+        type = only(arguments)
+        if type isa DataType && isconcretetype(type) &&
+           !(type in (QuantumSavory.Tag, Symbol, DataType)) &&
+           all(fieldtypes(type)) do field_type
+             field_type === Symbol || field_type === DataType ||
+               field_type <: Integer || field_type <: AbstractFloat
+           end
+          push!(expected_named_ids, qualified_type_id(type))
+        end
+      end
+      if !isempty(arguments) && first(arguments) in (Symbol, DataType) &&
+         all(type -> type isa DataType && (
+           type === Symbol || type === DataType || type <: Integer || type <: AbstractFloat
+         ), arguments[2:end])
+        push!(expected_general_shapes, (
+          string(nameof(first(arguments))),
+          Tuple(string(nameof(type)) for type in arguments[2:end]),
+        ))
+      end
+    end
+
+    actual_named_ids = Set(String(definition["type_id"]) for definition in catalog["named_tags"])
+    actual_general_shapes = Set(
+      (
+        String(signature["head_type"]),
+        Tuple(String(field["type"]) for field in signature["fields"]),
+      ) for signature in catalog["general_signatures"]
+    )
+    @test actual_named_ids == expected_named_ids
+    @test actual_general_shapes == expected_general_shapes
+    @test length(unique(signature["signature_id"] for signature in catalog["general_signatures"])) ==
+      length(catalog["general_signatures"])
+    @test any(
+      signature -> signature["head_type"] == "Symbol" &&
+        length(signature["fields"]) == 6 &&
+        all(field -> field["type"] == "Int64", signature["fields"]),
+      catalog["general_signatures"],
+    )
+    @test all(signature["variadic"] === false for signature in catalog["general_signatures"])
+
+    graph_definition = only(filter(
+      definition -> definition["display_name"] == "GraphStateStorage",
+      catalog["named_tags"],
+    ))
+    @test graph_definition["type_id"] ==
+      "QuantumSavory.ProtocolZoo.MBQCEntanglementDistillation.GraphStateStorage"
+    @test [field["name"] for field in graph_definition["fields"]] == ["uuid", "vertex"]
+    @test [field["type"] for field in graph_definition["fields"]] == ["Int64", "Int64"]
+    @test all(field["doc"] isa String for field in graph_definition["fields"])
+
+    graph_spec = Dict(
+      "kind" => "named",
+      "type_id" => graph_definition["type_id"],
+      "fields" => Dict("uuid" => 17, "vertex" => 4),
+    )
+    graph_preview = WebQuantumSavory.preview_tag_payload(Dict("tag" => graph_spec))
+    @test graph_preview["tag"]["kind"] == "named"
+    @test graph_preview["tag"]["type_id"] == graph_definition["type_id"]
+    @test [field["value"] for field in graph_preview["tag"]["fields"]] == [17, 4]
+    @test graph_preview["rendered"] isa String
+    @test !isempty(graph_preview["rendered"])
+
+    symbol_int_signature = only(filter(catalog["general_signatures"]) do signature
+      signature["head_type"] == "Symbol" &&
+        [field["type"] for field in signature["fields"]] == ["Int64"]
+    end)
+    symbol_int_spec = Dict(
+      "kind" => "general",
+      "signature_id" => symbol_int_signature["signature_id"],
+      "head" => Dict("type" => "Symbol", "value" => "codec_test"),
+      "fields" => [Dict("type" => "Int64", "value" => 7)],
+    )
+    symbol_preview = WebQuantumSavory.preview_tag_payload(Dict("tag" => symbol_int_spec))
+    @test symbol_preview["tag"]["kind"] == "general"
+    @test symbol_preview["tag"]["head"] == Dict("type" => "Symbol", "value" => "codec_test")
+    @test symbol_preview["tag"]["fields"][1]["value"] == 7
+    @test symbol_preview["rendered"] == "SymbolInt(:codec_test, 7)::Tag"
+
+    allowed_type_ids = Set(String(type["type_id"]) for type in catalog["allowed_data_types"])
+    @test "Core.Int64" in allowed_type_ids
+    datatype_empty_signature = only(filter(catalog["general_signatures"]) do signature
+      signature["head_type"] == "DataType" && isempty(signature["fields"])
+    end)
+    @test datatype_empty_signature["allowed_data_type_ids"] == ["Core.Int64"]
+    datatype_spec = Dict(
+      "kind" => "general",
+      "signature_id" => datatype_empty_signature["signature_id"],
+      "head" => Dict("type" => "DataType", "value" => "Core.Int64"),
+      "fields" => Any[],
+    )
+    datatype_preview = WebQuantumSavory.preview_tag_payload(Dict("tag" => datatype_spec))
+    @test datatype_preview["tag"]["head"]["value"] == "Core.Int64"
+    @test occursin("Int64", datatype_preview["rendered"])
+
+    function captured_error(thunk)
+      try
+        thunk()
+        nothing
+      catch error
+        error
+      end
+    end
+
+    missing_named = deepcopy(graph_spec)
+    delete!(missing_named["fields"], "vertex")
+    error = captured_error(() -> WebQuantumSavory.preview_tag_payload(Dict("tag" => missing_named)))
+    @test error isa WebQuantumSavory.APIError
+    @test error.status_code == 400
+    @test occursin("incomplete", error.message)
+
+    extra_named = deepcopy(graph_spec)
+    extra_named["fields"]["extra"] = 1
+    error = captured_error(() -> WebQuantumSavory.preview_tag_payload(Dict("tag" => extra_named)))
+    @test error isa WebQuantumSavory.APIError
+    @test error.status_code == 400
+
+    mismatched_general = deepcopy(symbol_int_spec)
+    mismatched_general["fields"][1]["type"] = "Float64"
+    error = captured_error(() -> WebQuantumSavory.preview_tag_payload(Dict("tag" => mismatched_general)))
+    @test error isa WebQuantumSavory.APIError
+    @test error.status_code == 400
+    @test occursin("does not match", error.message)
+
+    incomplete_general = deepcopy(symbol_int_spec)
+    empty!(incomplete_general["fields"])
+    error = captured_error(() -> WebQuantumSavory.preview_tag_payload(Dict("tag" => incomplete_general)))
+    @test error isa WebQuantumSavory.APIError
+    @test error.status_code == 400
+
+    malformed_string_fields = Any[
+      Dict("tag" => Dict("kind" => 1)),
+      Dict("tag" => Dict("kind" => "named", "type_id" => 1)),
+      Dict("tag" => Dict("kind" => "general", "signature_id" => 1)),
+    ]
+    malformed_head_type = deepcopy(symbol_int_spec)
+    malformed_head_type["head"] = Dict{String,Any}(
+      "type" => 1,
+      "value" => "codec_test",
+    )
+    push!(malformed_string_fields, Dict("tag" => malformed_head_type))
+    malformed_field_type = deepcopy(symbol_int_spec)
+    malformed_field_type["fields"][1]["type"] = 1
+    push!(malformed_string_fields, Dict("tag" => malformed_field_type))
+    for malformed_payload in malformed_string_fields
+      error = captured_error(() -> WebQuantumSavory.preview_tag_payload(malformed_payload))
+      @test error isa WebQuantumSavory.APIError
+      @test error.status_code == 400
+      @test occursin("must be a string", error.message)
+    end
+
+    unsafe_datatype = deepcopy(datatype_spec)
+    unsafe_datatype["head"]["value"] = "Main.UnadvertisedType"
+    error = captured_error(() -> WebQuantumSavory.preview_tag_payload(Dict("tag" => unsafe_datatype)))
+    @test error isa WebQuantumSavory.APIError
+    @test error.status_code == 400
+    @test occursin("advertised DataType", error.message)
+
+    incompatible_datatype = deepcopy(datatype_spec)
+    incompatible_datatype["head"]["value"] = graph_definition["type_id"]
+    error = captured_error(() -> WebQuantumSavory.preview_tag_payload(
+      Dict("tag" => incompatible_datatype),
+    ))
+    @test error isa WebQuantumSavory.APIError
+    @test error.status_code == 400
+    @test occursin("incompatible", error.message)
+  end
+
+  @testset "Live Tag Operations and Queries" begin
+    payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    simulation_name = "tag_operations_unit"
+    payload["name"] = simulation_name
+    state = nothing
+
+    function captured_error(thunk)
+      try
+        thunk()
+        nothing
+      catch error
+        error
+      end
+    end
+
+    catalog = WebQuantumSavory.tag_type_catalog()
+    symbol_int_signature = only(filter(catalog["general_signatures"]) do signature
+      signature["head_type"] == "Symbol" &&
+        [field["type"] for field in signature["fields"]] == ["Int64"]
+    end)
+    symbol_float_signature = only(filter(catalog["general_signatures"]) do signature
+      signature["head_type"] == "Symbol" &&
+        [field["type"] for field in signature["fields"]] == ["Float64"]
+    end)
+    symbol_tag(head, value) = Dict(
+      "kind" => "general",
+      "signature_id" => symbol_int_signature["signature_id"],
+      "head" => Dict("type" => "Symbol", "value" => head),
+      "fields" => [Dict("type" => "Int64", "value" => value)],
+    )
+    query_spec(head, term) = Dict(
+      "kind" => "general",
+      "signature_id" => symbol_int_signature["signature_id"],
+      "head" => Dict("type" => "Symbol", "value" => head),
+      "fields" => [Dict("type" => "Int64", "value" => term)],
+    )
+    symbol_float_tag(head, value) = Dict(
+      "kind" => "general",
+      "signature_id" => symbol_float_signature["signature_id"],
+      "head" => Dict("type" => "Symbol", "value" => head),
+      "fields" => [Dict("type" => "Float64", "value" => value)],
+    )
+    float_query_spec(head, term) = Dict(
+      "kind" => "general",
+      "signature_id" => symbol_float_signature["signature_id"],
+      "head" => Dict("type" => "Symbol", "value" => head),
+      "fields" => [Dict("type" => "Float64", "value" => term)],
+    )
+
+    slot_one = Dict("target" => "slot", "slot_id" => "slot_MglsMO")
+    slot_two = Dict("target" => "slot", "slot_id" => "slot_VSOCk6")
+    register_target = Dict("target" => "register", "node_id" => "node_FVAmt8")
+    register_destination = merge(register_target, Dict("destination_slot_id" => "slot_VSOCk6"))
+    message_target = Dict("target" => "message_buffer", "node_id" => "node_FVAmt8")
+
+    try
+      state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(payload))
+      @test WebQuantumSavory.require_live_tag_state(simulation_name) === state
+
+      malformed_target_error = captured_error(() -> WebQuantumSavory.list_tags(
+        state,
+        Dict("target" => 1),
+      ))
+      @test malformed_target_error isa WebQuantumSavory.APIError
+      @test malformed_target_error.status_code == 400
+
+      contradictory_target = merge(slot_one, Dict("node_id" => "node_ZowYQo"))
+      ownership_error = captured_error(() -> WebQuantumSavory.list_tags(
+        state,
+        contradictory_target,
+      ))
+      @test ownership_error isa WebQuantumSavory.APIError
+      @test ownership_error.status_code == 400
+
+      slot_entry = WebQuantumSavory.attach_tag!(
+        state,
+        merge(slot_one, Dict("tag" => symbol_tag("unit_attach", 1))),
+      )
+      register_entry = WebQuantumSavory.attach_tag!(
+        state,
+        merge(register_destination, Dict("tag" => symbol_tag("unit_attach", 2))),
+      )
+      @test slot_entry["tag_id"] isa String
+      @test register_entry["tag_id"] isa String
+      @test slot_entry["slot_id"] == "slot_MglsMO"
+      @test register_entry["slot_id"] == "slot_VSOCk6"
+      @test slot_entry["node_id"] == "node_FVAmt8"
+      @test slot_entry["time"] == 0.0
+
+      slot_entries = WebQuantumSavory.list_tags(state, slot_one)
+      register_entries = WebQuantumSavory.list_tags(state, register_target)
+      @test [entry["tag_id"] for entry in slot_entries] == [slot_entry["tag_id"]]
+      @test [entry["tag_id"] for entry in register_entries] ==
+        [register_entry["tag_id"], slot_entry["tag_id"]]
+
+      inactive_since = Dates.now() - Dates.Hour(1)
+      state.simulation_last_active_time = inactive_since
+      WebQuantumSavory.list_tags(state, register_target)
+      @test state.simulation_last_active_time > inactive_since
+
+      removed_slot = WebQuantumSavory.delete_tag!(state, slot_entry["tag_id"], slot_one)
+      @test removed_slot["tag_id"] == slot_entry["tag_id"]
+      @test isempty(WebQuantumSavory.list_tags(state, slot_one))
+
+      stale_error = captured_error(() -> WebQuantumSavory.delete_tag!(
+        state,
+        slot_entry["tag_id"],
+        register_target,
+      ))
+      @test stale_error isa WebQuantumSavory.APIError
+      @test stale_error.status_code == 404
+
+      removed_register = WebQuantumSavory.delete_tag!(
+        state,
+        register_entry["tag_id"],
+        register_target,
+      )
+      @test removed_register["tag_id"] == register_entry["tag_id"]
+      @test isempty(WebQuantumSavory.list_tags(state, register_target))
+
+      message_one = WebQuantumSavory.attach_tag!(
+        state,
+        merge(message_target, Dict("tag" => symbol_tag("unit_message", 1))),
+      )
+      message_two = WebQuantumSavory.attach_tag!(
+        state,
+        merge(message_target, Dict("tag" => symbol_tag("unit_message", 2))),
+      )
+      message_entries = WebQuantumSavory.list_tags(state, message_target)
+      @test [entry["tag_id"] for entry in message_entries] ==
+        [message_two["tag_id"], message_one["tag_id"]]
+      @test [entry["depth"] for entry in message_entries] == [2, 1]
+      @test all(entry["node_id"] == "node_FVAmt8" for entry in message_entries)
+      @test length(QuantumSavory.peektags(QuantumSavory.messagebuffer(state.network, 1))) == 2
+
+      message_delete_error = captured_error(() -> WebQuantumSavory.delete_tag!(
+        state,
+        message_one["tag_id"],
+        message_target,
+      ))
+      @test message_delete_error isa WebQuantumSavory.APIError
+      @test message_delete_error.status_code == 400
+      @test occursin("not supported", message_delete_error.message)
+
+      query_entry_one = WebQuantumSavory.attach_tag!(
+        state,
+        merge(slot_one, Dict("tag" => symbol_tag("unit_query", 1))),
+      )
+      query_entry_two = WebQuantumSavory.attach_tag!(
+        state,
+        merge(register_destination, Dict("tag" => symbol_tag("unit_query", 2))),
+      )
+
+      exact_query = merge(register_target, Dict("query" => query_spec(
+        "unit_query",
+        Dict("kind" => "exact", "value" => 2),
+      )))
+      exact_entries = WebQuantumSavory.query_tags(state, exact_query)
+      @test [entry["tag_id"] for entry in exact_entries] == [query_entry_two["tag_id"]]
+
+      slot_exact = merge(slot_one, Dict("query" => query_spec(
+        "unit_query",
+        Dict("kind" => "exact", "value" => 1),
+      )))
+      @test [entry["tag_id"] for entry in WebQuantumSavory.query_tags(state, slot_exact)] ==
+        [query_entry_one["tag_id"]]
+
+      wildcard_query = merge(register_target, Dict("query" => query_spec(
+        "unit_query",
+        Dict("kind" => "wildcard"),
+      )))
+      wildcard_entries = WebQuantumSavory.query_tags(state, wildcard_query)
+      @test [entry["tag_id"] for entry in wildcard_entries] ==
+        [query_entry_two["tag_id"], query_entry_one["tag_id"]]
+
+      preset_query = merge(register_target, Dict("query" => query_spec(
+        "unit_query",
+        Dict(
+          "kind" => "predicate",
+          "predicate" => "preset",
+          "operator" => "≥",
+          "operand" => 2,
+        ),
+      )))
+      @test [entry["tag_id"] for entry in WebQuantumSavory.query_tags(state, preset_query)] ==
+        [query_entry_two["tag_id"]]
+
+      custom_query = merge(register_target, Dict("query" => query_spec(
+        "unit_query",
+        Dict(
+          "kind" => "predicate",
+          "predicate" => "custom",
+          "source" => "candidate -> candidate == 2",
+        ),
+      )))
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+        @test [entry["tag_id"] for entry in WebQuantumSavory.query_tags(state, custom_query)] ==
+          [query_entry_two["tag_id"]]
+      end
+      @test length(WebQuantumSavory.list_tags(state, register_target)) == 2
+
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+        denied = captured_error(() -> WebQuantumSavory.query_tags(state, custom_query))
+        @test denied isa WebQuantumSavory.APIError
+        @test denied.status_code == 403
+        @test denied.error_code == WebQuantumSavory.UNSAFE_EVALUATION_DISABLED_CODE
+      end
+
+      invalid_operator = deepcopy(preset_query)
+      invalid_operator["query"]["fields"][1]["value"]["operator"] = "≈"
+      operator_error = captured_error(() -> WebQuantumSavory.query_tags(state, invalid_operator))
+      @test operator_error isa WebQuantumSavory.APIError
+      @test operator_error.status_code == 400
+
+      malformed_query = deepcopy(exact_query)
+      malformed_query["query"]["kind"] = 1
+      malformed_query_error = captured_error(() -> WebQuantumSavory.query_tags(state, malformed_query))
+      @test malformed_query_error isa WebQuantumSavory.APIError
+      @test malformed_query_error.status_code == 400
+
+      message_query_error = captured_error(() -> WebQuantumSavory.query_tags(
+        state,
+        merge(message_target, Dict("query" => wildcard_query["query"])),
+      ))
+      @test message_query_error isa WebQuantumSavory.APIError
+      @test message_query_error.status_code == 400
+
+      integer_collision = WebQuantumSavory.attach_tag!(
+        state,
+        merge(slot_one, Dict("tag" => symbol_tag("unit_float_exact", 1))),
+      )
+      float_entry = WebQuantumSavory.attach_tag!(
+        state,
+        merge(register_destination, Dict("tag" => symbol_float_tag("unit_float_exact", 1.0))),
+      )
+      float_exact_query = merge(register_target, Dict("query" => float_query_spec(
+        "unit_float_exact",
+        Dict("kind" => "exact", "value" => 1.0),
+      )))
+      @test [entry["tag_id"] for entry in WebQuantumSavory.query_tags(state, float_exact_query)] ==
+        [float_entry["tag_id"]]
+      @test integer_collision["tag_id"] != float_entry["tag_id"]
+    finally
+      haskey(WebQuantumSavory.STATE, simulation_name) &&
+        WebQuantumSavory.destroy_simulation(simulation_name)
+    end
+
+    missing_error = captured_error(() -> WebQuantumSavory.require_live_tag_state("missing_tag_state"))
+    @test missing_error isa WebQuantumSavory.APIError
+    @test missing_error.status_code == 404
+
+    blocked_name = "blocked_tag_state"
+    blocked_state = WebQuantumSavory.State(
+      name=blocked_name,
+      execution_time_exceeded=true,
+    )
+    WebQuantumSavory.STATE[blocked_name] = blocked_state
+    try
+      blocked_error = captured_error(() -> WebQuantumSavory.require_live_tag_state(blocked_name))
+      @test blocked_error isa WebQuantumSavory.APIError
+      @test blocked_error.status_code == 400
+    finally
+      haskey(WebQuantumSavory.STATE, blocked_name) &&
+        WebQuantumSavory.destroy_simulation(blocked_name)
+    end
   end
 end
