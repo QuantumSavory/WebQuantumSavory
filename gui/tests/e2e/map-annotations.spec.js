@@ -76,6 +76,26 @@ async function currentAnnotations(page) {
   })
 }
 
+async function currentAnnotationAreaBounds(page, annotationId) {
+  return page.evaluate((id) => {
+    const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    const exposedMap = setup?.baseMapInstance?.map
+    const map = exposedMap?.value ?? exposedMap
+    const source = map?.getSource(`annotation-source-${id}-area`)
+    const feature = source?.serialize?.().data
+    const ring = feature?.geometry?.coordinates?.[0]
+    if (!Array.isArray(ring)) return null
+    const longitudes = ring.map(position => position[0])
+    const latitudes = ring.map(position => position[1])
+    return {
+      west: Math.min(...longitudes),
+      south: Math.min(...latitudes),
+      east: Math.max(...longitudes),
+      north: Math.max(...latitudes),
+    }
+  }, annotationId)
+}
+
 async function createSimulationTopology(page) {
   const canvas = page.locator('.maplibregl-canvas')
   await page.keyboard.down('Alt')
@@ -286,35 +306,27 @@ test.describe('Map annotations and Tools presentation', () => {
         y: areaHandleBounds.y + areaHandleBounds.height / 2,
       },
       {
-        x: annotationBounds.x - 55,
-        y: annotationBounds.y + annotationBounds.height + 55,
+        x: 20,
+        y: annotationBounds.y + annotationBounds.height + 20,
       },
     )
     await expect.poll(async () => JSON.stringify((await currentAnnotations(page))[0].area.freeCorner))
       .not.toBe(JSON.stringify(freeCornerBeforeDrag))
     await expect.poll(async () => {
       const [value] = await currentAnnotations(page)
-      const center = [
-        (value.bounds.west + value.bounds.east) / 2,
-        (value.bounds.south + value.bounds.north) / 2,
-      ]
-      return value.area.freeCorner[0] < center[0] && value.area.freeCorner[1] < center[1]
+      return value.area.freeCorner[0] < value.bounds.west
+        && value.area.freeCorner[1] < value.bounds.south
     }).toBe(true)
-    const flippedArea = (await currentAnnotations(page))[0]
-    const flippedSharedCorner = [
-      flippedArea.area.freeCorner[0]
-        < (flippedArea.bounds.west + flippedArea.bounds.east) / 2
-        ? flippedArea.bounds.west
-        : flippedArea.bounds.east,
-      flippedArea.area.freeCorner[1]
-        < (flippedArea.bounds.south + flippedArea.bounds.north) / 2
-        ? flippedArea.bounds.south
-        : flippedArea.bounds.north,
-    ]
-    expect(flippedSharedCorner).toEqual([
-      flippedArea.bounds.west,
-      flippedArea.bounds.south,
-    ])
+    const draggedArea = (await currentAnnotations(page))[0]
+    await expect.poll(async () => currentAnnotationAreaBounds(page, draggedArea.id))
+      .not.toBeNull()
+    const renderedAreaBounds = await currentAnnotationAreaBounds(page, draggedArea.id)
+    const annotationHeight = draggedArea.bounds.north - draggedArea.bounds.south
+    expect(renderedAreaBounds.east).toBeCloseTo(draggedArea.bounds.west, 9)
+    const sharedLength = Math.min(renderedAreaBounds.north, draggedArea.bounds.north)
+      - Math.max(renderedAreaBounds.south, draggedArea.bounds.south)
+    expect(sharedLength).toBeGreaterThan(0)
+    expect(sharedLength).toBeCloseTo(annotationHeight, 9)
 
     await page.evaluate(() => {
       const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState

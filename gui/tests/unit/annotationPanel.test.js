@@ -55,7 +55,7 @@ describe('AnnotationPanel', () => {
 
     expect(checkbox.attributes('aria-describedby')).toBeTruthy()
     expect(wrapper.get(`#${checkbox.attributes('aria-describedby')}`).text())
-      .toContain('transparent dashed area')
+      .toContain('connected along an annotation edge')
 
     await checkbox.setValue(true)
     expect(selected.area).toEqual({ freeCorner: [6, 3] })

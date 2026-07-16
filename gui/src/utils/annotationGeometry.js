@@ -316,16 +316,25 @@ export function annotationCenter(bounds) {
   ]
 }
 
-/** Derive the attached area's annotation corner from the free corner's current quadrant. */
-export function sharedCornerForFreeCorner(bounds, freeCorner) {
-  const normalized = normalizeAnnotationBounds(bounds)
-  if (!geographicPosition(freeCorner)) {
-    throw new Error('Annotation area freeCorner must be a valid map position')
+function areaAttachmentCorner(bounds, freeCorner) {
+  const center = [
+    (bounds.west + bounds.east) / 2,
+    (bounds.south + bounds.north) / 2,
+  ]
+  const horizontalDisplacement = Math.abs(freeCorner[0] - center[0])
+    / (bounds.east - bounds.west)
+  const verticalDisplacement = Math.abs(freeCorner[1] - center[1])
+    / (bounds.north - bounds.south)
+
+  if (horizontalDisplacement >= verticalDisplacement) {
+    return [
+      freeCorner[0] < center[0] ? bounds.west : bounds.east,
+      freeCorner[1] < center[1] ? bounds.north : bounds.south,
+    ]
   }
-  const center = annotationCenter(normalized)
   return [
-    freeCorner[0] < center[0] ? normalized.west : normalized.east,
-    freeCorner[1] < center[1] ? normalized.south : normalized.north,
+    freeCorner[0] < center[0] ? bounds.east : bounds.west,
+    freeCorner[1] < center[1] ? bounds.south : bounds.north,
   ]
 }
 
@@ -338,10 +347,7 @@ export function annotationAreaBounds(annotation) {
   ]
   const freeCorner = interactiveMapPosition(annotation?.area?.freeCorner, center[0])
   if (!freeCorner) return null
-  const sharedCorner = [
-    freeCorner[0] < center[0] ? bounds.west : bounds.east,
-    freeCorner[1] < center[1] ? bounds.south : bounds.north,
-  ]
+  const sharedCorner = areaAttachmentCorner(bounds, freeCorner)
   const areaBounds = {
     west: Math.min(sharedCorner[0], freeCorner[0]),
     south: Math.min(sharedCorner[1], freeCorner[1]),
