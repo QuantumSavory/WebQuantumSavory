@@ -212,7 +212,7 @@ defineExpose({ updatePositions })
   width: 100%;
   height: 100%;
   pointer-events: none; /* Allow clicks to pass through */
-  z-index: 1000; 
+  z-index: var(--app-z-map-state-connection);
 }
 
 .connection-svg {

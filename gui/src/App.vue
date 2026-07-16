@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted, provide } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, provide, watch } from 'vue'
 import BaseMap from './components/map/BaseMap.vue'
 import NodePanel from './components/panels/NodePanel.vue'
 import ProjectStore from './models/ProjectStore.js'
@@ -33,6 +33,7 @@ import {
 } from '@lucide/vue'
 import EdgeListPanel from './components/panels/EdgeListPanel.vue'
 import EdgePanel from './components/panels/EdgePanel.vue'
+import AnnotationPanel from './components/panels/AnnotationPanel.vue'
 import BottomPanel from './components/panels/BottomPanel.vue'
 import ProjectNameDialog from './components/ProjectNameDialog.vue'
 import ImportConflictDialog from './components/ImportConflictDialog.vue'
@@ -101,6 +102,7 @@ const TIME_STEP = 0.1;
 const projectData = ref(createEmptyProject())
 const curveEditingEnabled = ref(false)
 const showPhysicalBadges = ref(true)
+const annotationCreationEnabled = ref(false)
 
 // Required variables and functions for composables
 // Log management functions
@@ -452,6 +454,21 @@ const {
   }),
   showError: message => showAlert('Project Error', message)
 })
+
+watch(projectTransitionGeneration, () => {
+  annotationCreationEnabled.value = false
+})
+
+function beginAnnotationCreation() {
+  annotationCreationEnabled.value = true
+}
+
+function handleAnnotationCreated(annotation) {
+  projectData.value.annotations.push(annotation)
+  handleSelect(annotation, 'annotation')
+  annotationCreationEnabled.value = false
+  addLog('info', `Created annotation: ${annotation.id}`, 'Map')
+}
 
 const applicationShellPendingMessage = computed(() => applicationLoadingMessage({
   applicationMetadataPending: applicationMetadataPending.value,
@@ -1091,8 +1108,10 @@ onUnmounted(() => {
           ref="baseMapInstance"
           :nodes="projectData.net.nodes"
           :edges="projectData.net.edges"
+          :annotations="projectData.annotations"
           :selected-item="selectedItem"
           :selected-type="selectedType"
+          :annotation-creation-enabled="annotationCreationEnabled"
           :center="mapCenter"
           :zoom="mapZoom"
           :editing-locked="isNetworkEditingDisabled"
@@ -1102,6 +1121,7 @@ onUnmounted(() => {
           @select="handleSelect"
           @map-click="handleMapClickComposable"
           @edge-created="handleEdgeCreated"
+          @annotation-created="handleAnnotationCreated"
           @map-state-change="handleMapStateChangeComposable"
           @map-ready="handleMapReady"
           @map-initialization-error="handleMapInitializationError"
@@ -1182,6 +1202,14 @@ onUnmounted(() => {
                 v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
               />
+              <AnnotationPanel
+                id="annotationPanel"
+                v-else-if="selectedType === 'annotation' && selectedItem"
+                :key="selectedItem.id"
+                :annotation="selectedItem"
+                v-model:collapsed="panelCollapsedStates.selectedElementPanel"
+                @delete="deleteSelected"
+              />
               <VoidPanel 
                 v-else
                 v-model:collapsed="panelCollapsedStates.selectedElementPanel"
@@ -1253,6 +1281,7 @@ onUnmounted(() => {
         :helpers-disabled="isNetworkEditingDisabled"
         :curve-editing-enabled="curveEditingEnabled"
         :show-physical-badges="showPhysicalBadges"
+        :annotation-creation-enabled="annotationCreationEnabled"
         :variables="projectData.variables"
         :project-data="projectData"
         :export-script-payload="exportScriptPayload"
@@ -1266,6 +1295,7 @@ onUnmounted(() => {
         @open-repeater-chain-generator="openRepeaterChainGenerator"
         @open-star-network-generator="openStarNetworkGenerator"
         @open-graph-network-generator="openGraphNetworkGenerator"
+        @add-annotation="beginAnnotationCreation"
         @update:refractive-index="projectData.net.physicalConfig.refractiveIndex = $event"
         @update:curve-editing-enabled="curveEditingEnabled = $event"
         @update:show-physical-badges="showPhysicalBadges = $event"

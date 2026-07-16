@@ -4,10 +4,17 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import NodeMarker from './NodeMarker.vue'
 import EdgeLine from './EdgeLine.vue'
+import MapAnnotation from './MapAnnotation.vue'
 import StateNode from './StateNode.vue'
 import StateConnectionOverlay from './StateConnectionOverlay.vue'
 import Edge from '../../models/Edge'
 import { generateUUid, setEdgeCorrectNodeOrder } from '../../utils/Utils'
+import {
+  annotationBoundsFromScreenCenter,
+  createAnnotation,
+} from '../../utils/annotationGeometry'
+import { isEdgeLayerId } from '../../utils/mapLayers'
+import { isInteractiveMapMarkerTarget } from '../../utils/mapMarkers'
 import { 
   findSlotElements, 
   calculateStateNodePosition, 
@@ -40,8 +47,10 @@ const props = defineProps({
   style:        {    type: String,  default: 'https://demotiles.maplibre.org/style.json' },
   nodes:        {    type: Array,   default: () => [] },
   edges:        {    type: Array,   default: () => [] },
+  annotations:  {    type: Array,   default: () => [] },
   selectedItem: {    type: Object,  default: null },
   selectedType: {    type: String,  default: null },
+  annotationCreationEnabled: { type: Boolean, default: false },
   editingLocked: {   type: Boolean, default: false },
   curveEditingEnabled: { type: Boolean, default: false },
   showPhysicalBadges: { type: Boolean, default: true },
@@ -52,6 +61,7 @@ const emit = defineEmits([
   'select',
   'map-click',
   'edge-created',
+  'annotation-created',
   'map-state-change',
   'delete',
   'map-ready',
@@ -242,19 +252,52 @@ function handleEndConnection(target) {
 
 
 function onKeydown(e) {
-  const ignoreElements = ["INPUT", "SELECT", "BUTTON"]
   if (e.key === 'Shift' || (e.code && e.code.startsWith('Shift'))){
     shiftDown.value = true;
   }else if (
-    // Delete key
-   ( e.key === 'Backspace' || (e.code && e.code.startsWith('Backspace'))) && 
+   (e.key === 'Delete'
+      || e.code === 'Delete'
+      || e.key === 'Backspace'
+      || (e.code && e.code.startsWith('Backspace'))) &&
    // selected item and type are set
-   (props.selectedItem && props.selectedType) && 
-   // target is body or canvas, to prevent deleting when focus is on input fields
-   (e.target.nodeName == "BODY" || e.target.nodeName == "CANVAS")
+   (props.selectedItem && props.selectedType) &&
+   // Never turn a text-editing keystroke into a map deletion.
+   !['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(e.target.nodeName)
+   && !e.target.isContentEditable
   ){
     emit('delete', props.selectedItem, props.selectedType)
   }
+}
+
+function isEdgeAtPoint(point) {
+  return map.value.queryRenderedFeatures(point).some(feature => (
+    feature.layer && isEdgeLayerId(feature.layer.id)
+  ))
+}
+
+function createMapAnnotation(event) {
+  const center = [event.lngLat.lng, event.lngLat.lat]
+  const bounds = annotationBoundsFromScreenCenter(center, map.value)
+  if (!bounds) return
+  const annotation = createAnnotation({
+    bounds,
+    existingAnnotations: props.annotations,
+  })
+  emit('annotation-created', annotation)
+}
+
+function handleMapMousedown(event) {
+  const markerClick = isInteractiveMapMarkerTarget(event.originalEvent.target)
+  const edgeClick = isEdgeAtPoint(event.point)
+  if (markerClick || edgeClick) return
+
+  if (props.annotationCreationEnabled) {
+    createMapAnnotation(event)
+    return
+  }
+
+  emit('map-click', event)
+  emit('select', null, null)
 }
 
 function onKeyup(e) {
@@ -318,34 +361,7 @@ onMounted(() => {
     })
 
     // Clear selection when clicking the map background
-    map.value.on('mousedown', (e) => {
-      // Check if we clicked on a marker DOM element
-      let target = e.originalEvent.target
-      console.log( 'target', target );
-      let isMarkerClick = false
-      
-      // Walk up the DOM tree to check for node-marker class
-      while (target && target !== document.body) {
-        if (target.classList && target.classList.contains('node-marker')) {
-          isMarkerClick = true
-          break
-        }
-        target = target.parentElement
-      }
-      
-      // Check if we clicked on our custom edge layers (not base map features)
-      const features = map.value.queryRenderedFeatures(e.point)
-      const isEdgeClick = features.some(feature => 
-        feature.layer && 
-        (feature.layer.id.startsWith('edge-layer-') || feature.layer.id.startsWith('edge-click-layer-'))
-      )
-      
-      // Only emit map-click if we didn't click on a marker or edge
-      if (!isMarkerClick && !isEdgeClick) {
-        emit('map-click', e) // Background click (land, water, labels, etc.)
-        emit('select', null, null) // Feature click (deselect)
-      }
-    })
+    map.value.on('mousedown', handleMapMousedown)
 
     // Track map state changes (pan and zoom)
     map.value.on('moveend', () => {
@@ -406,6 +422,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKeyup);
   window.removeEventListener('blur', onBlur);
   document.removeEventListener('visibilitychange', onVisibilityChange);
+  map.value?.off('mousedown', handleMapMousedown)
 });
 
 
@@ -466,7 +483,17 @@ defineExpose({
   <div ref="mapContainer" class="map-container">
     <!-- Render edges and markers only after map is loaded -->
     <template v-if="isMapLoaded && map">
-      <!-- Render edges first so they appear under markers -->
+      <!-- Annotation geometry is inserted before every edge layer. -->
+      <MapAnnotation
+        v-for="(annotation, annotationIndex) in annotations"
+        :key="annotation.id"
+        :annotation="annotation"
+        :map="map"
+        :is-selected="selectedItem === annotation"
+        :next-annotation-id="annotations[annotationIndex + 1]?.id"
+        @select="handleSelect"
+      />
+      <!-- Render edges above annotation geometry and below HTML markers. -->
       <EdgeLine
         v-for="edge in edges"
         :key="edge.id"

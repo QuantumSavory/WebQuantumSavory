@@ -27,6 +27,10 @@ import {
   resolveEdgePhysicalProperties,
   sampleEdgeRoute,
 } from '../../utils/edgeGeometry'
+import {
+  edgeClickLayerId,
+  edgeLineLayerId,
+} from '../../utils/mapLayers'
 import CurvePointHandle from './CurvePointHandle.vue'
 import EdgeBadgeStack from './EdgeBadgeStack.vue'
 
@@ -43,8 +47,8 @@ const props = defineProps({
 
 const emit = defineEmits(['select'])
 const sourceId = `edge-${props.edge.id}`
-const layerId = `edge-layer-${props.edge.id}`
-const clickLayerId = `edge-click-layer-${props.edge.id}`
+const layerId = edgeLineLayerId(props.edge.id)
+const clickLayerId = edgeClickLayerId(props.edge.id)
 const isHovered = ref(false)
 
 const DEFAULT_STYLE = {

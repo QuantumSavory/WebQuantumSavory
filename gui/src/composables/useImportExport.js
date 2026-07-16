@@ -1,5 +1,5 @@
 import ProjectStore from '../models/ProjectStore'
-import { validatePayload } from '../utils/projectHelpers'
+import { normalizeAnnotations } from '../utils/annotationGeometry'
 
 /**
  * useImportExport - Composable for import/export operations
@@ -78,7 +78,19 @@ export function useImportExport({
       return
     }
 
-    const normalizedData = { ...jsonData, name: jsonData.name.trim() }
+    let annotations
+    try {
+      annotations = normalizeAnnotations(jsonData.annotations)
+    } catch (error) {
+      showAlert('Import failed', `Invalid project structure: ${error.message}`)
+      return
+    }
+
+    const normalizedData = {
+      ...jsonData,
+      name: jsonData.name.trim(),
+      annotations,
+    }
     const existingProjects = ProjectStore.listProjects()
     if (existingProjects.includes(normalizedData.name)) {
       importedProjectData.value = normalizedData
@@ -94,7 +106,8 @@ export function useImportExport({
       const projectDataToImport = {
         ...jsonData,
         name: finalName.trim(),
-        description: jsonData.description ?? ''
+        description: jsonData.description ?? '',
+        annotations: jsonData.annotations,
       }
       
       const opened = await importIntoSession(projectDataToImport, projectDataToImport.name)
@@ -170,7 +183,6 @@ export function useImportExport({
     importProject,
     exportProject,
     validateAndProcessImport,
-    processImport,
     generateUniqueName,
     handleImportConflictOverwrite,
     handleImportConflictNewName,

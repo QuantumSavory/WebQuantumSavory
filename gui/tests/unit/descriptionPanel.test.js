@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import DescriptionPanel from '../../src/components/panels/DescriptionPanel.vue'
+import MarkdownEditor from '../../src/components/ui/MarkdownEditor.vue'
 
 function createPasteEvent(items) {
   const event = new Event('paste', { bubbles: true, cancelable: true })
@@ -23,6 +24,26 @@ afterEach(() => {
 })
 
 describe('DescriptionPanel', () => {
+  it('is a project-specific Markdown editor adapter', () => {
+    const wrapper = mount(DescriptionPanel, {
+      props: { modelValue: 'Project details' },
+    })
+    const editor = wrapper.getComponent(MarkdownEditor)
+
+    expect(editor.props()).toMatchObject({
+      modelValue: 'Project details',
+      idPrefix: 'project-description',
+      editorLabel: 'Project description in Markdown',
+      editButtonLabel: 'Edit project description',
+      saveButtonLabel: 'Save project description',
+      cancelButtonLabel: 'Cancel description editing',
+      emptyText: 'No description yet.',
+    })
+
+    editor.vm.$emit('update:modelValue', 'Updated details')
+    expect(wrapper.emitted('update:modelValue')).toEqual([['Updated details']])
+  })
+
   it('inserts pasted images as Markdown data URLs at the current selection', async () => {
     const wrapper = mount(DescriptionPanel, {
       props: { modelValue: 'Before selected after' },

@@ -104,7 +104,7 @@ test.describe('Project description', () => {
     await expect(saveButton.locator('svg.lucide-save')).toHaveCount(1)
     await saveButton.click()
 
-    const rendered = panel.getByTestId('rendered-description')
+    const rendered = panel.getByTestId('markdown-rendered')
     await expect(rendered.getByRole('heading', { name: 'Bell network' })).toBeVisible()
     await expect(rendered.locator('strong')).toHaveText('rendered Markdown')
     await expect(rendered.locator('.katex')).toHaveCount(2)

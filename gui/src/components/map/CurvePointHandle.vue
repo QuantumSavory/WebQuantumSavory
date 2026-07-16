@@ -65,6 +65,7 @@ onUnmounted(() => marker?.remove())
   background: var(--app-color-surface);
   box-shadow: var(--app-shadow-marker);
   cursor: grab;
+  z-index: var(--app-z-map-handle);
 }
 
 .curve-point-handle:active {

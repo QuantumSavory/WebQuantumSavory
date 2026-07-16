@@ -43,6 +43,15 @@
   --app-overlay-background: rgba(0, 0, 0, 0.18);
   --app-z-popup: 3000;
   --app-z-tooltip: 10000;
+  /* MapLibre marker stacking: canvas geometry < annotations < badges/handles
+     < nodes < transient state visualization. */
+  --app-z-map-annotation: 10;
+  --app-z-map-edge-badge: 20;
+  --app-z-map-handle: 30;
+  --app-z-map-node: 40;
+  --app-z-map-node-selected: 41;
+  --app-z-map-state-connection: 1000;
+  --app-z-map-state-node: 1001;
   --app-shadow-dialog: 0 2px 16px rgba(0, 0, 0, 0.13);
   --app-shadow-marker: 0 1px 4px rgba(0, 0, 0, 0.35);
   --app-radius-control: 4px;

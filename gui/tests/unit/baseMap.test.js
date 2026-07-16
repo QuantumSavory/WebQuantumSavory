@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import BaseMap from '../../src/components/map/BaseMap.vue'
 
@@ -64,5 +65,116 @@ describe('BaseMap initialization', () => {
 
     expect(wrapper.emitted('map-ready')).toHaveLength(1)
     expect(map.off).toHaveBeenCalledWith('error', initializationErrorHandler)
+  })
+
+  function makeInteractiveMap() {
+    const handlers = new Map()
+    const map = {
+      handlers,
+      on: vi.fn((event, handler) => handlers.set(event, handler)),
+      off: vi.fn((event, handler) => {
+        if (handlers.get(event) === handler) handlers.delete(event)
+      }),
+      addControl: vi.fn(),
+      getCenter: vi.fn(() => ({ lng: -74.5, lat: 40 })),
+      getZoom: vi.fn(() => 9),
+      queryRenderedFeatures: vi.fn(() => []),
+      project: vi.fn(position => ({ x: position[0] * 10, y: position[1] * -10 })),
+      unproject: vi.fn(point => {
+        const [x, y] = Array.isArray(point) ? point : [point.x, point.y]
+        return { lng: x / 10, lat: y / -10 }
+      }),
+      remove: vi.fn(),
+    }
+    return map
+  }
+
+  it('creates one canonical annotation on a wrapped world copy without background deselection', async () => {
+    const map = makeInteractiveMap()
+    mapConstructor.mockImplementation(() => map)
+    wrapper = mount(BaseMap, {
+      props: {
+        annotations: [],
+        annotationCreationEnabled: true,
+      },
+    })
+    map.handlers.get('load')()
+    await nextTick()
+
+    const canvas = document.createElement('canvas')
+    map.handlers.get('mousedown')({
+      lngLat: { lng: 290, lat: 40 },
+      point: { x: 0, y: 0 },
+      originalEvent: { target: canvas },
+    })
+
+    const annotation = wrapper.emitted('annotation-created')[0][0]
+    expect(annotation.id).toMatch(/^annotation_/)
+    expect(annotation.bounds).toEqual({ west: -82, south: 33, east: -58, north: 47 })
+    expect(annotation.markdown).toBe('')
+    expect(wrapper.emitted('map-click')).toBeUndefined()
+    expect(wrapper.emitted('select')).toBeUndefined()
+  })
+
+  it('does not treat annotation markers as map-background clicks', async () => {
+    const map = makeInteractiveMap()
+    mapConstructor.mockImplementation(() => map)
+    wrapper = mount(BaseMap)
+    map.handlers.get('load')()
+    await nextTick()
+
+    const overlay = document.createElement('div')
+    overlay.className = 'annotation-overlay'
+    const overlayChild = document.createElement('strong')
+    overlay.appendChild(overlayChild)
+    map.handlers.get('mousedown')({
+      point: { x: 0, y: 0 },
+      originalEvent: { target: overlayChild },
+    })
+
+    expect(wrapper.emitted('map-click')).toBeUndefined()
+    expect(wrapper.emitted('select')).toBeUndefined()
+  })
+
+  it.each(['Delete', 'Backspace'])('deletes the selected annotation with %s', async key => {
+    const map = makeInteractiveMap()
+    const annotation = { id: 'annotation-1' }
+    mapConstructor.mockImplementation(() => map)
+    wrapper = mount(BaseMap, {
+      attachTo: document.body,
+      props: {
+        selectedItem: annotation,
+        selectedType: 'annotation',
+      },
+    })
+
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+    expect(wrapper.emitted('delete')).toEqual([[annotation, 'annotation']])
+  })
+
+  it('deletes from a focused annotation overlay but not from an editor', () => {
+    const map = makeInteractiveMap()
+    const annotation = { id: 'annotation-1' }
+    mapConstructor.mockImplementation(() => map)
+    wrapper = mount(BaseMap, {
+      attachTo: document.body,
+      props: {
+        selectedItem: annotation,
+        selectedType: 'annotation',
+      },
+    })
+
+    const overlay = document.createElement('div')
+    overlay.className = 'annotation-overlay'
+    document.body.appendChild(overlay)
+    overlay.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
+
+    const editor = document.createElement('textarea')
+    document.body.appendChild(editor)
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }))
+
+    expect(wrapper.emitted('delete')).toEqual([[annotation, 'annotation']])
+    overlay.remove()
+    editor.remove()
   })
 })

@@ -165,7 +165,7 @@ defineExpose({
   height: 30px;
   position: absolute;
   transform: translate(-50%, -50%);
-  z-index: 1000;
+  z-index: var(--app-z-map-state-node);
 }
 
 .state-name {

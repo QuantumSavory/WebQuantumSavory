@@ -147,8 +147,9 @@
 </template>
 
 <script setup>
-import { computed, shallowRef, useId, watch, watchEffect } from 'vue'
+import { computed, shallowRef, watch, watchEffect } from 'vue'
 import { Link2, TriangleAlert, Unlink2 } from '@lucide/vue'
+import { useDomId } from '../../composables/useDomId'
 import { api } from '../../utils/ApiConnector'
 import { VariableReference, isVariableReference } from '../../models/Variable'
 import {
@@ -197,7 +198,7 @@ const props = defineProps({
 const blacklistParamNames = new Set(['sim', 'net', 'node', 'nodeA', 'nodeB'])
 const directParameterValues = new WeakMap()
 const variablePickerParameter = shallowRef(null)
-const formId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+const formId = useDomId('protocol-constructor')
 
 const isEditingDisabled = computed(() => props.disabled || props.editingLocked)
 const filteredParameters = computed(() => {

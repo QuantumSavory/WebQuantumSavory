@@ -161,6 +161,7 @@ export function useProjectSession({
     // Give MapLibre-owned marker components one tick to release the old graph.
     projectData.value = {
       ...projectData.value,
+      annotations: [],
       net: { nodes: [], edges: [], protocols: [] }
     }
     await nextTick()

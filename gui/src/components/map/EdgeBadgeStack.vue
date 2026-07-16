@@ -46,6 +46,7 @@ onUnmounted(() => marker?.remove())
   gap: 3px;
   pointer-events: none;
   transform: translateY(-18px);
+  z-index: var(--app-z-map-edge-badge);
 }
 
 .edge-badge {

@@ -224,8 +224,9 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { LoaderCircle, Plus, Search, Trash2 } from '@lucide/vue'
+import { useDomId } from '../../composables/useDomId'
 import { api } from '../../utils/ApiConnector.js'
 import { markdownCodeBlock } from '../../utils/markdown.js'
 import {
@@ -276,7 +277,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['submit'])
-const instanceId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+const instanceId = useDomId('tag-constructor')
 const comboboxId = `${instanceId}-tag-combobox`
 const listboxId = `${instanceId}-tag-options`
 const search = ref('')
