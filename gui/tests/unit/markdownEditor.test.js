@@ -54,11 +54,10 @@ describe('MarkdownEditor', () => {
           '![Pixel](data:image/png;base64,AAEC)',
           '<script>alert(1)</script>',
         ].join('\n\n'),
-        renderedTestId: 'rendered-note',
       },
     })
 
-    const rendered = wrapper.get('[data-testid="rendered-note"]')
+    const rendered = wrapper.get('[data-testid="markdown-rendered"]')
     expect(rendered.get('h1').text()).toBe('Note')
     expect(rendered.find('.katex').exists()).toBe(true)
     expect(rendered.get('img').attributes('src')).toBe('data:image/png;base64,AAEC')
@@ -77,7 +76,7 @@ describe('MarkdownEditor', () => {
       },
     })
 
-    expect(wrapper.get('.empty-description').text()).toBe('Nothing written.')
+    expect(wrapper.get('.markdown-empty').text()).toBe('Nothing written.')
     await wrapper.get('[aria-label="Edit note"]').trigger('click')
     await wrapper.get('textarea').setValue('Discarded')
     await wrapper.get('[aria-label="Cancel note editing"]').trigger('click')

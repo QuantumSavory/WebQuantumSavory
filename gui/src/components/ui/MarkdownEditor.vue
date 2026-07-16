@@ -1,6 +1,6 @@
 <template>
   <div class="markdown-editor">
-    <form v-if="isEditing" class="description-editor" @submit.prevent="saveMarkdown">
+    <form v-if="isEditing" class="markdown-editor-form" @submit.prevent="saveMarkdown">
       <label :for="editorId" class="visually-hidden">
         {{ editorLabel }}
       </label>
@@ -8,28 +8,28 @@
         :id="editorId"
         ref="editor"
         v-model="draft"
-        class="description-textarea"
+        class="markdown-editor-textarea"
         :aria-describedby="helpId"
         :aria-busy="isEmbeddingImage"
         :placeholder="placeholder"
         :readonly="isEmbeddingImage"
         @paste="handlePaste"
       />
-      <p v-if="isEmbeddingImage" class="description-paste-status" role="status">
+      <p v-if="isEmbeddingImage" class="markdown-paste-status" role="status">
         Embedding pasted image…
       </p>
-      <p v-if="pasteError" class="description-paste-error" role="alert">
+      <p v-if="pasteError" class="markdown-paste-error" role="alert">
         {{ pasteError }}
       </p>
-      <div class="description-editor-footer">
-        <p :id="helpId" class="description-help">
+      <div class="markdown-editor-footer">
+        <p :id="helpId" class="markdown-editor-help">
           Markdown, $inline math$, $$display math$$, and PNG/JPEG/GIF/WebP image pasting as
           data URLs are supported.
         </p>
-        <div class="description-actions">
+        <div class="markdown-editor-actions">
           <button
             type="submit"
-            class="description-action primary-action"
+            class="markdown-editor-action primary-action"
             :aria-label="saveButtonLabel"
             :disabled="isEmbeddingImage"
           >
@@ -38,7 +38,7 @@
           </button>
           <button
             type="button"
-            class="description-action"
+            class="markdown-editor-action"
             :aria-label="cancelButtonLabel"
             @click="cancelEditing"
           >
@@ -50,10 +50,10 @@
     </form>
 
     <template v-else>
-      <div class="description-toolbar">
+      <div class="markdown-editor-toolbar">
         <button
           type="button"
-          class="description-action"
+          class="markdown-editor-action"
           :aria-label="editButtonLabel"
           @click="startEditing"
         >
@@ -63,18 +63,19 @@
       </div>
       <div
         v-if="modelValue"
-        class="description-markdown"
-        :data-testid="renderedTestId || undefined"
+        class="markdown-rendered"
+        data-testid="markdown-rendered"
         v-html="renderedMarkdown"
       />
-      <p v-else class="empty-description">{{ emptyText }}</p>
+      <p v-else class="markdown-empty">{{ emptyText }}</p>
     </template>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, ref, useId, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { PencilLine, Save, X } from '@lucide/vue'
+import { useDomId } from '../../composables/useDomId'
 import { renderMarkdown } from '../../utils/markdown.js'
 import { getClipboardImageFiles, imageFilesToMarkdown } from '../../utils/markdownImagePaste'
 
@@ -111,16 +112,12 @@ const props = defineProps({
     type: String,
     default: 'No content yet.',
   },
-  renderedTestId: {
-    type: String,
-    default: '',
-  },
 })
 
 const emit = defineEmits(['update:modelValue'])
 
-const generatedId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
-const resolvedIdPrefix = computed(() => props.idPrefix || `markdown-editor-${generatedId}`)
+const generatedId = useDomId('markdown-editor')
+const resolvedIdPrefix = computed(() => props.idPrefix || generatedId)
 const editorId = computed(() => `${resolvedIdPrefix.value}-editor`)
 const helpId = computed(() => `${resolvedIdPrefix.value}-editor-help`)
 const isEditing = ref(false)
@@ -210,13 +207,13 @@ function cancelEditing() {
   color: var(--app-color-text);
 }
 
-.description-toolbar {
+.markdown-editor-toolbar {
   display: flex;
   justify-content: flex-end;
   margin-bottom: var(--app-space-1);
 }
 
-.description-action {
+.markdown-editor-action {
   display: inline-flex;
   min-height: 28px;
   align-items: center;
@@ -225,7 +222,7 @@ function cancelEditing() {
   padding: var(--app-space-1) 10px;
 }
 
-.description-action:focus-visible {
+.markdown-editor-action:focus-visible {
   outline: var(--app-focus-ring-width) solid var(--app-color-focus);
   outline-offset: var(--app-focus-ring-offset);
 }
@@ -240,13 +237,13 @@ function cancelEditing() {
   background: var(--app-color-primary-hover);
 }
 
-.description-editor {
+.markdown-editor-form {
   display: flex;
   flex-direction: column;
   gap: 7px;
 }
 
-.description-textarea {
+.markdown-editor-textarea {
   width: 100%;
   min-height: 145px;
   resize: vertical;
@@ -258,119 +255,119 @@ function cancelEditing() {
   font: 0.9rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-.description-textarea:focus {
+.markdown-editor-textarea:focus {
   border-color: var(--app-color-primary);
   outline: var(--app-focus-ring-width) solid var(--app-color-primary-soft);
 }
 
-.description-editor-footer {
+.markdown-editor-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--app-space-4);
 }
 
-.description-help {
+.markdown-editor-help {
   margin: 0;
   color: var(--app-color-text-muted);
   font-size: 0.78rem;
 }
 
-.description-paste-status,
-.description-paste-error {
+.markdown-paste-status,
+.markdown-paste-error {
   margin: 0;
   font-size: 0.78rem;
 }
 
-.description-paste-status {
+.markdown-paste-status {
   color: var(--app-color-text-muted);
 }
 
-.description-paste-error {
+.markdown-paste-error {
   color: var(--app-color-danger);
 }
 
-.description-actions {
+.markdown-editor-actions {
   display: flex;
   flex: 0 0 auto;
   gap: var(--app-space-2);
 }
 
-.empty-description {
+.markdown-empty {
   margin: var(--app-space-3) var(--app-space-1);
   color: var(--app-color-text-muted);
   font-style: italic;
 }
 
-.description-markdown {
+.markdown-rendered {
   padding: 2px 7px var(--app-space-4);
   overflow-wrap: anywhere;
   line-height: 1.5;
 }
 
-.description-markdown :deep(h1),
-.description-markdown :deep(h2),
-.description-markdown :deep(h3) {
+.markdown-rendered :deep(h1),
+.markdown-rendered :deep(h2),
+.markdown-rendered :deep(h3) {
   margin: 0.8em 0 0.35em;
   line-height: 1.25;
 }
 
-.description-markdown :deep(h1:first-child),
-.description-markdown :deep(h2:first-child),
-.description-markdown :deep(h3:first-child) {
+.markdown-rendered :deep(h1:first-child),
+.markdown-rendered :deep(h2:first-child),
+.markdown-rendered :deep(h3:first-child) {
   margin-top: 0;
 }
 
-.description-markdown :deep(p),
-.description-markdown :deep(ul),
-.description-markdown :deep(ol),
-.description-markdown :deep(blockquote),
-.description-markdown :deep(pre) {
+.markdown-rendered :deep(p),
+.markdown-rendered :deep(ul),
+.markdown-rendered :deep(ol),
+.markdown-rendered :deep(blockquote),
+.markdown-rendered :deep(pre) {
   margin: 0 0 0.75em;
 }
 
-.description-markdown :deep(ul),
-.description-markdown :deep(ol) {
+.markdown-rendered :deep(ul),
+.markdown-rendered :deep(ol) {
   padding-left: 1.6em;
 }
 
-.description-markdown :deep(blockquote) {
+.markdown-rendered :deep(blockquote) {
   padding-left: 0.8em;
   border-left: 3px solid var(--app-color-border);
   color: var(--app-color-text-muted);
 }
 
-.description-markdown :deep(code) {
+.markdown-rendered :deep(code) {
   padding: 0.1em 0.3em;
   border-radius: 3px;
   background: var(--app-color-surface-hover);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-.description-markdown :deep(pre) {
+.markdown-rendered :deep(pre) {
   overflow: auto;
   padding: var(--app-space-3) 10px;
   border-radius: var(--app-radius-control);
   background: var(--app-color-surface-hover);
 }
 
-.description-markdown :deep(pre code) {
+.markdown-rendered :deep(pre code) {
   padding: 0;
   background: transparent;
 }
 
-.description-markdown :deep(img) {
+.markdown-rendered :deep(img) {
   max-width: 100%;
   height: auto;
 }
 
-.description-markdown :deep(.katex-display) {
+.markdown-rendered :deep(.katex-display) {
   overflow-x: auto;
   overflow-y: hidden;
 }
 
 @media (max-width: 620px) {
-  .description-editor-footer {
+  .markdown-editor-footer {
     align-items: flex-end;
     flex-direction: column;
   }

@@ -692,11 +692,11 @@ onMounted(() => {
   max-height: none;
 }
 
-.description-tab-panel :deep(.description-editor) {
+.description-tab-panel :deep(.markdown-editor-form) {
   height: 100%;
 }
 
-.description-tab-panel :deep(.description-textarea) {
+.description-tab-panel :deep(.markdown-editor-textarea) {
   flex: 1 1 auto;
 }
 

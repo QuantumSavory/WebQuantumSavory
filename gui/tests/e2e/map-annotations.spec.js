@@ -265,8 +265,8 @@ test.describe('Map annotations and Tools presentation', () => {
     await expect(markdownEditor).toBeFocused()
     await markdownEditor.fill('# Route note\n\n**Ready** with inline math $x^2$.')
     await selectedPanel.getByRole('button', { name: 'Save annotation content' }).click()
-    await expect(selectedPanel.locator('.description-markdown strong')).toHaveText('Ready')
-    await expect(selectedPanel.locator('.description-markdown .katex')).toHaveCount(1)
+    await expect(selectedPanel.locator('.markdown-rendered strong')).toHaveText('Ready')
+    await expect(selectedPanel.locator('.markdown-rendered .katex')).toHaveCount(1)
     await expect(annotation.locator('.annotation-markdown strong')).toHaveText('Ready')
     await expect(annotation.locator('.annotation-markdown .katex')).toHaveCount(1)
 

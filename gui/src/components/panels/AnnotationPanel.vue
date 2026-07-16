@@ -76,8 +76,8 @@
 </template>
 
 <script setup>
-import { useId } from 'vue'
 import { Trash2 } from '@lucide/vue'
+import { useDomId } from '../../composables/useDomId'
 import {
   attachAnnotationArea,
   detachAnnotationArea,
@@ -99,7 +99,7 @@ const props = defineProps({
 
 const emit = defineEmits(['delete', 'update:collapsed'])
 
-const instanceId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+const instanceId = useDomId('annotation-panel')
 const editorIdPrefix = `annotation-content-${instanceId}`
 const backgroundColorId = `annotation-background-${instanceId}`
 const borderColorId = `annotation-border-${instanceId}`

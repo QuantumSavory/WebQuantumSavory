@@ -38,7 +38,6 @@ describe('DescriptionPanel', () => {
       saveButtonLabel: 'Save project description',
       cancelButtonLabel: 'Cancel description editing',
       emptyText: 'No description yet.',
-      renderedTestId: 'rendered-description',
     })
 
     editor.vm.$emit('update:modelValue', 'Updated details')

@@ -82,9 +82,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronDown, LoaderCircle, RefreshCw } from '@lucide/vue'
 import AutoComplete from 'primevue/autocomplete'
+import { useDomId } from '../../composables/useDomId'
 import { api } from '../../utils/ApiConnector.js'
 import { namedTagTypeOptions } from '../../utils/tagExplorer.js'
 
@@ -111,7 +112,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue'])
-const instanceId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+const instanceId = useDomId('named-tag-type')
 const inputId = `${instanceId}-named-tag-type`
 const errorId = `${instanceId}-named-tag-type-error`
 const unavailableId = `${instanceId}-named-tag-type-unavailable`

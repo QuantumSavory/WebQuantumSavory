@@ -9,7 +9,6 @@
       cancel-button-label="Cancel description editing"
       placeholder="Describe this simulation with Markdown and LaTeX math…"
       empty-text="No description yet."
-      rendered-test-id="rendered-description"
       @update:model-value="emit('update:modelValue', $event)"
     />
   </div>

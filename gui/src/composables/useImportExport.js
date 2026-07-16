@@ -107,7 +107,7 @@ export function useImportExport({
         ...jsonData,
         name: finalName.trim(),
         description: jsonData.description ?? '',
-        annotations: normalizeAnnotations(jsonData.annotations),
+        annotations: jsonData.annotations,
       }
       
       const opened = await importIntoSession(projectDataToImport, projectDataToImport.name)
@@ -183,7 +183,6 @@ export function useImportExport({
     importProject,
     exportProject,
     validateAndProcessImport,
-    processImport,
     generateUniqueName,
     handleImportConflictOverwrite,
     handleImportConflictNewName,
