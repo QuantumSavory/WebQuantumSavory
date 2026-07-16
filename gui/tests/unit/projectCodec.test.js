@@ -53,6 +53,14 @@ function legacyProject() {
   return {
     name: 'Embedded Name',
     description: '# Project notes',
+    annotations: [{
+      id: 'annotation_notes',
+      markdown: 'Bell-pair source $\\rho$',
+      bounds: { west: -74, south: 41, east: -73, north: 42 },
+      backgroundColor: '#FFFFFF',
+      borderColor: '#123ABC',
+      area: { freeCorner: [-75, 40] },
+    }],
     futureProjectField: { enabled: true },
     variables: [
       {
@@ -127,6 +135,7 @@ describe('createEmptyProject', () => {
     expect(first).toEqual({
       name: 'First',
       description: '',
+      annotations: [],
       variables: [],
       simulationConfig: { time: 1, timeStep: 0.1 },
       net: {
@@ -160,6 +169,14 @@ describe('decodeStoredProject', () => {
     expect(decoded.schemaVersion).toBe(0)
     expect(decoded.project.name).toBe('Storage Name')
     expect(decoded.project.description).toBe('# Project notes')
+    expect(decoded.project.annotations).toEqual([{
+      id: 'annotation_notes',
+      markdown: 'Bell-pair source $\\rho$',
+      bounds: { west: -74, south: 41, east: -73, north: 42 },
+      backgroundColor: '#ffffff',
+      borderColor: '#123abc',
+      area: { freeCorner: [-75, 40] },
+    }])
     expect(decoded.project.futureProjectField).toEqual({ enabled: true })
     expect(decoded.project.simulationConfig).toEqual({
       time: 1,
@@ -215,6 +232,7 @@ describe('decodeStoredProject', () => {
     expect(decoded.project).toMatchObject({
       name: 'Partial',
       description: '',
+      annotations: [],
       variables: [],
       simulationConfig: { time: 1, timeStep: 0.1 },
       net: {
@@ -275,6 +293,16 @@ describe('decodeStoredProject', () => {
     const dangling = legacyProject()
     dangling.net.edges[0].target = 'missing_node'
     expect(() => decodeStoredProject(dangling)).toThrow(/references a missing node/)
+  })
+
+  it('rejects malformed and duplicate persisted annotations', () => {
+    const malformed = legacyProject()
+    malformed.annotations[0].backgroundColor = 'white'
+    expect(() => decodeStoredProject(malformed)).toThrow(/six-digit hex color/)
+
+    const duplicate = legacyProject()
+    duplicate.annotations.push(structuredClone(duplicate.annotations[0]))
+    expect(() => decodeStoredProject(duplicate)).toThrow(/duplicate annotation ID/)
   })
 
   it('normalizes physical routes and overrides while rejecting ambiguous or invalid data', () => {
@@ -350,6 +378,8 @@ describe('encodeStoredProject', () => {
     expect(encoded.schemaVersion).toBe(PROJECT_SCHEMA_VERSION)
     expect(encoded.name).toBe('Saved As')
     expect(encoded.description).toBe('# Project notes')
+    expect(encoded.annotations).toEqual(decoded.project.annotations)
+    expect(encoded.annotations).not.toBe(decoded.project.annotations)
     expect(encoded.platformInfo).toEqual({ versions: { app: '2.0.0' } })
     expect(encoded.uiGlobal).toEqual({
       futureUiField: true,
@@ -397,6 +427,7 @@ describe('encodeStoredProject', () => {
     expect(second.project.net.edges[0].source).toBe(second.project.net.nodes[0])
     expect(second.project.net.edges[0].target).toBe(second.project.net.nodes[1])
     expect(second.project.description).toBe(first.project.description)
+    expect(second.project.annotations).toEqual(first.project.annotations)
     expect(second.project.variables[0].value).toEqual(first.project.variables[0].value)
     expect(second.map).toEqual(first.map)
   })
@@ -467,6 +498,7 @@ describe('backend payload codecs', () => {
     expect(payload.futureProjectField).toEqual({ enabled: true })
     expect(payload).not.toHaveProperty('schemaVersion')
     expect(payload).not.toHaveProperty('description')
+    expect(payload).not.toHaveProperty('annotations')
     expect(payload).not.toHaveProperty('simulationConfig')
     expect(payload).not.toHaveProperty('platformInfo')
     expect(payload).not.toHaveProperty('uiGlobal')
@@ -515,11 +547,20 @@ describe('backend payload codecs', () => {
   it('adds only the requested simulation configuration for script export', () => {
     const project = createEmptyProject('Script')
     project.description = 'Not simulator input'
+    project.annotations.push({
+      id: 'script_annotation',
+      markdown: 'Not Julia input',
+      bounds: { west: -1, south: -1, east: 1, north: 1 },
+      backgroundColor: '#ffffff',
+      borderColor: '#000000',
+      area: null,
+    })
 
     const payload = toScriptExportPayload(project, { time: 2.5, timeStep: 0.25, ui: true })
 
     expect(payload.simulationConfig).toEqual({ time: 2.5, timeStep: 0.25 })
     expect(payload).not.toHaveProperty('description')
+    expect(payload).not.toHaveProperty('annotations')
     expect(payload).not.toHaveProperty('schemaVersion')
   })
 

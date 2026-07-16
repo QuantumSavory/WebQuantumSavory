@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { createEmptyProject, encodeStoredProject } from '../../src/utils/projectCodec'
 import { useProjectSession } from '../../src/composables/useProjectSession'
 
@@ -102,6 +102,40 @@ beforeAll(() => {
 beforeEach(() => window.localStorage.clear())
 
 describe('project session', () => {
+  it('clears old annotations during graph release and commits the candidate annotations', async () => {
+    const oldAnnotation = {
+      id: 'annotation_old',
+      markdown: 'Old',
+      bounds: { west: -2, south: -1, east: 2, north: 1 },
+      backgroundColor: '#ffffff',
+      borderColor: '#000000',
+      area: null,
+    }
+    const nextAnnotation = {
+      ...oldAnnotation,
+      id: 'annotation_next',
+      markdown: 'Next',
+    }
+    const target = createEmptyProject('B')
+    target.annotations.push(nextAnnotation)
+    const harness = createHarness({
+      projects: { B: encodeStoredProject(target, { name: 'B' }) },
+    })
+    harness.projectData.value.annotations.push(oldAnnotation)
+    const observedAnnotationIds = []
+    const stop = watch(
+      harness.projectData,
+      project => observedAnnotationIds.push(project.annotations.map(annotation => annotation.id)),
+      { flush: 'sync' },
+    )
+
+    expect(await harness.session.open('B')).toBe(true)
+    stop()
+
+    expect(observedAnnotationIds).toContainEqual([])
+    expect(harness.projectData.value.annotations).toEqual([nextAnnotation])
+  })
+
   it('renames before Save As serialization and starts a clean session', () => {
     const harness = createHarness()
     expect(harness.session.saveAs('B')).toBe(true)

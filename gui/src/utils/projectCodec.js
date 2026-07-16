@@ -3,6 +3,7 @@ import FloatingProtocol from '../models/FloatingProtocol'
 import Node from '../models/Node'
 import Variable from '../models/Variable'
 import { setEdgeCorrectNodeOrder } from './Utils'
+import { normalizeAnnotations } from './annotationGeometry'
 import {
   CURVE_POINT_TYPES,
   DEFAULT_REFRACTIVE_INDEX,
@@ -348,6 +349,7 @@ export function createEmptyProject(name = DEFAULT_PROJECT_NAME) {
   return {
     name: normalizeProjectName(name),
     description: '',
+    annotations: [],
     variables: [],
     simulationConfig: {
       time: DEFAULT_SIMULATION_TIME,
@@ -399,6 +401,7 @@ export function decodeStoredProject(raw, context = {}) {
     ...omitFields(source, new Set([
       'name',
       'description',
+      'annotations',
       'variables',
       'simulationConfig',
       'net',
@@ -406,6 +409,7 @@ export function decodeStoredProject(raw, context = {}) {
     ])),
     name,
     description: typeof source.description === 'string' ? source.description : '',
+    annotations: normalizeAnnotations(source.annotations),
     variables: Array.isArray(source.variables)
       ? source.variables.map(variable => {
           const hydrated = new Variable(isRecord(variable) ? cloneValue(variable) : {})
@@ -465,6 +469,7 @@ export function encodeStoredProject(project, context = {}) {
     ...omitFields(source, new Set([
       'name',
       'description',
+      'annotations',
       'variables',
       'simulationConfig',
       'net',
@@ -473,6 +478,7 @@ export function encodeStoredProject(project, context = {}) {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     name,
     description: typeof source.description === 'string' ? source.description : '',
+    annotations: normalizeAnnotations(source.annotations),
     variables: Array.isArray(source.variables) ? source.variables.map(plainVariable) : [],
     simulationConfig: {
       ...omitFields(sourceSimulationConfig, new Set(['time', 'timeStep'])),
@@ -549,6 +555,7 @@ export function toSimulationPayload(project) {
     ...omitFields(source, new Set([
       'schemaVersion',
       'description',
+      'annotations',
       'simulationConfig',
       'platformInfo',
       'uiGlobal',
