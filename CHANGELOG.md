@@ -6,7 +6,7 @@
 - Applied each resolved physical-link delay to both directed classical and quantum simulator channels and generated scripts, while excluding virtual links from physical graphs and retaining their permitted protocols.
 - Fixed wrapped Tools tabs and reorganized Layout Tools into a full-width live-help card above equal Physical Defaults, Drawing Tools, and Helpers cards, with consistent pointer and keyboard-focus guidance.
 - Added persisted frontend-only map annotations with safe Markdown and LaTeX, fill and border colors, one-shot placement, selection, dragging, minimum-size corner resizing, deletion, and editing throughout every simulation phase.
-- Added optional transparent dashed annotation areas whose independent free corner flips the shared annotation corner across either center axis, while keeping annotation data out of simulator and generated-script payloads.
+- Added optional transparent dashed annotation areas whose independently persisted `freeCorner` selects a dominant normalized-axis attachment, always shares a positive annotation-edge segment instead of a lone corner, and expands across the full edge when the selection extends beyond it, while keeping annotation data out of simulator and generated-script payloads.
 
 ## 1.8.0
 
