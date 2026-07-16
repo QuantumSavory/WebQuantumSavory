@@ -54,7 +54,7 @@
             <span>Attach area selection</span>
           </label>
           <p :id="areaHelpId" class="annotation-field-help">
-            Adds a transparent dashed area connected to one annotation corner.
+            Adds a transparent dashed area connected along an annotation edge.
           </p>
         </fieldset>
 

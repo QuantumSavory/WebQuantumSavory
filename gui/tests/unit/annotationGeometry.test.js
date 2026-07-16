@@ -22,7 +22,6 @@ import {
   normalizeAnnotations,
   resizeAnnotation,
   setAnnotationAreaFreeCorner,
-  sharedCornerForFreeCorner,
 } from '../../src/utils/annotationGeometry'
 
 const projection = {
@@ -40,6 +39,27 @@ function annotation(overrides = {}) {
     area: null,
     ...overrides,
   }
+}
+
+function sharedBoundaryLengths(annotationBounds, areaBounds) {
+  if (!areaBounds) return []
+  const latitudeOverlap = Math.max(0, Math.min(annotationBounds.north, areaBounds.north)
+    - Math.max(annotationBounds.south, areaBounds.south))
+  const longitudeOverlap = Math.max(0, Math.min(annotationBounds.east, areaBounds.east)
+    - Math.max(annotationBounds.west, areaBounds.west))
+  const sharedLengths = []
+  const sharesVerticalBoundary = [areaBounds.west, areaBounds.east]
+    .some(longitude => (
+      longitude === annotationBounds.west || longitude === annotationBounds.east
+    ))
+  if (latitudeOverlap > 0 && sharesVerticalBoundary) {
+    sharedLengths.push(latitudeOverlap)
+  }
+  if (longitudeOverlap > 0 && [areaBounds.south, areaBounds.north]
+    .some(latitude => latitude === annotationBounds.south || latitude === annotationBounds.north)) {
+    sharedLengths.push(longitudeOverlap)
+  }
+  return sharedLengths
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -123,7 +143,7 @@ describe('annotation geometry', () => {
         ]],
       },
     })
-    expect(annotationAreaBounds(value)).toEqual({ west: 2, south: 1, east: 4, north: 3 })
+    expect(annotationAreaBounds(value)).toEqual({ west: -2, south: 1, east: 4, north: 3 })
     expect(annotationAreaToGeoJSON(value)?.properties.kind).toBe('annotation-area')
     expect(annotationAreaToGeoJSON(annotation())).toBeNull()
     expect(annotationAreaToGeoJSON(annotation({
@@ -135,12 +155,103 @@ describe('annotation geometry', () => {
     })).toBeNull()
   })
 
-  it('flips the shared corner whenever the free corner crosses a center axis', () => {
+  it.each([
+    ['northwest horizontal', [-5, 2], { west: -5, south: -1, east: -2, north: 2 }],
+    ['northeast vertical', [3, 3], { west: -2, south: 1, east: 3, north: 3 }],
+    ['southeast horizontal', [5, -2], { west: 2, south: -2, east: 5, north: 1 }],
+    ['southwest vertical', [-3, -3], { west: -3, south: -3, east: 2, north: -1 }],
+  ])('uses normalized dominant-axis attachment in the %s quadrant', (
+    _label,
+    freeCorner,
+    expectedArea,
+  ) => {
+    const value = annotation({ area: { freeCorner } })
+
+    expect(annotationAreaBounds(value)).toEqual(expectedArea)
+    expect(Math.max(...sharedBoundaryLengths(value.bounds, expectedArea))).toBeGreaterThan(0)
+  })
+
+  it.each([
+    [[4, 2], { west: 2, south: -1, east: 4, north: 2 }],
+    [[-4, -2], { west: -4, south: -2, east: -2, north: 1 }],
+  ])('prioritizes horizontal attachment for normalized ties at %j', (
+    freeCorner,
+    expectedArea,
+  ) => {
+    expect(annotationAreaBounds(annotation({ area: { freeCorner } }))).toEqual(expectedArea)
+  })
+
+  it.each([
+    [[4, 0.5], { west: 2, south: -1, east: 4, north: 0.5 }],
+    [[-1, 3], { west: -1, south: 1, east: 2, north: 3 }],
+  ])('shares a positive edge segment for an inside tangent coordinate %j', (
+    freeCorner,
+    expectedArea,
+  ) => {
+    const value = annotation({ area: { freeCorner } })
+    const areaBounds = annotationAreaBounds(value)
+
+    expect(areaBounds).toEqual(expectedArea)
+    expect(Math.max(...sharedBoundaryLengths(value.bounds, areaBounds))).toBeGreaterThan(0)
+  })
+
+  it.each([
+    [[5, 1], 2],
+    [[-5, -2], 2],
+    [[2, 3], 4],
+    [[-3, -3], 4],
+  ])('shares the complete annotation edge when tangent coordinate %j reaches or passes its span', (
+    freeCorner,
+    expectedLength,
+  ) => {
+    const value = annotation({ area: { freeCorner } })
+    const areaBounds = annotationAreaBounds(value)
+
+    expect(Math.max(...sharedBoundaryLengths(value.bounds, areaBounds))).toBe(expectedLength)
+  })
+
+  it('handles exact centers, edges, and corners without a corner-only rectangle', () => {
     const bounds = annotation().bounds
-    expect(sharedCornerForFreeCorner(bounds, [-4, 3])).toEqual([-2, 1])
-    expect(sharedCornerForFreeCorner(bounds, [4, 3])).toEqual([2, 1])
-    expect(sharedCornerForFreeCorner(bounds, [4, -3])).toEqual([2, -1])
-    expect(sharedCornerForFreeCorner(bounds, [-4, -3])).toEqual([-2, -1])
+    for (const freeCorner of [[0, 0], [5, 0], [0, 3]]) {
+      const areaBounds = annotationAreaBounds(annotation({ area: { freeCorner } }))
+      expect(areaBounds).not.toBeNull()
+      expect(Math.max(...sharedBoundaryLengths(bounds, areaBounds))).toBeGreaterThan(0)
+    }
+
+    for (const freeCorner of [
+      [2, 0], [-2, 0], [0, 1], [0, -1],
+      [2, 1], [2, -1], [-2, 1], [-2, -1],
+    ]) {
+      expect(annotationAreaBounds(annotation({ area: { freeCorner } }))).toBeNull()
+    }
+
+    expect(annotationAreaBounds(annotation({
+      bounds: { west: 2, south: -1, east: 2, north: 1 },
+      area: { freeCorner: [4, 3] },
+    }))).toBeNull()
+  })
+
+  it.each([
+    [
+      { west: 160, south: 70, east: 170, north: 80 },
+      [-175, 85],
+      { west: 170, south: 70, east: 180, north: 85 },
+    ],
+    [
+      { west: -170, south: 70, east: -160, north: 80 },
+      [175, 85],
+      { west: -180, south: 70, east: -170, north: 85 },
+    ],
+  ])('selects a world-wrap-aware edge for dateline bounds %#', (
+    bounds,
+    freeCorner,
+    expectedArea,
+  ) => {
+    const areaBounds = annotationAreaBounds(annotation({ bounds, area: { freeCorner } }))
+
+    expect(areaBounds).toEqual(expectedArea)
+    expect(Math.max(...sharedBoundaryLengths(bounds, areaBounds)))
+      .toBe(bounds.north - bounds.south)
   })
 
   it('owns area attachment, free-corner updates, and detachment', () => {
@@ -152,8 +263,7 @@ describe('annotation geometry', () => {
 
     const movedCorner = setAnnotationAreaFreeCorner(attached, [-4, 3])
     expect(movedCorner.area).toEqual({ freeCorner: [-4, 3] })
-    expect(sharedCornerForFreeCorner(movedCorner.bounds, movedCorner.area.freeCorner))
-      .toEqual([-2, 1])
+    expect(annotationAreaBounds(movedCorner)).toEqual({ west: -4, south: 1, east: 2, north: 3 })
     expect(detachAnnotationArea(movedCorner).area).toBeNull()
     expect(() => setAnnotationAreaFreeCorner(value, [4, 3])).toThrow(/attached area/)
 
