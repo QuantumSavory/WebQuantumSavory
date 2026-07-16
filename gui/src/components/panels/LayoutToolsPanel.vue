@@ -14,6 +14,7 @@
         <li>Drag a node or visible curve handle to position it.</li>
         <li>In curve mode, click a selected edge to add a smooth handle.</li>
         <li>Click a handle for smooth → sharp → delete.</li>
+        <li>Choose Add Annotation, then click the map to place a note.</li>
       </ul>
     </section>
 
@@ -37,7 +38,14 @@
 
     <section class="layout-tools-card drawing-card" aria-labelledby="drawing-tools-title">
       <h3 id="drawing-tools-title" class="card-title">Drawing Tools</h3>
-      <label class="checkbox-field" for="curve-editing-enabled">
+      <label
+        class="checkbox-field"
+        for="curve-editing-enabled"
+        @mouseenter="showHelp(curveModeHelp)"
+        @mouseleave="showDefaultHelp"
+        @focusin="showHelp(curveModeHelp)"
+        @focusout="showDefaultHelp"
+      >
         <input
           id="curve-editing-enabled"
           type="checkbox"
@@ -47,7 +55,14 @@
         >
         <span>Curve mode</span>
       </label>
-      <label class="checkbox-field" for="physical-badges-visible">
+      <label
+        class="checkbox-field"
+        for="physical-badges-visible"
+        @mouseenter="showHelp(physicalBadgesHelp)"
+        @mouseleave="showDefaultHelp"
+        @focusin="showHelp(physicalBadgesHelp)"
+        @focusout="showDefaultHelp"
+      >
         <input
           id="physical-badges-visible"
           type="checkbox"
@@ -56,8 +71,22 @@
         >
         <span>Distance and delay badges</span>
       </label>
+      <button
+        type="button"
+        class="helper-button annotation-button"
+        :class="{ active: annotationCreationEnabled }"
+        :aria-pressed="annotationCreationEnabled"
+        @mouseenter="showHelp(addAnnotationHelp)"
+        @mouseleave="showDefaultHelp"
+        @focus="showHelp(addAnnotationHelp)"
+        @blur="showDefaultHelp"
+        @click="emit('add-annotation')"
+      >
+        <MessageSquarePlus :size="16" aria-hidden="true" />
+        Add Annotation
+      </button>
       <p v-if="disabled" id="layout-tools-disabled-help" class="disabled-help">
-        Drawing is unavailable after a simulation has started.
+        Network editing is unavailable after a simulation has started. Annotations remain available.
       </p>
     </section>
 
@@ -70,9 +99,9 @@
         class="helper-button"
         :disabled="disabled"
         :aria-describedby="disabled ? 'layout-tools-disabled-help' : undefined"
-        @mouseenter="activeHelper = helper"
+        @mouseenter="showHelp(helper)"
         @mouseleave="showDefaultHelp"
-        @focus="activeHelper = helper"
+        @focus="showHelp(helper)"
         @blur="showDefaultHelp"
         @click="emit(helper.event)"
       >
@@ -85,7 +114,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { Network, Star, Waypoints } from '@lucide/vue'
+import { MessageSquarePlus, Network, Star, Waypoints } from '@lucide/vue'
 
 const props = defineProps({
   disabled: { type: Boolean, default: false },
@@ -95,6 +124,7 @@ const props = defineProps({
   },
   curveEditingEnabled: { type: Boolean, default: false },
   showPhysicalBadges: { type: Boolean, default: true },
+  annotationCreationEnabled: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -104,7 +134,23 @@ const emit = defineEmits([
   'update:refractive-index',
   'update:curve-editing-enabled',
   'update:show-physical-badges',
+  'add-annotation',
 ])
+
+const curveModeHelp = {
+  label: 'Curve mode',
+  description: 'Select a physical edge to add, position, and cycle its curve handles.',
+}
+
+const physicalBadgesHelp = {
+  label: 'Distance and delay badges',
+  description: 'Show or hide the calculated distance and propagation delay on physical edges.',
+}
+
+const addAnnotationHelp = {
+  label: 'Add Annotation',
+  description: 'Start one-shot annotation placement, then click the map where the note should appear.',
+}
 
 const helpers = [
   {
@@ -132,6 +178,10 @@ const helpers = [
 
 const activeHelper = ref(null)
 
+function showHelp(helper) {
+  activeHelper.value = helper
+}
+
 function showDefaultHelp() {
   activeHelper.value = null
 }
@@ -149,7 +199,7 @@ function updateRefractiveIndex(event) {
 <style scoped>
 .layout-tools {
   display: grid;
-  grid-template-columns: minmax(17rem, 2fr) minmax(11rem, 1fr) minmax(13rem, 1fr) minmax(15rem, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   min-height: 150px;
   color: var(--app-color-text);
@@ -164,6 +214,7 @@ function updateRefractiveIndex(event) {
 }
 
 .help-card {
+  grid-column: 1 / -1;
   background: var(--app-color-surface-subtle);
 }
 
@@ -251,6 +302,12 @@ kbd {
   outline-offset: var(--app-focus-ring-offset);
 }
 
+.annotation-button.active {
+  border-color: var(--app-color-primary);
+  background: var(--app-color-primary-soft);
+  color: var(--app-color-primary);
+}
+
 .helper-button:disabled,
 .number-input:disabled {
   border-color: var(--app-color-border);
@@ -261,11 +318,5 @@ kbd {
 
 .disabled-help {
   color: var(--app-color-text-muted);
-}
-
-@media (max-width: 900px) {
-  .layout-tools {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 </style>

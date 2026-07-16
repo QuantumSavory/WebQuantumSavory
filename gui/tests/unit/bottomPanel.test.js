@@ -29,6 +29,15 @@ const BasePanelStub = defineComponent({
   template: '<section><slot name="content" /></section>'
 })
 
+const LayoutToolsPanelStub = defineComponent({
+  name: 'LayoutToolsPanel',
+  props: {
+    annotationCreationEnabled: Boolean
+  },
+  emits: ['add-annotation'],
+  template: '<button data-testid="layout-tools-stub" @click="$emit(\'add-annotation\')" />'
+})
+
 function mountPanel(availableBounds, extraProps = {}) {
   return mount(BottomPanel, {
     props: {
@@ -49,7 +58,7 @@ function mountPanel(availableBounds, extraProps = {}) {
         BasePanel: BasePanelStub,
         DescriptionPanel: true,
         ExportScriptPanel: true,
-        LayoutToolsPanel: true,
+        LayoutToolsPanel: LayoutToolsPanelStub,
         LogsPanel: true,
         StatesZooPanel: true,
         TagsQueriesPanel: true,
@@ -139,5 +148,18 @@ describe('BottomPanel bounds contract', () => {
 
     await wrapper.get('#bottom-panel-logs-tab').trigger('keydown', { key: 'ArrowLeft' })
     expect(wrapper.get('#bottom-panel-export-script-tab').attributes('aria-selected')).toBe('true')
+  })
+
+  it('forwards annotation creation state and requests to the layout tools', async () => {
+    const wrapper = mountPanel(
+      { left: 0, right: 1000, top: 0, bottom: 800 },
+      { annotationCreationEnabled: true }
+    )
+
+    const layoutTools = wrapper.getComponent(LayoutToolsPanelStub)
+    expect(layoutTools.props('annotationCreationEnabled')).toBe(true)
+
+    await layoutTools.trigger('click')
+    expect(wrapper.emitted('add-annotation')).toEqual([[]])
   })
 })
