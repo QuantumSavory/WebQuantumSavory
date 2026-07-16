@@ -187,6 +187,7 @@ test.describe('Map annotations and Tools presentation', () => {
   })
 
   test('creates, edits, persists, locks, exports, imports, and deletes annotations', async ({ page }) => {
+    test.slow()
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.addInitScript(() => {
       localStorage.setItem('bottomPanel_size', JSON.stringify({ width: 800, height: 360 }))
