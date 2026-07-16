@@ -62,8 +62,19 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
   }
 
   function deleteSelected(item, type) {
-    console.log( 'deleteSelected', item )
     if (!item) return
+
+    if (type === 'annotation') {
+      const annotations = Array.isArray(projectData.value.annotations)
+        ? projectData.value.annotations
+        : []
+      projectData.value.annotations = annotations.filter(annotation => (
+        annotation !== item && annotation.id !== item.id
+      ))
+      addLog('warning', `Deleted annotation: ${item.id}`, 'Map')
+      handleSelectLocal(null, null)
+      return
+    }
 
     if (editingLocked.value) {
       showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)

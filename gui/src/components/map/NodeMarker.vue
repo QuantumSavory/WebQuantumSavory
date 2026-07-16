@@ -25,9 +25,9 @@ function updateMarkerStyle(selected) {
   if (!marker.value) return
   const el = marker.value.getElement()
   if (selected) {
-    el.style.zIndex = '1'
+    el.style.zIndex = '41'
   } else {
-    el.style.zIndex = '0'
+    el.style.zIndex = '40'
   }
 }
 
