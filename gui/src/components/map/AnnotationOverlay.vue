@@ -148,6 +148,8 @@ onMounted(() => {
   })
     .setLngLat(annotationNorthwest())
     .addTo(props.map)
+  // MapLibre replaces custom marker labels when a marker is added.
+  element.value.setAttribute('aria-label', `Map annotation ${props.annotation.id}`)
 
   marker.on('dragstart', () => {
     dragStartBounds = { ...props.annotation.bounds }

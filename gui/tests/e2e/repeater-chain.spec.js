@@ -204,7 +204,9 @@ test.describe('Layout Tools repeater chain generator', () => {
       app._instance.setupState.simulationState.phase = 'parsed'
     })
     await expect(helper).toBeDisabled()
-    await expect(page.getByText('Drawing is unavailable after a simulation has started.')).toBeVisible()
+    await expect(page.getByText(
+      'Network editing is unavailable after a simulation has started. Annotations remain available.',
+    )).toBeVisible()
   })
 
   test('clones a configured virtual template into an evenly spaced persistent chain', async ({ page }) => {

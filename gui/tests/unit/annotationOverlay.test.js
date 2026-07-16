@@ -19,7 +19,11 @@ vi.mock('maplibre-gl', () => {
     }
 
     getLngLat() { return this.position }
-    addTo(map) { this.map = map; return this }
+    addTo(map) {
+      this.map = map
+      this.options.element.setAttribute('aria-label', 'Map marker')
+      return this
+    }
     on(event, handler) { this.handlers.set(event, handler); return this }
     remove() { this.removed = true }
   }
@@ -73,6 +77,7 @@ describe('AnnotationOverlay', () => {
     expect(bodyMarker).toBeDefined()
     expect(bodyMarker.options.element.style.width).toBe('240px')
     expect(bodyMarker.options.element.style.height).toBe('140px')
+    expect(bodyMarker.options.element.getAttribute('aria-label')).toBe('Map annotation annotation-1')
     expect(wrapper.get('.annotation-markdown strong').text()).toBe('Note')
 
     bodyMarker.handlers.get('dragstart')()
@@ -87,6 +92,8 @@ describe('AnnotationOverlay', () => {
     const northeastMarker = markerInstances.find(instance => (
       instance.options.element.dataset.annotationCorner === 'northeast'
     ))
+    expect(northeastMarker.options.element.getAttribute('aria-label'))
+      .toBe('Resize annotation from northeast corner')
     northeastMarker.position = { lng: 5, lat: 5 }
     northeastMarker.handlers.get('drag')()
     expect(annotation.bounds).toEqual({ west: 2, south: 1, east: 10, north: 7 })

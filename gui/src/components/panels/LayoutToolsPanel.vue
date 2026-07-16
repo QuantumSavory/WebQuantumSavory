@@ -215,6 +215,7 @@ function updateRefractiveIndex(event) {
 
 .help-card {
   grid-column: 1 / -1;
+  min-height: 112px;
   background: var(--app-color-surface-subtle);
 }
 

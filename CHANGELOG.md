@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.9.0
 
 - Added dependency-backed Bézier routing for physical links with typed smooth/sharp anchors, geodesic distance and propagation-delay badges, editable physical defaults and per-edge overrides, and schema-v1 legacy normalization.
 - Applied each resolved physical-link delay to both directed classical and quantum simulator channels and generated scripts, while excluding virtual links from physical graphs and retaining their permitted protocols.
+- Fixed wrapped Tools tabs and reorganized Layout Tools into a full-width live-help card above equal Physical Defaults, Drawing Tools, and Helpers cards, with consistent pointer and keyboard-focus guidance.
+- Added persisted frontend-only map annotations with safe Markdown and LaTeX, fill and border colors, one-shot placement, selection, dragging, minimum-size corner resizing, deletion, and editing throughout every simulation phase.
+- Added optional transparent dashed annotation areas whose independent free corner flips the shared annotation corner across either center axis, while keeping annotation data out of simulator and generated-script payloads.
 
 ## 1.8.0
 

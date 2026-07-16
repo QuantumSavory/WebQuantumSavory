@@ -7,7 +7,6 @@
     :data-annotation-corner="corner || undefined"
     :aria-label="label"
     @click.stop
-    @mousedown.stop
   />
 </template>
 
@@ -40,6 +39,9 @@ onMounted(() => {
   })
     .setLngLat(props.position)
     .addTo(props.map)
+  // MapLibre assigns its generic localized marker label during addTo().
+  // Restore the domain-specific control label for keyboard and screen-reader users.
+  element.value.setAttribute('aria-label', props.label)
 
   marker.on('dragstart', () => emit('activate'))
   marker.on('drag', () => emit('move', markerPosition()))
@@ -51,6 +53,7 @@ watch(
   position => marker?.setLngLat(position),
   { deep: true },
 )
+watch(() => props.label, label => element.value?.setAttribute('aria-label', label))
 
 onUnmounted(() => marker?.remove())
 </script>
