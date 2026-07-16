@@ -81,7 +81,7 @@ describe('AnnotationOverlay', () => {
     expect(wrapper.get('.annotation-markdown strong').text()).toBe('Note')
 
     bodyMarker.handlers.get('dragstart')()
-    bodyMarker.position = { lng: 2, lat: 15 }
+    bodyMarker.position = { lng: 362, lat: 15 }
     bodyMarker.handlers.get('drag')()
 
     expect(annotation).toBe(originalIdentity)
@@ -94,14 +94,14 @@ describe('AnnotationOverlay', () => {
     ))
     expect(northeastMarker.options.element.getAttribute('aria-label'))
       .toBe('Resize annotation from northeast corner')
-    northeastMarker.position = { lng: 5, lat: 5 }
+    northeastMarker.position = { lng: 365, lat: 5 }
     northeastMarker.handlers.get('drag')()
     expect(annotation.bounds).toEqual({ west: 2, south: 1, east: 10, north: 7 })
 
     const areaMarker = markerInstances.find(instance => (
       instance.options.element.classList.contains('annotation-resize-handle-area')
     ))
-    areaMarker.position = { lng: 0, lat: -5 }
+    areaMarker.position = { lng: 360, lat: -5 }
     areaMarker.handlers.get('drag')()
     expect(annotation.area.freeCorner).toEqual([0, -5])
 

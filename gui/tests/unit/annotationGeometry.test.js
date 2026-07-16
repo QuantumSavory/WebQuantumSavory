@@ -17,6 +17,7 @@ import {
   detachAnnotationArea,
   generateAnnotationId,
   moveAnnotation,
+  moveAnnotationToNorthwest,
   normalizeAnnotation,
   normalizeAnnotations,
   resizeAnnotation,
@@ -125,6 +126,13 @@ describe('annotation geometry', () => {
     expect(annotationAreaBounds(value)).toEqual({ west: 2, south: 1, east: 4, north: 3 })
     expect(annotationAreaToGeoJSON(value)?.properties.kind).toBe('annotation-area')
     expect(annotationAreaToGeoJSON(annotation())).toBeNull()
+    expect(annotationAreaToGeoJSON(annotation({
+      area: { freeCorner: [2, 1] },
+    }))).toBeNull()
+    expect(annotationAreaToGeoJSON({
+      ...value,
+      id: '',
+    })).toBeNull()
   })
 
   it('flips the shared corner whenever the free corner crosses a center axis', () => {
@@ -164,6 +172,49 @@ describe('annotation geometry', () => {
     expect(moved.bounds).toEqual({ west: 170, south: 80, east: 180, north: 90 })
     expect(moved.area).toEqual({ freeCorner: [150, 60] })
     expect(moved.area).not.toBe(value.area)
+  })
+
+  it('canonicalizes world-wrapped marker positions without throwing during interaction', () => {
+    const value = annotation({ area: { freeCorner: [4, 3] } })
+
+    expect(annotationBoundsFromScreenCenter([360, 0], projection)).toEqual({
+      west: -12,
+      south: -7,
+      east: 12,
+      north: 7,
+    })
+    expect(moveAnnotationToNorthwest(value, [359, 2]).bounds).toEqual({
+      west: -1,
+      south: 0,
+      east: 3,
+      north: 2,
+    })
+    expect(setAnnotationAreaFreeCorner(value, [364, 95]).area.freeCorner).toEqual([4, 90])
+    expect(setAnnotationAreaFreeCorner(annotation({
+      bounds: { west: 160, south: 70, east: 170, north: 80 },
+      area: { freeCorner: [175, 85] },
+    }), [190, 85]).area.freeCorner).toEqual([180, 85])
+
+    const resized = resizeAnnotation(
+      annotation({ bounds: { west: 160, south: 70, east: 170, north: 80 } }),
+      'southeast',
+      [190, 60],
+      projection,
+    )
+    expect(resized.bounds).toEqual({ west: 150, south: 60, east: 180, north: 80 })
+    expect(() => normalizeAnnotation(resized)).not.toThrow()
+  })
+
+  it('fails soft for invalid interactive projection results', () => {
+    const value = annotation()
+    const brokenProjection = {
+      project: () => ({ x: Number.NaN, y: 0 }),
+      unproject: () => ({ lng: Number.NaN, lat: 0 }),
+    }
+
+    expect(annotationBoundsFromScreenCenter([0, 0], brokenProjection)).toBeNull()
+    expect(resizeAnnotation(value, 'southeast', [2, -1], brokenProjection)).toEqual(value)
+    expect(annotationToGeoJSON({ ...value, bounds: { west: 2, east: -2 } })).toBeNull()
   })
 
   it('enforces the centralized minimum visible size while resizing', () => {

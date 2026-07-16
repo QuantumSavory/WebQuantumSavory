@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import maplibregl from 'maplibre-gl'
 import Slot from '../../models/Slot'
 import SlotIcon from './SlotIcon.vue';
@@ -19,17 +19,6 @@ const isDraggingConnector = ref(false)
 const slots = ref([])
 const { showEntangledSlots } = useUiServices()
 
-
-// Update marker style based on selection
-function updateMarkerStyle(selected) {
-  if (!marker.value) return
-  const el = marker.value.getElement()
-  if (selected) {
-    el.style.zIndex = '41'
-  } else {
-    el.style.zIndex = '40'
-  }
-}
 
 onMounted(() => {
   // Create and initialize marker
@@ -54,9 +43,6 @@ onMounted(() => {
     props.node.updatePosition([position.lng, position.lat])
     emit('nodePositionChanged', props.node)
   })
-
-  // Set initial selection state
-  updateMarkerStyle(props.isSelected)
 })
 
 onUnmounted(() => {
@@ -64,9 +50,6 @@ onUnmounted(() => {
     marker.value.remove()
   }
 })
-
-// Watch for selection changes
-watch(() => props.isSelected, updateMarkerStyle)
 
 // Update marker if node position changes externally
 function updatePosition(position) {
@@ -251,6 +234,7 @@ defineExpose({ updatePosition })
   position: absolute;
   transform: translate(-50%, -50%);
   transition: box-shadow 0.2s ease, background-color 0.2s ease;
+  z-index: var(--app-z-map-node);
 }
 
 .node-marker.is-selected {
@@ -258,6 +242,7 @@ defineExpose({ updatePosition })
   box-shadow: 0 0px 10px 3px #8586f6;
   font-weight: 600;
   transition: box-shadow 0.2s ease, background-color 0.2s ease;
+  z-index: var(--app-z-map-node-selected);
 }
 
 .node-marker.is-hovered {

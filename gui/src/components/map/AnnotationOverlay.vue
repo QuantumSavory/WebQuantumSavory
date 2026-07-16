@@ -41,10 +41,10 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import maplibregl from 'maplibre-gl'
+import { useMaplibreMarker } from '../../composables/useMaplibreMarker'
 import {
   ANNOTATION_CORNERS,
-  moveAnnotation,
+  moveAnnotationToNorthwest,
   resizeAnnotation,
   setAnnotationAreaFreeCorner,
 } from '../../utils/annotationGeometry'
@@ -77,7 +77,6 @@ const areaHandlePosition = computed(() => (
     : null
 ))
 
-let marker = null
 let dragStartBounds = null
 const mapGeometryEvents = ['move', 'zoom', 'rotate', 'pitch', 'resize']
 
@@ -99,9 +98,9 @@ function projectedLength(start, end) {
 }
 
 function updateOverlayGeometry() {
-  if (!marker || !element.value) return
+  if (!element.value) return
   const bounds = props.annotation.bounds
-  marker.setLngLat(annotationNorthwest())
+  markerController.setPosition(annotationNorthwest())
   element.value.style.width = `${projectedLength(
     [bounds.west, bounds.north],
     [bounds.east, bounds.north],
@@ -112,20 +111,16 @@ function updateOverlayGeometry() {
   )}px`
 }
 
-function markerPosition() {
-  const position = marker.getLngLat()
-  return [position.lng, position.lat]
-}
-
 function updateDrag() {
   if (!dragStartBounds) return
-  const position = markerPosition()
-  const updated = moveAnnotation(
+  const position = markerController.getPosition()
+  if (!position) return
+  const updated = moveAnnotationToNorthwest(
     { ...props.annotation, bounds: dragStartBounds },
-    [position[0] - dragStartBounds.west, position[1] - dragStartBounds.north],
+    position,
   )
   Object.assign(props.annotation, updated)
-  marker.setLngLat(annotationNorthwest())
+  markerController.setPosition(annotationNorthwest())
 }
 
 function resizeFromCorner(corner, position) {
@@ -138,28 +133,32 @@ function moveAreaFreeCorner(position) {
   Object.assign(props.annotation, updated)
 }
 
-onMounted(() => {
-  marker = new maplibregl.Marker({
-    element: element.value,
+const markerController = useMaplibreMarker({
+  map: () => props.map,
+  element,
+  position: annotationNorthwest,
+  options: {
     draggable: true,
     anchor: 'top-left',
     rotationAlignment: 'map',
     pitchAlignment: 'map',
-  })
-    .setLngLat(annotationNorthwest())
-    .addTo(props.map)
-  // MapLibre replaces custom marker labels when a marker is added.
-  element.value.setAttribute('aria-label', `Map annotation ${props.annotation.id}`)
+  },
+  ariaLabel: () => `Map annotation ${props.annotation.id}`,
+  events: {
+    dragstart: () => {
+      dragStartBounds = { ...props.annotation.bounds }
+      selectAnnotation()
+    },
+    drag: updateDrag,
+    dragend: () => {
+      updateDrag()
+      dragStartBounds = null
+    },
+  },
+  watchPosition: false,
+})
 
-  marker.on('dragstart', () => {
-    dragStartBounds = { ...props.annotation.bounds }
-    selectAnnotation()
-  })
-  marker.on('drag', updateDrag)
-  marker.on('dragend', () => {
-    updateDrag()
-    dragStartBounds = null
-  })
+onMounted(() => {
   mapGeometryEvents.forEach(event => props.map.on(event, updateOverlayGeometry))
   updateOverlayGeometry()
 })
@@ -168,7 +167,6 @@ watch(() => props.annotation.bounds, updateOverlayGeometry, { deep: true })
 
 onUnmounted(() => {
   mapGeometryEvents.forEach(event => props.map.off(event, updateOverlayGeometry))
-  marker?.remove()
 })
 </script>
 
@@ -186,7 +184,7 @@ onUnmounted(() => {
   background: transparent;
   color: var(--app-color-text);
   cursor: grab;
-  z-index: 10;
+  z-index: var(--app-z-map-annotation);
 }
 
 .annotation-overlay:active {

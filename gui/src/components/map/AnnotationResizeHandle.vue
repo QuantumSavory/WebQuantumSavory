@@ -11,8 +11,8 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue'
-import maplibregl from 'maplibre-gl'
+import { ref } from 'vue'
+import { useMaplibreMarker } from '../../composables/useMaplibreMarker'
 
 const props = defineProps({
   map: { type: Object, required: true },
@@ -24,38 +24,22 @@ const props = defineProps({
 
 const emit = defineEmits(['activate', 'move'])
 const element = ref(null)
-let marker = null
 
-function markerPosition() {
-  const position = marker.getLngLat()
-  return [position.lng, position.lat]
-}
-
-onMounted(() => {
-  marker = new maplibregl.Marker({
-    element: element.value,
+const markerController = useMaplibreMarker({
+  map: () => props.map,
+  element,
+  position: () => props.position,
+  options: {
     draggable: true,
     anchor: 'center',
-  })
-    .setLngLat(props.position)
-    .addTo(props.map)
-  // MapLibre assigns its generic localized marker label during addTo().
-  // Restore the domain-specific control label for keyboard and screen-reader users.
-  element.value.setAttribute('aria-label', props.label)
-
-  marker.on('dragstart', () => emit('activate'))
-  marker.on('drag', () => emit('move', markerPosition()))
-  marker.on('dragend', () => emit('move', markerPosition()))
+  },
+  ariaLabel: () => props.label,
+  events: {
+    dragstart: () => emit('activate'),
+    drag: () => emit('move', markerController.getPosition()),
+    dragend: () => emit('move', markerController.getPosition()),
+  },
 })
-
-watch(
-  () => props.position,
-  position => marker?.setLngLat(position),
-  { deep: true },
-)
-watch(() => props.label, label => element.value?.setAttribute('aria-label', label))
-
-onUnmounted(() => marker?.remove())
 </script>
 
 <style scoped>
@@ -68,7 +52,7 @@ onUnmounted(() => marker?.remove())
   background: var(--app-color-surface);
   box-shadow: var(--app-shadow-marker);
   cursor: nwse-resize;
-  z-index: 30;
+  z-index: var(--app-z-map-handle);
 }
 
 .annotation-resize-handle-annotation[data-annotation-corner="northeast"],

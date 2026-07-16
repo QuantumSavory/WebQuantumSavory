@@ -89,7 +89,7 @@ describe('BaseMap initialization', () => {
     return map
   }
 
-  it('creates one canonical 240 by 140 pixel annotation without background deselection', async () => {
+  it('creates one canonical annotation on a wrapped world copy without background deselection', async () => {
     const map = makeInteractiveMap()
     mapConstructor.mockImplementation(() => map)
     wrapper = mount(BaseMap, {
@@ -103,7 +103,7 @@ describe('BaseMap initialization', () => {
 
     const canvas = document.createElement('canvas')
     map.handlers.get('mousedown')({
-      lngLat: { lng: -70, lat: 40 },
+      lngLat: { lng: 290, lat: 40 },
       point: { x: 0, y: 0 },
       originalEvent: { target: canvas },
     })
@@ -125,9 +125,11 @@ describe('BaseMap initialization', () => {
 
     const overlay = document.createElement('div')
     overlay.className = 'annotation-overlay'
+    const overlayChild = document.createElement('strong')
+    overlay.appendChild(overlayChild)
     map.handlers.get('mousedown')({
       point: { x: 0, y: 0 },
-      originalEvent: { target: overlay },
+      originalEvent: { target: overlayChild },
     })
 
     expect(wrapper.emitted('map-click')).toBeUndefined()

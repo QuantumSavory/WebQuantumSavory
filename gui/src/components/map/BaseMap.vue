@@ -13,6 +13,8 @@ import {
   annotationBoundsFromScreenCenter,
   createAnnotation,
 } from '../../utils/annotationGeometry'
+import { isEdgeLayerId } from '../../utils/mapLayers'
+import { isInteractiveMapMarkerTarget } from '../../utils/mapMarkers'
 import { 
   findSlotElements, 
   calculateStateNodePosition, 
@@ -267,37 +269,25 @@ function onKeydown(e) {
   }
 }
 
-function isInteractiveMapMarker(target) {
-  while (target && target !== document.body) {
-    if (target.classList && (
-      target.classList.contains('node-marker')
-      || target.classList.contains('annotation-overlay')
-      || target.classList.contains('annotation-resize-handle')
-    )) return true
-    target = target.parentElement
-  }
-  return false
-}
-
 function isEdgeAtPoint(point) {
   return map.value.queryRenderedFeatures(point).some(feature => (
-    feature.layer
-    && (feature.layer.id.startsWith('edge-layer-')
-      || feature.layer.id.startsWith('edge-click-layer-'))
+    feature.layer && isEdgeLayerId(feature.layer.id)
   ))
 }
 
 function createMapAnnotation(event) {
   const center = [event.lngLat.lng, event.lngLat.lat]
+  const bounds = annotationBoundsFromScreenCenter(center, map.value)
+  if (!bounds) return
   const annotation = createAnnotation({
-    bounds: annotationBoundsFromScreenCenter(center, map.value),
+    bounds,
     existingAnnotations: props.annotations,
   })
   emit('annotation-created', annotation)
 }
 
 function handleMapMousedown(event) {
-  const markerClick = isInteractiveMapMarker(event.originalEvent.target)
+  const markerClick = isInteractiveMapMarkerTarget(event.originalEvent.target)
   const edgeClick = isEdgeAtPoint(event.point)
   if (markerClick || edgeClick) return
 
@@ -495,11 +485,12 @@ defineExpose({
     <template v-if="isMapLoaded && map">
       <!-- Annotation geometry is inserted before every edge layer. -->
       <MapAnnotation
-        v-for="annotation in annotations"
+        v-for="(annotation, annotationIndex) in annotations"
         :key="annotation.id"
         :annotation="annotation"
         :map="map"
         :is-selected="selectedItem === annotation"
+        :next-annotation-id="annotations[annotationIndex + 1]?.id"
         @select="handleSelect"
       />
       <!-- Render edges above annotation geometry and below HTML markers. -->

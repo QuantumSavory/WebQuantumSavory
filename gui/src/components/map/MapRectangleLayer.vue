@@ -3,11 +3,18 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, watch } from 'vue'
+import {
+  annotationFillLayerId,
+  annotationLineLayerId,
+  annotationSourceId,
+  firstEdgeLayerId,
+} from '../../utils/mapLayers'
 
 const props = defineProps({
   map: { type: Object, required: true },
   layerKey: { type: String, required: true },
+  beforeLayerId: { type: String, default: '' },
   feature: { type: Object, required: true },
   fillColor: { type: String, required: true },
   borderColor: { type: String, required: true },
@@ -16,20 +23,28 @@ const props = defineProps({
   lineDasharray: { type: Array, default: null },
 })
 
-const sourceId = `annotation-source-${props.layerKey}`
-const fillLayerId = `annotation-fill-${props.layerKey}`
-const lineLayerId = `annotation-line-${props.layerKey}`
+const sourceId = annotationSourceId(props.layerKey)
+const fillLayerId = annotationFillLayerId(props.layerKey)
+const lineLayerId = annotationLineLayerId(props.layerKey)
 
-function firstEdgeLayerId() {
-  return props.map.getStyle?.().layers?.find(layer => (
-    layer.id.startsWith('edge-layer-') || layer.id.startsWith('edge-click-layer-')
-  ))?.id
+function insertionTarget() {
+  if (props.beforeLayerId && props.map.getLayer(props.beforeLayerId)) {
+    return props.beforeLayerId
+  }
+  return firstEdgeLayerId(props.map)
 }
 
 function addLayer(layer) {
-  const beforeId = firstEdgeLayerId()
+  const beforeId = insertionTarget()
   if (beforeId) props.map.addLayer(layer, beforeId)
   else props.map.addLayer(layer)
+}
+
+function ensureLayerOrder() {
+  const beforeId = insertionTarget()
+  if (!beforeId || typeof props.map.moveLayer !== 'function') return
+  if (props.map.getLayer(fillLayerId)) props.map.moveLayer(fillLayerId, beforeId)
+  if (props.map.getLayer(lineLayerId)) props.map.moveLayer(lineLayerId, beforeId)
 }
 
 function updateFeature(feature) {
@@ -74,9 +89,11 @@ onMounted(() => {
     layout: { 'line-join': 'round', 'line-cap': 'round' },
     paint: linePaint,
   })
+  nextTick(ensureLayerOrder)
 })
 
 watch(() => props.feature, updateFeature, { deep: true })
+watch(() => props.beforeLayerId, () => nextTick(ensureLayerOrder))
 watch(() => props.fillColor, value => updatePaint(fillLayerId, 'fill-color', value))
 watch(() => props.fillOpacity, value => updatePaint(fillLayerId, 'fill-opacity', value))
 watch(() => props.borderColor, value => updatePaint(lineLayerId, 'line-color', value))
