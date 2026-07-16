@@ -62,6 +62,7 @@
       "type" => "T2Dephasing",
       "parameters" => [Dict("name" => "t2", "value" => 5)],
     )
+    payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = 0.125
     parameters = payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
     parameter_by_name = Dict(parameter["name"] => parameter for parameter in parameters)
     parameter_by_name["pairstate"]["value"] = Dict("kind" => "variable", "id" => "state-variable")
@@ -101,8 +102,12 @@
       script,
     )
     @test occursin("# Register network and simulation clock", script)
+    @test occursin("propagation_delays = Dict{Tuple{Int,Int},Float64}(", script)
+    @test occursin("    (1, 2) => 0.125,", script)
+    @test occursin("link_delay(src, dst) = propagation_delays[minmax(src, dst)]", script)
     @test occursin(
-      "QuantumSavory.RegisterNet(graph, registers; names = [\"Amherst\", \"Cambridge\"])",
+      "QuantumSavory.RegisterNet(graph, registers; names = [\"Amherst\", \"Cambridge\"], " *
+      "classical_delay = link_delay, quantum_delay = link_delay)",
       script,
     )
     @test occursin("# Protocol construction and initialization", script)
@@ -110,6 +115,24 @@
     @test occursin("ConcurrentSim.run(sim, simulation_duration)", script)
     @test occursin("CairoMakie.record", script)
     @test occursin("show(io, MIME\"image/png\"(), protocol)", script)
+
+    virtual_payload = deepcopy(payload)
+    consumer = Dict(
+      "id" => "virtual-consumer",
+      "type" => string(QuantumSavory.ProtocolZoo.EntanglementConsumer),
+      "parameters" => Any[],
+    )
+    push!(virtual_payload["net"]["edges"], Dict(
+      "id" => "virtual-edge",
+      "source" => virtual_payload["net"]["edges"][1]["target"],
+      "target" => virtual_payload["net"]["edges"][1]["source"],
+      "isLogic" => true,
+      "data" => Dict("protocols" => [consumer]),
+    ))
+    virtual_script = WebQuantumSavory.generate_julia_script(virtual_payload)
+    @test count(==("Graphs.add_edge!(graph, 1, 2)"), eachline(IOBuffer(virtual_script))) == 1
+    @test occursin("virtual-consumer", virtual_script)
+    @test count(==("    (1, 2) => 0.125,"), eachline(IOBuffer(virtual_script))) == 1
 
     counterpart_id = "QuantumSavory.ProtocolZoo.EntanglementCounterpart"
     tagged_payload = deepcopy(payload)
@@ -1664,6 +1687,56 @@
         @test e isa WebQuantumSavory.APIError
         @test e.message == "Edge 1 references non-existent target node: 'nonexistent'"
       end
+
+      duplicate_physical = deepcopy(test_payload)
+      duplicate_edge = deepcopy(duplicate_physical["net"]["edges"][1])
+      duplicate_edge["id"] = "duplicate-physical"
+      duplicate_edge["source"], duplicate_edge["target"] =
+        duplicate_edge["target"], duplicate_edge["source"]
+      duplicate_edge["data"]["protocols"] = Any[]
+      push!(duplicate_physical["net"]["edges"], duplicate_edge)
+      duplicate_error = try
+        WebQuantumSavory.validate_payload(duplicate_physical)
+        nothing
+      catch error
+        error
+      end
+      @test duplicate_error isa WebQuantumSavory.APIError
+      @test occursin("Duplicate physical edge endpoints", duplicate_error.message)
+
+      permitted_virtual = deepcopy(duplicate_physical)
+      permitted_virtual["net"]["edges"][2]["isLogic"] = true
+      permitted_virtual["net"]["edges"][2]["data"]["protocols"] = [Dict(
+        "id" => "virtual-consumer",
+        "type" => string(QuantumSavory.ProtocolZoo.EntanglementConsumer),
+        "parameters" => Any[],
+      )]
+      @test WebQuantumSavory.validate_payload(permitted_virtual)["success"] == true
+
+      forbidden_virtual = deepcopy(permitted_virtual)
+      forbidden_virtual["net"]["edges"][2]["data"]["protocols"][1]["type"] =
+        string(QuantumSavory.ProtocolZoo.EntanglerProt)
+      forbidden_error = try
+        WebQuantumSavory.validate_payload(forbidden_virtual)
+        nothing
+      catch error
+        error
+      end
+      @test forbidden_error isa WebQuantumSavory.APIError
+      @test occursin("not permitted on a virtual edge", forbidden_error.message)
+
+      for invalid_delay in (true, -1, Inf, "slow")
+        invalid_payload = deepcopy(test_payload)
+        invalid_payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = invalid_delay
+        delay_error = try
+          WebQuantumSavory.validate_payload(invalid_payload)
+          nothing
+        catch error
+          error
+        end
+        @test delay_error isa WebQuantumSavory.APIError
+        @test occursin("propagation delay", delay_error.message)
+      end
   end
 
   @testset "Simulation Variables" begin
@@ -1942,6 +2015,49 @@
       @test isa(g, SimpleGraph)
       @test nv(g) == 2  # 2 nodes
       @test ne(g) == 1  # 1 edge
+
+      with_virtual = deepcopy(test_payload)
+      virtual_edge = deepcopy(with_virtual["net"]["edges"][1])
+      virtual_edge["id"] = "virtual-edge"
+      virtual_edge["isLogic"] = true
+      virtual_edge["data"]["protocols"] = Any[]
+      push!(with_virtual["net"]["edges"], virtual_edge)
+      virtual_graph = WebQuantumSavory.build_graph(
+        WebQuantumSavory.validate_payload(with_virtual),
+      )
+      @test nv(virtual_graph) == 2
+      @test ne(virtual_graph) == 1
+  end
+
+  @testset "Physical Propagation Delays" begin
+      payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+      simulation_name = "physical_propagation_delays"
+      payload["name"] = simulation_name
+      payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = 0.125
+      virtual_edge = deepcopy(payload["net"]["edges"][1])
+      virtual_edge["id"] = "virtual-edge"
+      virtual_edge["isLogic"] = true
+      virtual_edge["data"]["protocols"] = [Dict(
+        "id" => "virtual-consumer",
+        "type" => string(QuantumSavory.ProtocolZoo.EntanglementConsumer),
+        "parameters" => Any[],
+      )]
+      push!(payload["net"]["edges"], virtual_edge)
+
+      try
+        state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(payload))
+        @test ne(state.graph) == 1
+        for endpoints in (1 => 2, 2 => 1)
+          @test QuantumSavory.channel(state.network, endpoints).delay == 0.125
+          @test QuantumSavory.qchannel(state.network, endpoints).queue.delay == 0.125
+        end
+        WebQuantumSavory.prepare_simulation(state, simulation_name)
+        @test state.protocol_mapping["virtual-consumer"] isa
+          QuantumSavory.ProtocolZoo.EntanglementConsumer
+      finally
+        haskey(WebQuantumSavory.STATE, simulation_name) &&
+          WebQuantumSavory.destroy_simulation(simulation_name)
+      end
   end
 
   @testset "Register Creation" begin

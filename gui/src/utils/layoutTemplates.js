@@ -174,6 +174,17 @@ export function cloneEdgeData(templateData, nextId) {
     })
   }
 
+  const templateRefractiveIndex = data.physicalOverrides?.refractiveIndex
+  data.curvePoints = []
+  data.physicalOverrides = templateRefractiveIndex == null
+    ? null
+    : {
+        distanceMeters: null,
+        refractiveIndex: templateRefractiveIndex,
+        delaySeconds: null
+      }
+  delete data.propagationDelaySeconds
+
   return data
 }
 

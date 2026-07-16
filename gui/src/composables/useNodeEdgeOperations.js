@@ -97,6 +97,25 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
       return
     }
 
+    if (edge.isLogic !== true) {
+      const sourceId = edge.source?.id ?? edge.source
+      const targetId = edge.target?.id ?? edge.target
+      const endpointPair = [sourceId, targetId].sort().join('\u0000')
+      const duplicate = projectData.value.net.edges.some(existing => (
+        existing.isLogic !== true
+        && [existing.source?.id ?? existing.source, existing.target?.id ?? existing.target]
+          .sort()
+          .join('\u0000') === endpointPair
+      ))
+      if (duplicate) {
+        showAlert(
+          'Duplicate physical edge',
+          'Only one physical edge may connect a pair of nodes.',
+        )
+        return
+      }
+    }
+
     projectData.value.net.edges.push(edge)
     addLog('info', `Created new edge: ${edge.source.name} to ${edge.target.name}`, 'Map')
   }

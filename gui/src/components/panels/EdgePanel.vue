@@ -33,6 +33,15 @@
         </div>
       </section>
 
+      <section v-if="!edge.isLogic" class="panel-section">
+        <div class="panel-section-title">PHYSICAL PROPAGATION</div>
+        <PhysicalEdgeControls
+          :edge="edge"
+          :physical-config="projectData.net.physicalConfig"
+          :editing-locked="editingLocked"
+        />
+      </section>
+
       <!-- Section 2: Protocols Table -->
       <section class="panel-section">
         <div class="panel-section-title">PROTOCOLS ({{ props.edge.data.protocols.length }})</div>
@@ -62,6 +71,7 @@ import { api } from '../../utils/ApiConnector'
 import BasePanel from './BasePanel.vue'
 import FloatingProtocol from '../../models/FloatingProtocol'
 import ProtocolsManager from './ProtocolsManager.vue'
+import PhysicalEdgeControls from './PhysicalEdgeControls.vue'
 import Menu from 'primevue/menu'
 import { EllipsisVertical, Trash2 } from '@lucide/vue'
 import LucideMenuIcon from '../LucideMenuIcon.vue'

@@ -41,7 +41,11 @@ const props = defineProps({
   nodes:        {    type: Array,   default: () => [] },
   edges:        {    type: Array,   default: () => [] },
   selectedItem: {    type: Object,  default: null },
-  selectedType: {    type: String,  default: null }
+  selectedType: {    type: String,  default: null },
+  editingLocked: {   type: Boolean, default: false },
+  curveEditingEnabled: { type: Boolean, default: false },
+  showPhysicalBadges: { type: Boolean, default: true },
+  physicalConfig: { type: Object, default: () => ({}) }
 })
 
 const emit = defineEmits([
@@ -208,11 +212,18 @@ function handleEndConnection(target) {
         id: generateUUid('edge'),
         source: sourceNode.value,
         target: node,
-        data: { type: 'connection', protocols: [] },
+        data: {
+          type: 'connection',
+          protocols: [],
+          curvePoints: [],
+          physicalOverrides: null,
+        },
       }
       // If shift key is pressed, set logic to true
       if (shiftDown.value) {
         edgeOptions.isLogic = true
+        delete edgeOptions.data.curvePoints
+        delete edgeOptions.data.physicalOverrides
       }
       // Create new edge
       const newEdge = new Edge(edgeOptions)
@@ -461,8 +472,11 @@ defineExpose({
         :key="edge.id"
         :edge="edge"
         :map="map"
-        :is-logic="true"
         :is-selected="selectedItem === edge"
+        :editing-locked="editingLocked"
+        :curve-editing-enabled="curveEditingEnabled"
+        :show-physical-badges="showPhysicalBadges"
+        :physical-config="physicalConfig"
         @select="handleSelect"
       />
       <!-- Render temporary connection line -->

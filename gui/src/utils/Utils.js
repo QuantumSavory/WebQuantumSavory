@@ -17,6 +17,9 @@ function setEdgeCorrectNodeOrder(edge, nodeList){
   if (sourceNodeIndex > targetNodeIndex) {
     edge.source = previousTarget;
     edge.target = previousSource;
+    if (Array.isArray(edge.data?.curvePoints)) {
+      edge.data.curvePoints.reverse()
+    }
   }
 }
 export { generateUUid, setEdgeCorrectNodeOrder };

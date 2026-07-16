@@ -1,259 +1,246 @@
 <template>
-  <div class="edge-line"></div>
+  <div class="edge-line">
+    <EdgeBadgeStack
+      v-if="badgeRows.length > 0 && resolvedPhysical"
+      :map="map"
+      :position="resolvedPhysical.midpoint"
+      :rows="badgeRows"
+    />
+    <CurvePointHandle
+      v-for="point in editableCurvePoints"
+      :key="point.id"
+      :map="map"
+      :point="point"
+      @move="moveCurvePoint"
+      @cycle="cycleCurvePoint"
+    />
+  </div>
 </template>
+
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+
+import { generateUUid } from '../../utils/Utils'
+import {
+  formatPhysicalValue,
+  projectPointOntoEdge,
+  resolveEdgePhysicalProperties,
+  sampleEdgeRoute,
+} from '../../utils/edgeGeometry'
+import CurvePointHandle from './CurvePointHandle.vue'
+import EdgeBadgeStack from './EdgeBadgeStack.vue'
 
 const props = defineProps({
-  edge:         { type: Object, required: true },
-  map:          { type: Object, required: true },
-  isSelected:   { type: Boolean, default: false },
-  isTemporary:  { type: Boolean, default: false },
-  isLogic:      { type: Boolean, default: false }
+  edge: { type: Object, required: true },
+  map: { type: Object, required: true },
+  isSelected: { type: Boolean, default: false },
+  isTemporary: { type: Boolean, default: false },
+  editingLocked: { type: Boolean, default: false },
+  curveEditingEnabled: { type: Boolean, default: false },
+  showPhysicalBadges: { type: Boolean, default: true },
+  physicalConfig: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['select'])
-
 const sourceId = `edge-${props.edge.id}`
 const layerId = `edge-layer-${props.edge.id}`
 const clickLayerId = `edge-click-layer-${props.edge.id}`
-
-// Reactive state for hover
 const isHovered = ref(false)
 
-// Line styles
 const DEFAULT_STYLE = {
   'line-color': '#76769e',
   'line-width': 2,
-  'line-opacity': 0.8
+  'line-opacity': 0.8,
 }
-
 const SELECTED_STYLE = {
   'line-color': '#484ab2',
   'line-width': 4,
-  'line-opacity': 1
+  'line-opacity': 1,
 }
-
 const TEMPORARY_STYLE = {
   'line-color': '#76769e',
   'line-width': 2,
   'line-opacity': 0.5,
-  'line-dasharray': [2, 2]
+  'line-dasharray': [2, 2],
 }
-
 const LOGIC_STYLE = {
   'line-color': '#76769e90',
   'line-width': 8,
   'line-opacity': 1,
-  'line-dasharray': [.3, .3]
+  'line-dasharray': [0.3, 0.3],
 }
-
 const SELECTED_LOGIC_STYLE = {
   'line-color': '#484ab2',
   'line-width': 8,
   'line-opacity': 1,
-  'line-dasharray': [.3, .3]
+  'line-dasharray': [0.3, 0.3],
 }
-
-// Invisible thick line for better click targeting
 const CLICK_STYLE = {
   'line-color': 'transparent',
   'line-width': 30,
-  'line-opacity': 1
+  'line-opacity': 1,
 }
-
-// Hover styles (orange variants)
 const HOVER_STYLE = {
   'line-color': '#7375ec',
   'line-width': 4,
-  'line-opacity': 1
+  'line-opacity': 1,
 }
-
 const HOVER_LOGIC_STYLE = {
   'line-color': '#7375ec',
   'line-width': 8,
   'line-opacity': 1,
-  'line-dasharray': [.3, .3]
+  'line-dasharray': [0.3, 0.3],
 }
 
-// Update edge line coordinates
-function updateLine() {
-  if (!props.map || !props.edge) return
+function temporaryLine() {
+  const sourcePosition = Array.isArray(props.edge.source)
+    ? props.edge.source
+    : (props.edge.source.position || props.edge.source.getPosition())
+  const targetPosition = Array.isArray(props.edge.target)
+    ? props.edge.target
+    : (props.edge.target.position || props.edge.target.getPosition())
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates: [sourcePosition, targetPosition] },
+  }
+}
 
-  const source = props.map.getSource(sourceId)
-  if (source) {
-    let coordinates
-    if (props.isTemporary) {
-      // For temporary lines, ensure we get coordinates consistently
-      const sourcePos = Array.isArray(props.edge.source) ? 
-        props.edge.source : 
-        (props.edge.source.position || props.edge.source.getPosition())
-      
-      const targetPos = Array.isArray(props.edge.target) ? 
-        props.edge.target : 
-        (props.edge.target.position || props.edge.target.getPosition())
-      
-      coordinates = [sourcePos, targetPos]
-    } else {
-      // For real edges, use getCoordinates method
-      coordinates = props.edge.getCoordinates()
-    }
+const resolvedPhysical = computed(() => {
+  if (props.isTemporary || props.edge.isLogic === true) return null
+  return resolveEdgePhysicalProperties(props.edge, props.physicalConfig)
+})
 
-    source.setData({
-      type: 'Feature',
-      properties: {},
-      geometry: {
-        type: 'LineString',
-        coordinates
-      }
+const renderedLine = computed(() => {
+  if (props.isTemporary) return temporaryLine()
+  return resolvedPhysical.value?.line ?? sampleEdgeRoute(props.edge).line
+})
+
+const badgeRows = computed(() => {
+  if (!props.showPhysicalBadges || !resolvedPhysical.value) return []
+  const rows = []
+  if (!resolvedPhysical.value.manualDelay) {
+    rows.push({
+      id: 'distance',
+      label: formatPhysicalValue(resolvedPhysical.value.distanceMeters, 'm'),
     })
   }
+  rows.push({
+    id: 'delay',
+    label: formatPhysicalValue(resolvedPhysical.value.propagationDelaySeconds, 's'),
+  })
+  return rows
+})
+
+const editableCurvePoints = computed(() => (
+  !props.isTemporary
+  && props.edge.isLogic !== true
+  && props.isSelected
+  && props.curveEditingEnabled
+  && !props.editingLocked
+    ? props.edge.data.curvePoints
+    : []
+))
+
+function updateLine() {
+  props.map.getSource(sourceId)?.setData(renderedLine.value)
 }
 
-// Update line style based on selection and hover
 function updateStyle(selected = props.isSelected, hovered = isHovered.value) {
-  if (!props.map) return
-  
   let style
-  if (selected) {
-    // Selected state (highest priority)
-    style = props.edge.isLogic ? SELECTED_LOGIC_STYLE : SELECTED_STYLE
-  } else if (hovered) {
-    // Hover state (when not selected)
-    style = props.edge.isLogic ? HOVER_LOGIC_STYLE : HOVER_STYLE
-  } else {
-    // Default state
-    style = props.edge.isLogic ? LOGIC_STYLE : DEFAULT_STYLE
-  }
-  
+  if (selected) style = props.edge.isLogic ? SELECTED_LOGIC_STYLE : SELECTED_STYLE
+  else if (hovered) style = props.edge.isLogic ? HOVER_LOGIC_STYLE : HOVER_STYLE
+  else style = props.edge.isLogic ? LOGIC_STYLE : DEFAULT_STYLE
+
   if (props.map.getLayer(layerId)) {
-    const entries = Object.entries(style);
-    entries.forEach(([key, value]) => {
+    Object.entries(style).forEach(([key, value]) => {
       props.map.setPaintProperty(layerId, key, value)
     })
   }
 }
 
-// Setup edge line on mount
-onMounted(() => {
-  if (!props.map || !props.edge) return
+function handleEdgeClick(event) {
+  emit('select', props.edge, 'edge')
+  if (!props.isSelected
+    || !props.curveEditingEnabled
+    || props.editingLocked
+    || props.edge.isLogic === true) return
 
-  let initialCoords
-  if (props.isTemporary) {
-    // For temporary lines, ensure we get coordinates consistently
-    const sourcePos = Array.isArray(props.edge.source) ? 
-      props.edge.source : 
-      (props.edge.source.position || props.edge.source.getPosition())
-    
-    const targetPos = Array.isArray(props.edge.target) ? 
-      props.edge.target : 
-      (props.edge.target.position || props.edge.target.getPosition())
-    
-    initialCoords = [sourcePos, targetPos]
-  } else {
-    initialCoords = props.edge.getCoordinates()
-  }
-
-  // Add source
-  props.map.addSource(sourceId, {
-    type: 'geojson',
-    data: {
-      type: 'Feature',
-      properties: {},
-      geometry: {
-        type: 'LineString',
-        coordinates: initialCoords
-      }
-    }
+  const projection = projectPointOntoEdge(
+    props.edge,
+    [event.lngLat.lng, event.lngLat.lat],
+  )
+  props.edge.data.curvePoints.splice(projection.segmentIndex, 0, {
+    id: generateUUid('curve'),
+    position: projection.position,
+    type: 'smooth',
   })
+}
 
-  // Add thick invisible click layer first (below the visible line)
+function handleMouseEnter(event) {
+  if (!event.originalEvent.target.classList.contains('maplibregl-canvas')) return
+  isHovered.value = true
+  updateStyle(props.isSelected, true)
+}
+
+function handleMouseLeave() {
+  isHovered.value = false
+  updateStyle(props.isSelected, false)
+}
+
+function moveCurvePoint(point, position) {
+  point.position = [...position]
+}
+
+function cycleCurvePoint(point) {
+  if (point.type === 'smooth') {
+    point.type = 'sharp'
+    return
+  }
+  const index = props.edge.data.curvePoints.findIndex(candidate => candidate.id === point.id)
+  if (index >= 0) props.edge.data.curvePoints.splice(index, 1)
+}
+
+onMounted(() => {
+  props.map.addSource(sourceId, { type: 'geojson', data: renderedLine.value })
   if (!props.isTemporary) {
     props.map.addLayer({
       id: clickLayerId,
       type: 'line',
       source: sourceId,
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: CLICK_STYLE
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: CLICK_STYLE,
     })
   }
-
-  // Add visible line layer
   props.map.addLayer({
     id: layerId,
     type: 'line',
     source: sourceId,
-    layout: {
-      'line-join': 'round', // options: round, square, bevel
-      'line-cap': 'square' // options: round, square, bevel
-    },
-    paint: props.isTemporary ? TEMPORARY_STYLE : props.edge.isLogic ? LOGIC_STYLE : DEFAULT_STYLE
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: props.isTemporary
+      ? TEMPORARY_STYLE
+      : (props.edge.isLogic ? LOGIC_STYLE : DEFAULT_STYLE),
   })
 
-  // Add click handler to the thick invisible layer for better targeting
   if (!props.isTemporary) {
-    props.map.on('click', clickLayerId, (e) => {
-      emit('select', props.edge, 'edge')
-    })
-    
-    // Add hover handlers
-    props.map.on('mouseenter', clickLayerId, (e) => {
-      const originalTarget = e.originalEvent.target;
-      if (!originalTarget.classList.contains('maplibregl-canvas')) {
-        return;
-      }
-      isHovered.value = true
-      updateStyle(props.isSelected, true)
-    })
-    
-    props.map.on('mouseleave', clickLayerId, (e) => {
-      isHovered.value = false
-      updateStyle(props.isSelected, false)
-    })
+    props.map.on('click', clickLayerId, handleEdgeClick)
+    props.map.on('mouseenter', clickLayerId, handleMouseEnter)
+    props.map.on('mouseleave', clickLayerId, handleMouseLeave)
   }
-
-  // Set initial style
   updateStyle(props.isSelected)
 })
 
-// Cleanup on unmount
 onUnmounted(() => {
-  if (!props.map) return
-
-  // Remove visible layer
-  if (props.map.getLayer(layerId)) {
-    props.map.removeLayer(layerId)
+  if (!props.isTemporary) {
+    props.map.off('click', clickLayerId, handleEdgeClick)
+    props.map.off('mouseenter', clickLayerId, handleMouseEnter)
+    props.map.off('mouseleave', clickLayerId, handleMouseLeave)
   }
-  // Remove click layer
-  if (props.map.getLayer(clickLayerId)) {
-    props.map.removeLayer(clickLayerId)
-  }
-  // Remove source
-  if (props.map.getSource(sourceId)) {
-    props.map.removeSource(sourceId)
-  }
+  if (props.map.getLayer(layerId)) props.map.removeLayer(layerId)
+  if (props.map.getLayer(clickLayerId)) props.map.removeLayer(clickLayerId)
+  if (props.map.getSource(sourceId)) props.map.removeSource(sourceId)
 })
 
-// Watch for position changes
-watch(
-  () => {
-    if (props.isTemporary) {
-      return [props.edge.source, props.edge.target]
-    }
-    return [
-      props.edge.source.getPosition(),
-      props.edge.target.getPosition()
-    ]
-  },
-  () => updateLine(),
-  { deep: true }
-)
-
-// Watch for selection changes
-watch(() => props.isSelected, (newSelected) => {
-  updateStyle(newSelected, isHovered.value)
-})
+watch(renderedLine, updateLine, { deep: true })
+watch(() => props.isSelected, selected => updateStyle(selected, isHovered.value))
 </script>

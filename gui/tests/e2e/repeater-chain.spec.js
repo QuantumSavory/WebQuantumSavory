@@ -174,7 +174,7 @@ test.describe('Layout Tools repeater chain generator', () => {
     await expect(page.locator('.edge-list-item')).toHaveCount(2)
 
     await page.getByRole('tab', { name: 'Layout Tools' }).click()
-    await expect(page.getByRole('heading', { name: 'Layout controls' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Help', exact: true })).toBeVisible()
     await expect(page.getByText('Alt-click the map to add a node.')).toBeVisible()
 
     const helper = page.getByRole('button', { name: 'Repeater Chain Generator' })
@@ -182,7 +182,7 @@ test.describe('Layout Tools repeater chain generator', () => {
     await expect(page.getByRole('heading', { name: 'Repeater Chain Generator' })).toBeVisible()
     await expect(page.getByText('Create an evenly spaced chain')).toBeVisible()
     await page.getByRole('heading', { name: 'Helpers' }).hover()
-    await expect(page.getByRole('heading', { name: 'Layout controls' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Help', exact: true })).toBeVisible()
 
     await openGenerator(page)
     await expect(page.locator('#chain-create-virtual-edge')).toBeChecked()
@@ -204,7 +204,7 @@ test.describe('Layout Tools repeater chain generator', () => {
       app._instance.setupState.simulationState.phase = 'parsed'
     })
     await expect(helper).toBeDisabled()
-    await expect(page.getByText('Layout helpers are unavailable after a simulation has started.')).toBeVisible()
+    await expect(page.getByText('Drawing is unavailable after a simulation has started.')).toBeVisible()
   })
 
   test('clones a configured virtual template into an evenly spaced persistent chain', async ({ page }) => {

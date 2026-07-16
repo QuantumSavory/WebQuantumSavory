@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added dependency-backed Bézier routing for physical links with typed smooth/sharp anchors, geodesic distance and propagation-delay badges, editable physical defaults and per-edge overrides, and schema-v1 legacy normalization.
+- Applied each resolved physical-link delay to both directed classical and quantum simulator channels and generated scripts, while excluding virtual links from physical graphs and retaining their permitted protocols.
+
 ## 1.8.0
 
 - Added immediate, accessible loading feedback for simulation setup and application-shell initialization while keeping ordinary execution, polling, tag previews, plots, and script export on their existing local indicators.

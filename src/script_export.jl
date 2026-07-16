@@ -20,6 +20,8 @@ const _SCRIPT_RESERVED_IDENTIFIERS = Set([
   "network_observable",
   "node_indices",
   "nodeid",
+  "link_delay",
+  "propagation_delays",
   "protocol_output_directory",
   "protocols",
   "registers",
@@ -734,13 +736,28 @@ function generate_julia_script(payload)
   ])
   id_to_index = Dict(String(node["id"]) => index for (index, node) in enumerate(nodes))
   for edge in edges
+    _is_virtual_edge(edge) && continue
     source = get(id_to_index, String(edge["source"]), nothing)
     target = get(id_to_index, String(edge["target"]), nothing)
     (source !== nothing && target !== nothing) || throw(validation_error("Edge references an unknown node"))
     push!(lines, "Graphs.add_edge!(graph, $source, $target)")
   end
+  push!(lines, "propagation_delays = Dict{Tuple{Int,Int},Float64}(")
+  for edge in edges
+    _is_virtual_edge(edge) && continue
+    source = id_to_index[String(edge["source"])]
+    target = id_to_index[String(edge["target"])]
+    delay = _physical_edge_delay(edge, "Physical edge $(edge["id"])")
+    push!(lines, "    $(minmax(source, target)) => $(_script_literal(delay, "propagation delay")),")
+  end
   append!(lines, [
-    "network = QuantumSavory.RegisterNet(graph, registers; names = $(_script_literal(_register_names(nodes), "register names")))",
+    ")",
+    "link_delay(src, dst) = propagation_delays[minmax(src, dst)]",
+  ])
+  append!(lines, [
+    "network = QuantumSavory.RegisterNet(graph, registers; " *
+      "names = $(_script_literal(_register_names(nodes), "register names")), " *
+      "classical_delay = link_delay, quantum_delay = link_delay)",
     "sim = QuantumSavory.get_time_tracker(network)",
     "",
     "# -----------------------------------------------------------------------------",

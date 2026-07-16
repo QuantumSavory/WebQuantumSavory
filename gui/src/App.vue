@@ -99,6 +99,8 @@ const TIME_STEP = 0.1;
 
 // Initialize composables
 const projectData = ref(createEmptyProject())
+const curveEditingEnabled = ref(false)
+const showPhysicalBadges = ref(true)
 
 // Required variables and functions for composables
 // Log management functions
@@ -1093,6 +1095,10 @@ onUnmounted(() => {
           :selected-type="selectedType"
           :center="mapCenter"
           :zoom="mapZoom"
+          :editing-locked="isNetworkEditingDisabled"
+          :curve-editing-enabled="curveEditingEnabled"
+          :show-physical-badges="showPhysicalBadges"
+          :physical-config="projectData.net.physicalConfig"
           @select="handleSelect"
           @map-click="handleMapClickComposable"
           @edge-created="handleEdgeCreated"
@@ -1245,6 +1251,8 @@ onUnmounted(() => {
         :show-timestamps="true"
         :allow-clear="true"
         :helpers-disabled="isNetworkEditingDisabled"
+        :curve-editing-enabled="curveEditingEnabled"
+        :show-physical-badges="showPhysicalBadges"
         :variables="projectData.variables"
         :project-data="projectData"
         :export-script-payload="exportScriptPayload"
@@ -1258,6 +1266,9 @@ onUnmounted(() => {
         @open-repeater-chain-generator="openRepeaterChainGenerator"
         @open-star-network-generator="openStarNetworkGenerator"
         @open-graph-network-generator="openGraphNetworkGenerator"
+        @update:refractive-index="projectData.net.physicalConfig.refractiveIndex = $event"
+        @update:curve-editing-enabled="curveEditingEnabled = $event"
+        @update:show-physical-badges="showPhysicalBadges = $event"
       />
     </div>
 
