@@ -33,6 +33,7 @@ import {
 } from '@lucide/vue'
 import EdgeListPanel from './components/panels/EdgeListPanel.vue'
 import EdgePanel from './components/panels/EdgePanel.vue'
+import AnnotationPanel from './components/panels/AnnotationPanel.vue'
 import BottomPanel from './components/panels/BottomPanel.vue'
 import ProjectNameDialog from './components/ProjectNameDialog.vue'
 import ImportConflictDialog from './components/ImportConflictDialog.vue'
@@ -1198,6 +1199,14 @@ onUnmounted(() => {
                 :edge="selectedItem"
                 :editingLocked="isNetworkEditingDisabled"
                 :variables="projectData.variables"
+                v-model:collapsed="panelCollapsedStates.selectedElementPanel"
+                @delete="deleteSelected"
+              />
+              <AnnotationPanel
+                id="annotationPanel"
+                v-else-if="selectedType === 'annotation' && selectedItem"
+                :key="selectedItem.id"
+                :annotation="selectedItem"
                 v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
               />
