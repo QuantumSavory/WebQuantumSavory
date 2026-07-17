@@ -128,6 +128,17 @@ describe('BottomPanel bounds contract', () => {
     expect(wrapper.get('#bottom-panel-logs-tab .badge-error').text()).toBe('1')
   })
 
+  it('forwards the authoritative simulator log groups to the Logs panel', () => {
+    const simulationLogGroups = ['backend', 'network', 'protocol']
+    const wrapper = mountPanel(
+      { left: 0, right: 1000, top: 0, bottom: 800 },
+      { simulationLogGroups }
+    )
+
+    expect(wrapper.getComponent({ name: 'LogsPanel' }).props('simulationLogGroups'))
+      .toEqual(simulationLogGroups)
+  })
+
   it('enables the explorer from lifecycle capabilities and resets its active tab when disabled', async () => {
     const wrapper = mountPanel(
       { left: 0, right: 1000, top: 0, bottom: 800 },

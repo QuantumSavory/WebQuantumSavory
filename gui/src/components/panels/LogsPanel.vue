@@ -2,49 +2,104 @@
   <section class="panel-section logs-panel-content">
     <div class="logs-container">
       <div class="logs-header">
-        <input
-          v-model="searchQuery"
-          type="search"
-          placeholder="Search logs..."
-          aria-label="Search logs"
-          class="search-input"
-        />
-        <div class="logs-controls">
-          <details class="log-guide">
-            <summary title="Open the log guide">
-              <CircleHelp :size="14" aria-hidden="true" />
-              <span>Log guide</span>
-            </summary>
-            <div class="log-guide-content">
-              <section aria-labelledby="log-guide-severities">
-                <h3 id="log-guide-severities">Severities</h3>
-                <dl>
-                  <div><dt>Debug</dt><dd>Diagnostic details for troubleshooting.</dd></div>
-                  <div><dt>Info</dt><dd>Routine progress or status.</dd></div>
-                  <div><dt>Success</dt><dd>An operation completed successfully.</dd></div>
-                  <div><dt>Warning</dt><dd>A condition may need attention.</dd></div>
-                  <div><dt>Error</dt><dd>An operation failed but was reported normally.</dd></div>
-                  <div><dt>Panic</dt><dd>An unexpected simulator exception stopped the run.</dd></div>
-                </dl>
-              </section>
-              <section aria-labelledby="log-guide-sources">
-                <h3 id="log-guide-sources">Sources</h3>
-                <dl>
-                  <div><dt>App</dt><dd>Browser, project, map, and layout actions, with subsystem context when available.</dd></div>
-                  <div><dt>Web API</dt><dd>Requests and responses handled by the web service.</dd></div>
-                  <div><dt>Simulator</dt><dd>QuantumSavory runtime events.</dd></div>
-                </dl>
-              </section>
-            </div>
-          </details>
-          <button
-            v-if="allowClear && hasLogs"
-            type="button"
-            class="clear-logs-btn"
-            @click="clearLogs"
+        <div class="logs-toolbar">
+          <input
+            v-model="searchQuery"
+            type="search"
+            placeholder="Search logs..."
+            aria-label="Search logs"
+            class="search-input"
+          />
+          <div class="log-filter-group" role="group" aria-label="Filter logs by severity">
+            <span class="log-filter-label">Severity</span>
+            <button
+              v-for="level in LOG_LEVELS"
+              :key="level"
+              type="button"
+              class="log-filter-toggle"
+              :data-log-level-filter="level"
+              :aria-label="`Filter ${formatFilterLabel(level)} severity logs`"
+              :aria-pressed="isLevelVisible(level)"
+              @click="toggleLevel(level)"
+            >
+              {{ formatFilterLabel(level) }}
+            </button>
+          </div>
+          <div class="logs-controls">
+            <details class="log-guide">
+              <summary title="Open the log guide">
+                <CircleHelp :size="14" aria-hidden="true" />
+                <span>Log guide</span>
+              </summary>
+              <div class="log-guide-content">
+                <section aria-labelledby="log-guide-severities">
+                  <h3 id="log-guide-severities">Severities</h3>
+                  <dl>
+                    <div><dt>Debug</dt><dd>Diagnostic details for troubleshooting.</dd></div>
+                    <div><dt>Info</dt><dd>Routine progress or status.</dd></div>
+                    <div><dt>Success</dt><dd>An operation completed successfully.</dd></div>
+                    <div><dt>Warning</dt><dd>A condition may need attention.</dd></div>
+                    <div><dt>Error</dt><dd>An operation failed but was reported normally.</dd></div>
+                    <div><dt>Panic</dt><dd>An unexpected simulator exception stopped the run.</dd></div>
+                  </dl>
+                </section>
+                <section aria-labelledby="log-guide-sources">
+                  <h3 id="log-guide-sources">Sources</h3>
+                  <dl>
+                    <div><dt>App</dt><dd>Browser, project, map, and layout actions, with subsystem context when available.</dd></div>
+                    <div><dt>Web API</dt><dd>Requests and responses handled by the web service.</dd></div>
+                    <div><dt>Simulator</dt><dd>QuantumSavory runtime events.</dd></div>
+                  </dl>
+                </section>
+              </div>
+            </details>
+            <button
+              v-if="allowClear && hasLogs"
+              type="button"
+              class="clear-logs-btn"
+              @click="clearLogs"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div class="logs-filter-row">
+          <div class="log-filter-group" role="group" aria-label="Filter logs by source">
+            <span class="log-filter-label">Source</span>
+            <button
+              v-for="source in LOG_SOURCES"
+              :key="source"
+              type="button"
+              class="log-filter-toggle"
+              :data-log-source-filter="source"
+              :aria-label="`Filter ${source} source logs`"
+              :aria-pressed="isSourceVisible(source)"
+              @click="toggleSource(source)"
+            >
+              {{ source }}
+            </button>
+          </div>
+          <div
+            v-if="simulationGroupOptions.length"
+            class="log-filter-group"
+            role="group"
+            aria-label="Filter Simulator logs by group"
           >
-            Clear
-          </button>
+            <span class="log-filter-label">Simulator group</span>
+            <button
+              v-for="group in simulationGroupOptions"
+              :key="group"
+              type="button"
+              class="log-filter-toggle"
+              :data-log-group-filter="group"
+              :aria-label="`Filter ${formatFilterLabel(group)} simulation group logs`"
+              :aria-pressed="isGroupVisible(group)"
+              @click="toggleGroup(group)"
+            >
+              {{ formatFilterLabel(group) }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -53,8 +108,8 @@
           No logs available
         </div>
 
-        <div v-else-if="searchQuery && displayLogs.length === 0" class="empty-logs">
-          No logs match your search: "{{ searchQuery }}"
+        <div v-else-if="displayLogs.length === 0" class="empty-logs">
+          {{ noMatchesMessage }}
         </div>
 
         <article
@@ -165,7 +220,12 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { Braces, ChevronDown, ChevronRight, CircleHelp } from '@lucide/vue'
-import { normalizeLogRecord } from '../../utils/logRecords.js'
+import {
+  LOG_LEVELS,
+  LOG_SOURCES,
+  normalizeLogGroup,
+  normalizeLogRecord
+} from '../../utils/logRecords.js'
 
 const props = defineProps({
   logs: {
@@ -183,6 +243,10 @@ const props = defineProps({
   allowClear: {
     type: Boolean,
     default: true
+  },
+  simulationLogGroups: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -191,6 +255,9 @@ const emit = defineEmits(['clear-logs', 'log-click'])
 const searchQuery = ref('')
 const messageExpansion = ref(new Set())
 const rawExpansion = ref(new Set())
+const hiddenLevels = ref(new Set())
+const hiddenSources = ref(new Set())
+const hiddenGroups = ref(new Set())
 const fallbackIds = new WeakMap()
 let nextFallbackId = 1
 
@@ -211,10 +278,25 @@ const normalizedLogs = computed(() => props.logs.map((log, index) => {
   return normalized
 }))
 
+const simulationGroupOptions = computed(() => (
+  [...new Set(props.simulationLogGroups.map(normalizeLogGroup).filter(Boolean))]
+))
+
+const knownSimulationGroups = computed(() => new Set(simulationGroupOptions.value))
+
 const filteredLogs = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
-  if (!query) return normalizedLogs.value
-  return normalizedLogs.value.filter(log => log.searchText.includes(query))
+  return normalizedLogs.value.filter(log => {
+    if (hiddenLevels.value.has(log.level)) return false
+    if (hiddenSources.value.has(log.source)) return false
+    if (
+      log.source === 'Simulator'
+      && log.group
+      && knownSimulationGroups.value.has(log.group)
+      && hiddenGroups.value.has(log.group)
+    ) return false
+    return !query || log.searchText.includes(query)
+  })
 })
 
 const displayLogs = computed(() => {
@@ -224,6 +306,18 @@ const displayLogs = computed(() => {
 })
 
 const hasLogs = computed(() => props.logs.length > 0)
+const hasActiveFilters = computed(() => (
+  hiddenLevels.value.size > 0
+  || hiddenSources.value.size > 0
+  || hiddenGroups.value.size > 0
+))
+const noMatchesMessage = computed(() => {
+  if (searchQuery.value.trim()) {
+    return `No logs match your search: "${searchQuery.value}"`
+  }
+  if (hasActiveFilters.value) return 'No logs match the selected filters'
+  return 'No logs available'
+})
 
 watch(normalizedLogs, logs => {
   const currentIds = new Set(logs.map(log => log.stableId))
@@ -237,6 +331,43 @@ watch(normalizedLogs, logs => {
 
 function clearLogs() {
   emit('clear-logs')
+}
+
+function toggleHiddenFilter(hiddenFilters, value) {
+  const next = new Set(hiddenFilters.value)
+  if (next.has(value)) next.delete(value)
+  else next.add(value)
+  hiddenFilters.value = next
+}
+
+function toggleLevel(level) {
+  toggleHiddenFilter(hiddenLevels, level)
+}
+
+function toggleSource(source) {
+  toggleHiddenFilter(hiddenSources, source)
+}
+
+function toggleGroup(group) {
+  toggleHiddenFilter(hiddenGroups, group)
+}
+
+function isLevelVisible(level) {
+  return !hiddenLevels.value.has(level)
+}
+
+function isSourceVisible(source) {
+  return !hiddenSources.value.has(source)
+}
+
+function isGroupVisible(group) {
+  return !hiddenGroups.value.has(group)
+}
+
+function formatFilterLabel(value) {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, character => character.toUpperCase())
 }
 
 function isMessageExpanded(id) {
@@ -277,9 +408,11 @@ function rawDisclosureLabel(log) {
 }
 
 function sourceLabel(log) {
-  return log.source === 'App' && log.subsystem
-    ? `${log.source} · ${log.subsystem}`
-    : log.source
+  if (log.source === 'App' && log.subsystem) return `${log.source} · ${log.subsystem}`
+  if (log.source === 'Simulator' && log.group) {
+    return `${log.source} · ${formatFilterLabel(log.group)}`
+  }
+  return log.source
 }
 
 function safeDomId(id) {
@@ -339,23 +472,87 @@ function formatTimestamp(timestamp, onlyTime = false) {
   position: relative;
   z-index: 2;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--app-space-3);
-  padding: var(--app-space-3) var(--app-space-4);
+  align-items: stretch;
+  flex-direction: column;
+  gap: var(--app-space-2);
+  padding: var(--app-space-2) var(--app-space-4);
   border-bottom: 1px solid var(--app-color-border);
   border-radius: var(--app-radius-control) var(--app-radius-control) 0 0;
   background: var(--app-color-surface-subtle);
 }
 
-.logs-controls {
+.logs-toolbar,
+.logs-filter-row {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: var(--app-space-3);
 }
 
+.logs-toolbar {
+  flex-wrap: wrap;
+}
+
+.logs-filter-row {
+  flex-wrap: wrap;
+  row-gap: var(--app-space-2);
+}
+
+.logs-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--app-space-3);
+  margin-left: auto;
+}
+
+.log-filter-group {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--app-space-1);
+}
+
+.log-filter-label {
+  margin-right: 2px;
+  color: var(--app-color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.log-filter-toggle {
+  min-width: 0;
+  height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--app-color-border);
+  background: var(--app-color-surface);
+  color: var(--app-color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.log-filter-toggle[aria-pressed="true"] {
+  border-color: var(--app-color-primary);
+  background: var(--app-color-primary-soft);
+  color: var(--app-color-primary);
+}
+
+.log-filter-toggle:hover {
+  border-color: var(--app-color-primary);
+  background: var(--app-color-surface-hover);
+  color: var(--app-color-primary);
+}
+
+.log-filter-toggle:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--app-color-focus);
+  outline-offset: 1px;
+}
+
 .search-input {
   min-width: 150px;
+  height: 24px;
   padding: var(--app-space-1) var(--app-space-3);
   border: 1px solid var(--app-color-border);
   border-radius: var(--app-radius-control);
@@ -696,13 +893,20 @@ function formatTimestamp(timestamp, onlyTime = false) {
 }
 
 @media (max-width: 720px) {
-  .logs-header {
+  .logs-toolbar,
+  .logs-filter-row {
     align-items: stretch;
     flex-direction: column;
   }
 
+  .log-filter-group {
+    flex-wrap: wrap;
+  }
+
   .logs-controls {
+    width: 100%;
     justify-content: space-between;
+    margin-left: 0;
   }
 
   .log-guide-content {

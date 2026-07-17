@@ -121,6 +121,30 @@ export class ApiConnector {
     return types
   }
 
+  async fetchSimulationLogGroups({ signal, force = false } = {}) {
+    const cachedGroups = this._config.value.simulationLogGroups
+    if (!force && Array.isArray(cachedGroups)) return cachedGroups
+
+    const res = await fetch(`${this.baseUrl}/simulation_log_groups`, {
+      headers: this.requestHeaders,
+      signal,
+    })
+    const responseObject = await readJsonResponse(res, 'Simulation log groups fetch failed')
+    const groups = responseObject?.simulation_log_groups
+    if (
+      !Array.isArray(groups)
+      || groups.some(group => typeof group !== 'string' || group.trim().length === 0)
+    ) {
+      throw new Error('Simulation log groups response is invalid')
+    }
+
+    this._config.value = {
+      ...this._config.value,
+      simulationLogGroups: [...groups],
+    }
+    return this._config.value.simulationLogGroups
+  }
+
   async fetchStatesZooPreview(stateType, parameters, { signal } = {}) {
     const res = await fetch(`${this.baseUrl}/states_zoo_preview`, {
       headers: this.requestHeaders,

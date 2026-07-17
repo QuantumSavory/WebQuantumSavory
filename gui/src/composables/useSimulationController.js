@@ -206,6 +206,7 @@ export function useSimulationController({
     addLog('panic', panic.summary, 'Simulator', JSON.stringify(record, null, 2), {
       id: panic.id,
       timestamp: panic.timestamp,
+      group: record.group,
       raw: record,
       fullMessage: panic.message,
       exceptionType: panic.exception_type,
@@ -603,6 +604,7 @@ export function useSimulationController({
         addLog(severity, message, source, JSON.stringify(backendLog, null, 2), {
           id: backendLog.id,
           timestamp: backendLog.timestamp,
+          group: backendLog.group,
           raw: backendLog,
           fullMessage: backendLog.full_message || backendLog.fullMessage || message,
           exceptionType: backendLog.exception_type || backendLog.exceptionType || null,

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  areConsecutiveLogsEqual,
+  normalizeLogGroup,
   normalizeLogRecord,
   normalizeLogSeverity,
   normalizeLogSource,
@@ -37,6 +39,44 @@ describe('log record normalization', () => {
     expect(legacy).toMatchObject({ source: 'App', subsystem: 'Layout Tools' })
     expect(normalized).toMatchObject({ source: 'App', subsystem: 'Map' })
     expect(normalized.searchText).toContain('map')
+  })
+
+  it('normalizes simulator groups without changing the raw payload', () => {
+    const raw = {
+      id: 'simulator-log',
+      group: ' Protocol ',
+      event: 'entanglement-created'
+    }
+    const normalized = normalizeLogRecord({
+      source: 'Simulator',
+      severity: 'debug',
+      message: 'Entanglement created',
+      raw
+    })
+
+    expect(normalizeLogGroup(' NETWORK ')).toBe('network')
+    expect(normalizeLogGroup('')).toBeNull()
+    expect(normalized.group).toBe('protocol')
+    expect(normalized.raw).toBe(raw)
+    expect(normalized.searchText).toContain('protocol')
+    expect(raw.group).toBe(' Protocol ')
+  })
+
+  it('does not collapse otherwise identical simulator records from different groups', () => {
+    const base = {
+      source: 'Simulator',
+      severity: 'info',
+      message: 'Same simulator message'
+    }
+
+    expect(areConsecutiveLogsEqual(
+      { ...base, group: 'protocol' },
+      { ...base, group: 'protocol' }
+    )).toBe(true)
+    expect(areConsecutiveLogsEqual(
+      { ...base, group: 'protocol' },
+      { ...base, group: 'network' }
+    )).toBe(false)
   })
 
   it('defers expensive raw serialization until raw JSON or search text is requested', () => {
