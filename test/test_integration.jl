@@ -174,7 +174,12 @@
       export_payload = Dict(
         "name" => "Integration Export",
         "variables" => Any[],
-        "simulationConfig" => Dict("time" => 1.5, "timeStep" => 0.25),
+        "simulationConfig" => Dict(
+          "time" => 1.5,
+          "timeStep" => 0.25,
+          "qubitRepresentation" => "CliffordRepr",
+          "qumodeRepresentation" => "GabsRepr",
+        ),
         "net" => Dict(
           "nodes" => [
             Dict(
@@ -214,6 +219,7 @@
       @test data["success"] == true
       @test data["filename"] == "integration-export.jl"
       @test occursin("simulation_duration = 1.5", data["script"])
+      @test occursin("QuantumSavory.CliffordRepr()", data["script"])
       @test occursin("Graphs.add_edge!(graph, 1, 2)", data["script"])
       @test occursin("CairoMakie.record", data["script"])
       @test occursin("MIME\"image/png\"", data["script"])
@@ -230,6 +236,15 @@
       @test invalid_data["success"] == false
       @test invalid_data["error_code"] == "VALIDATION_ERROR"
       @test occursin("positive finite", invalid_data["error"])
+
+      incompatible_payload = deepcopy(export_payload)
+      incompatible_payload["simulationConfig"]["qubitRepresentation"] = "GabsRepr"
+      incompatible_response =
+        make_request("POST", "/export_script"; body=incompatible_payload)
+      @test incompatible_response.status == 400
+      incompatible_data = parse_response(incompatible_response)
+      @test incompatible_data["error_code"] == "VALIDATION_ERROR"
+      @test occursin("does not support Qubit slots", incompatible_data["error"])
   end
 
   @testset "Protocol Types Endpoint" begin

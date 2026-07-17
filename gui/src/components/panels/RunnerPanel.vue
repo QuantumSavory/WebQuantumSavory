@@ -2,6 +2,12 @@
 import { ref, computed } from 'vue'
 import { LoaderCircle, Pause, Play, Settings2, Square } from '@lucide/vue'
 import { SimulationPhase } from '../../composables/simulationLifecycle.js'
+import OptionHelpTooltip from '../ui/OptionHelpTooltip.vue'
+import {
+  QUBIT_REPRESENTATION_OPTIONS,
+  QUMODE_REPRESENTATION_OPTIONS,
+  normalizeRepresentationConfig
+} from '../../utils/representations.js'
 
 const props = defineProps({
   projectData: {
@@ -37,6 +43,29 @@ const props = defineProps({
 const emit = defineEmits(['run', 'pause', 'resume', 'stop', 'prepareNetworkGraph', 'prepareSimulation'])
 
 const showAdvancedControls = ref(false)
+const normalizedRepresentationConfig = computed(() => (
+  normalizeRepresentationConfig(props.projectData.simulationConfig)
+))
+
+function representationModel(field) {
+  return computed({
+    get: () => normalizedRepresentationConfig.value[field],
+    set: value => {
+      props.projectData.simulationConfig ??= {}
+      props.projectData.simulationConfig[field] = value
+    }
+  })
+}
+
+const qubitRepresentation = representationModel('qubitRepresentation')
+const qumodeRepresentation = representationModel('qumodeRepresentation')
+
+const selectedQubitRepresentation = computed(() => (
+  QUBIT_REPRESENTATION_OPTIONS.find(option => option.value === qubitRepresentation.value)
+))
+const selectedQumodeRepresentation = computed(() => (
+  QUMODE_REPRESENTATION_OPTIONS.find(option => option.value === qumodeRepresentation.value)
+))
 
 const currentTime = computed(() => {
   const sim = backendSim.value
@@ -72,6 +101,13 @@ const canResumeSimulation = computed(() => props.capabilities.canResume)
 const canStopSimulation = computed(() => props.capabilities.canStop)
 const foregroundAction = computed(() => props.foregroundRequest?.action || null)
 const foregroundPending = computed(() => Boolean(foregroundAction.value))
+const representationsDisabled = computed(() => (
+  Boolean(props.capabilities.editingDisabled)
+  || isSimulationRunning.value
+  || isSimulationPaused.value
+  || props.pollingActive
+  || foregroundPending.value
+))
 const foregroundStatus = computed(() => ({
   parse: 'Parsing network graph',
   prepare: 'Preparing simulation',
@@ -239,6 +275,58 @@ function toggleAdvancedControls() {
 
     <!-- Advanced Controls (Collapsible) -->
     <div class="advanced-controls" :class="{ visible: showAdvancedControls }">
+      <div class="representation-controls" aria-label="Default quantum representations">
+        <div class="representation-control qubit-representation-control">
+          <label for="qubit-representation">Qubits</label>
+          <div class="representation-editor">
+            <select
+              id="qubit-representation"
+              v-model="qubitRepresentation"
+              class="representation-select"
+              :disabled="representationsDisabled"
+            >
+              <option
+                v-for="option in QUBIT_REPRESENTATION_OPTIONS"
+                :key="option.value"
+                :value="option.value"
+                :title="option.tooltip.replaceAll('**', '')"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+            <OptionHelpTooltip
+              :label="`About ${selectedQubitRepresentation.label}`"
+              :text="selectedQubitRepresentation.tooltip"
+            />
+          </div>
+        </div>
+
+        <div class="representation-control qumode-representation-control">
+          <label for="qumode-representation">Qmodes</label>
+          <div class="representation-editor">
+            <select
+              id="qumode-representation"
+              v-model="qumodeRepresentation"
+              class="representation-select"
+              :disabled="representationsDisabled"
+            >
+              <option
+                v-for="option in QUMODE_REPRESENTATION_OPTIONS"
+                :key="option.value"
+                :value="option.value"
+                :title="option.tooltip.replaceAll('**', '')"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+            <OptionHelpTooltip
+              :label="`About ${selectedQumodeRepresentation.label}`"
+              :text="selectedQumodeRepresentation.tooltip"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="advanced-buttons">
         <button 
           :disabled="!props.capabilities.canPrepare || pollingActive || foregroundPending"
@@ -490,10 +578,62 @@ function toggleAdvancedControls() {
 }
 
 .advanced-controls.visible {
-  max-height: 300px;
+  max-height: 430px;
   transition: max-height 0.3s ease-in;
   border-top: 1px solid #eee;
   display: block;
+}
+
+.representation-controls {
+  display: grid;
+  gap: var(--app-space-2);
+  margin-bottom: var(--app-space-4);
+}
+
+.representation-control {
+  --representation-color: var(--app-color-primary);
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: var(--app-space-3);
+  align-items: center;
+  padding: var(--app-space-2) var(--app-space-3);
+  border-left: 3px solid var(--representation-color);
+  border-radius: var(--app-radius-control);
+  background: var(--app-color-surface-subtle);
+}
+
+.qubit-representation-control {
+  --representation-color: var(--app-color-qubit);
+}
+
+.qumode-representation-control {
+  --representation-color: var(--app-color-qmode);
+}
+
+.representation-control label {
+  color: var(--representation-color);
+  font-weight: 700;
+}
+
+.representation-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: var(--app-space-1);
+  align-items: center;
+}
+
+.representation-select {
+  width: 100%;
+  min-width: 0;
+  border-color: var(--representation-color);
+  background: var(--app-color-surface);
+  color: var(--app-color-text);
+}
+
+.representation-select:disabled {
+  border-color: var(--app-color-border);
+  background: var(--app-color-disabled-surface);
+  color: var(--app-color-disabled-text);
 }
 
 .advanced-buttons {

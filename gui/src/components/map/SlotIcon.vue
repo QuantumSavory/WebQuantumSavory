@@ -27,10 +27,10 @@ const props = defineProps({
 
 function getSlotColor(){
   if(props.registerSlot.type == "Qubit"){
-    return "#48ca82"
+    return "var(--app-color-qubit)"
   }
   if(props.registerSlot.type == "Qumode"){
-    return "#ffac2d"
+    return "var(--app-color-qmode)"
   }
 }
 </script>

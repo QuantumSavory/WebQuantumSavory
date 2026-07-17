@@ -95,6 +95,9 @@ test('Save As keeps storage, document, reload, and simulation namespaces aligned
     const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
     setup.projectData.net.nodes.forEach(node => node.createNewSlot())
   })
+  await page.getByRole('button', { name: 'Toggle advanced controls' }).click()
+  await page.getByLabel('Qubits').selectOption('CliffordRepr')
+  await page.getByLabel('Qmodes').selectOption('GabsRepr')
 
   await page.locator('.hamburger-btn').click()
   await page.getByRole('menuitem', { name: 'Save As' }).click()
@@ -106,16 +109,26 @@ test('Save As keeps storage, document, reload, and simulation namespaces aligned
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('cqn_project_Project B')))
   expect(stored).toMatchObject({ schemaVersion: 1, name: 'Project B' })
   expect(stored.net.nodes).toHaveLength(2)
+  expect(stored.simulationConfig).toMatchObject({
+    qubitRepresentation: 'CliffordRepr',
+    qumodeRepresentation: 'GabsRepr',
+  })
 
-  await page.getByRole('button', { name: 'Toggle advanced controls' }).click()
   await page.getByRole('button', { name: 'Parse', exact: true }).click()
   await expect.poll(() => parseRequests.length).toBe(1)
   expect(parseRequests[0].name).toMatch(/_Project B$/)
+  expect(parseRequests[0].simulationConfig).toEqual({
+    qubitRepresentation: 'CliffordRepr',
+    qumodeRepresentation: 'GabsRepr',
+  })
 
   await page.reload()
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
   await expect(page.locator('.project-name-label')).toHaveText('Project B')
   await expect(page.locator('.node-marker')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Toggle advanced controls' }).click()
+  await expect(page.getByLabel('Qubits')).toHaveValue('CliffordRepr')
+  await expect(page.getByLabel('Qmodes')).toHaveValue('GabsRepr')
 
   const reloaded = await page.evaluate(() => ({
     recent: localStorage.getItem('recentProjectName'),

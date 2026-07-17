@@ -6,6 +6,7 @@
 
 ## 1.9.0
 
+- Added advanced Qubit and Qumode representation defaults with backend-capability guidance, persistent project settings, and matching GUI-simulation and Julia-script-export behavior.
 - Added dependency-backed Bézier routing for physical links with typed smooth/sharp anchors, geodesic distance and propagation-delay badges, editable physical defaults and per-edge overrides, and schema-v1 legacy normalization.
 - Applied each resolved physical-link delay to both directed classical and quantum simulator channels and generated scripts, while excluding virtual links from physical graphs and retaining their permitted protocols.
 - Fixed wrapped Tools tabs and reorganized Layout Tools into a full-width live-help card above equal Physical Defaults, Drawing Tools, and Helpers cards, with consistent pointer and keyboard-focus guidance.

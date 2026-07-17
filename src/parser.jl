@@ -598,6 +598,8 @@ function validate_payload(payload)
       throw(validation_error("Missing required field: 'net' must be present"))
     end
 
+    representation_config(payload)
+
     net = payload["net"]
 
     # Validate net structure
@@ -778,6 +780,7 @@ _register_names(nodes) = [string(node["name"]) for node in nodes]
 function create_registers_from_nodes(data)
   # Extract nodes from the validation result
   nodes = data["graph_info"]["nodes"]
+  default_representations = representation_config(data["data"])
 
   # Create array of Register objects based on slots data
   registers = []
@@ -792,6 +795,7 @@ function create_registers_from_nodes(data)
 
     # Parse traits (Qubit/Qumode) and background noise for each slot
     traits = []
+    representations = QuantumSavory.AbstractRepresentation[]
     # Backgrounds are positional, so no-noise slots need explicit `nothing` entries.
     background_noise = Union{Nothing,QuantumSavory.AbstractBackground}[]
 
@@ -803,6 +807,7 @@ function create_registers_from_nodes(data)
         error("Unknown slot type: $slot_type_str")
       end
       push!(traits, slot_type())
+      push!(representations, construct_representation(default_representations, slot_type))
 
       # Instantiate background noise (supports string or object with parameters)
       noise_def = get(slot_data, "backgroundNoise", nothing)
@@ -810,8 +815,7 @@ function create_registers_from_nodes(data)
       push!(background_noise, background)
     end
 
-    reprs = [QuantumOpticsRepr() for _ in 1:length(traits)]
-    register = Register(traits, reprs, background_noise)
+    register = Register(traits, representations, background_noise)
     push!(registers, register)
 
     # Map slot IDs to actual slot objects

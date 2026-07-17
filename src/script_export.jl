@@ -629,6 +629,7 @@ function generate_julia_script(payload)
     "A runnable QuantumSavory script requires at least one node",
   ))
   duration, time_step = _script_simulation_config(data)
+  default_representations = representation_config(data)
   filename = _script_filename(data["name"])
   output_stem = first(filename, length(filename) - 3)
 
@@ -689,6 +690,7 @@ function generate_julia_script(payload)
       "Node $node_index requires at least one slot for a runnable QuantumSavory register",
     ))
     trait_expressions = String[]
+    representation_expressions = String[]
     background_expressions = String[]
     for (slot_index, slot) in enumerate(slots)
       _is_object_like(slot) || throw(validation_error("Node $node_index slot $slot_index must be an object"))
@@ -696,13 +698,21 @@ function generate_julia_script(payload)
       slot_type = _resolve_type_from_string(slot_type_name, :slot)
       slot_type === nothing && throw(validation_error("Node $node_index slot $slot_index has unknown type '$slot_type_name'"))
       push!(trait_expressions, "$(string(slot_type))()")
+      push!(
+        representation_expressions,
+        script_representation(default_representations, slot_type),
+      )
       push!(background_expressions, _script_noise_expression(
         get(slot, "backgroundNoise", nothing),
         "Node $node_index slot $slot_index background noise",
       ))
     end
     traits = isempty(trait_expressions) ? "Any[]" : "[" * join(trait_expressions, ", ") * "]"
-    representations = isempty(trait_expressions) ? "Any[]" : "[" * join(fill("QuantumSavory.QuantumOpticsRepr()", length(trait_expressions)), ", ") * "]"
+    representations = if isempty(representation_expressions)
+      "Any[]"
+    else
+      "[" * join(representation_expressions, ", ") * "]"
+    end
     backgrounds = isempty(background_expressions) ? "Any[]" : "[" * join(background_expressions, ", ") * "]"
     push!(lines, "traits = $traits")
     push!(lines, "representations = $representations")
