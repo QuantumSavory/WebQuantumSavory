@@ -1001,6 +1001,16 @@
       end
   end
 
+  @testset "Simulation Log Groups Endpoint" begin
+      response = make_request("GET", "/simulation_log_groups")
+      @test response.status == 200
+      data = parse_response(response)
+      expected_log_groups = String[
+        string(group) for group in values(QuantumSavory.LOG_GROUPS)
+      ]
+      @test data["simulation_log_groups"] == expected_log_groups
+  end
+
   @testset "Logs Endpoint - Success" begin
       # First create a simulation to have logs
       logs_test_name = "logs_test_sim"

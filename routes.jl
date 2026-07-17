@@ -2132,6 +2132,34 @@ end
 ########################################################
 
 @swagger """
+/simulation_log_groups:
+  get:
+    description: Get the stable QuantumSavory log groups used to classify simulator records.
+    responses:
+      '200':
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - simulation_log_groups
+              properties:
+                simulation_log_groups:
+                  type: array
+                  description: Canonical group identifiers sourced from QuantumSavory.LOG_GROUPS.
+                  items:
+                    type: string
+"""
+route("/simulation_log_groups", method="GET") do
+  json(Dict(
+    :simulation_log_groups => WebQuantumSavory.Logger.simulation_log_groups(),
+  ))
+end
+
+########################################################
+
+@swagger """
 /logs/{name}:
   get:
     description: Get and optionally purge JSON-safe structured log events from a simulation. Panic records include complete exception and stacktrace details.
@@ -2195,7 +2223,7 @@ end
                       group:
                         type: string
                         nullable: true
-                        description: Optional group identifier
+                        description: Optional canonical QuantumSavory group identifier, including groups recovered from hygienically renamed ResumableFunctions metadata
                       logging_id:
                         type: string
                         nullable: true

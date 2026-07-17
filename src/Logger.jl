@@ -5,15 +5,39 @@ using LoggingExtras
 using Dates
 using QuantumSavory
 
-export make_logger, MIN_LEVEL, MAX_LEVEL, log_event, @log_event
+export make_logger, MIN_LEVEL, MAX_LEVEL, log_event, @log_event, simulation_log_groups
 export event_timestamp, next_event_id, severity_name, json_safe, format_exception_stacktrace
 
 const MIN_LEVEL = Logging.Debug
 const MAX_LEVEL = Logging.Error
 const EVENT_SEQUENCE = Base.Threads.Atomic{UInt64}(0)
 const DEFAULT_SOURCE = "Simulator"
+const RESERVED_LOG_GROUP_KEY = r"^_group(?:_\d+)?$"
 
 ultimateparent(mod) = mod === parentmodule(mod) ? mod : ultimateparent(parentmodule(mod))
+
+"""Return the stable QuantumSavory log groups as public JSON-ready identifiers."""
+simulation_log_groups() = String[string(group) for group in values(QuantumSavory.LOG_GROUPS)]
+
+"""
+Resolve the stable QuantumSavory group carried by a Julia log record.
+
+`ResumableFunctions.@resumable` can hygienically rename the reserved `_group`
+logging keyword before the nested logging macro expands, leaving `_group_N` in
+the metadata and a file-derived positional group. Recover only that exact shape
+when its value belongs to the authoritative `QuantumSavory.LOG_GROUPS` catalog.
+"""
+function _canonical_log_group(group, fields)
+  canonical_groups = values(QuantumSavory.LOG_GROUPS)
+  group in canonical_groups && return group
+
+  for (key, value) in fields
+    occursin(RESERVED_LOG_GROUP_KEY, string(key)) || continue
+    value in canonical_groups && return value
+  end
+
+  return group
+end
 
 """Return the UTC timestamp format used by all public log and panic records."""
 event_timestamp() = Dates.format(Dates.now(Dates.UTC), dateformat"yyyy-mm-ddTHH:MM:SS.sssZ")
@@ -164,7 +188,7 @@ function Logging.handle_message(logger::CapturingLogger, level, message, _module
   try
     event = _base_event(level, message)
     event["module"] = string(_module)
-    event["group"] = json_safe(group)
+    event["group"] = json_safe(_canonical_log_group(group, kwargs))
     event["logging_id"] = json_safe(id)
     event["file"] = string(filepath)
     event["line"] = line
