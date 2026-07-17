@@ -57,6 +57,12 @@ export function normalizeLogSource(source) {
   }
 }
 
+export function normalizeLogGroup(group) {
+  if (typeof group !== 'string') return null
+  const normalized = group.trim().toLowerCase()
+  return normalized || null
+}
+
 export const normalizeLogSeverity = normalizeLogLevel
 
 export function parseLegacyLogDetails(value) {
@@ -139,6 +145,9 @@ export function normalizeLogRecord(log) {
       isRecord(raw) ? raw.subsystem : undefined
     ) || null
     : null
+  const group = source === 'Simulator'
+    ? normalizeLogGroup(record.group ?? (isRecord(raw) ? raw.group : undefined))
+    : null
 
   const normalized = {
     id: record.id,
@@ -146,6 +155,7 @@ export function normalizeLogRecord(log) {
     level,
     source,
     subsystem,
+    group,
     message,
     fullMessage,
     exceptionType,
@@ -169,6 +179,7 @@ export function normalizeLogRecord(log) {
         stacktrace,
         source,
         subsystem,
+        group,
         level,
         serializeLogValue(raw)
       ].join('\n').toLowerCase()
@@ -185,4 +196,5 @@ export function areConsecutiveLogsEqual(first, second) {
     && firstRecord.level === secondRecord.level
     && firstRecord.source === secondRecord.source
     && firstRecord.subsystem === secondRecord.subsystem
+    && firstRecord.group === secondRecord.group
 }

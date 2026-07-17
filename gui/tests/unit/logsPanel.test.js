@@ -79,6 +79,96 @@ describe('LogsPanel', () => {
     }
   })
 
+  it('combines accessible severity, source, and known simulator-group filters', async () => {
+    const wrapper = mount(LogsPanel, {
+      props: {
+        simulationLogGroups: [' Protocol ', 'network', 'protocol', ''],
+        logs: [
+          log({ id: 'app', level: 'debug', source: 'App', message: 'App message' }),
+          log({ id: 'api', level: 'info', source: 'Web API', message: 'API message' }),
+          log({
+            id: 'protocol',
+            level: 'warning',
+            source: 'Simulator',
+            group: 'protocol',
+            message: 'Protocol message',
+            raw: { group: 'protocol' }
+          }),
+          log({
+            id: 'network',
+            level: 'error',
+            source: 'Simulator',
+            group: 'network',
+            message: 'Network message',
+            raw: { group: 'network' }
+          }),
+          log({
+            id: 'unknown',
+            level: 'success',
+            source: 'Simulator',
+            group: 'custom',
+            message: 'Unknown group message',
+            raw: { group: 'custom' }
+          }),
+          log({
+            id: 'ungrouped',
+            level: 'panic',
+            source: 'Simulator',
+            message: 'Ungrouped message'
+          })
+        ]
+      }
+    })
+    const visibleIds = () => new Set(
+      wrapper.findAll('.log-entry-container').map(entry => entry.attributes('data-log-id'))
+    )
+    const warningFilter = wrapper.get('[data-log-level-filter="warning"]')
+    const apiFilter = wrapper.get('[data-log-source-filter="Web API"]')
+    const protocolFilter = wrapper.get('[data-log-group-filter="protocol"]')
+    const networkFilter = wrapper.get('[data-log-group-filter="network"]')
+
+    expect(wrapper.findAll('[data-log-level-filter]')).toHaveLength(6)
+    expect(wrapper.findAll('[data-log-source-filter]')).toHaveLength(3)
+    expect(wrapper.findAll('[data-log-group-filter]')).toHaveLength(2)
+    expect(warningFilter.attributes('aria-label')).toBe('Filter Warning severity logs')
+    expect(apiFilter.attributes('aria-label')).toBe('Filter Web API source logs')
+    expect(protocolFilter.attributes('aria-label'))
+      .toBe('Filter Protocol simulation group logs')
+    expect(warningFilter.attributes('aria-pressed')).toBe('true')
+    expect(visibleIds()).toEqual(new Set([
+      'app',
+      'api',
+      'protocol',
+      'network',
+      'unknown',
+      'ungrouped'
+    ]))
+    expect(wrapper.get('[data-log-id="unknown"] .log-source').text())
+      .toBe('[Simulator · Custom]')
+
+    await warningFilter.trigger('click')
+    expect(warningFilter.attributes('aria-pressed')).toBe('false')
+    expect(visibleIds().has('protocol')).toBe(false)
+    await warningFilter.trigger('click')
+
+    await apiFilter.trigger('click')
+    expect(visibleIds().has('api')).toBe(false)
+
+    await protocolFilter.trigger('click')
+    await networkFilter.trigger('click')
+    expect(protocolFilter.attributes('aria-pressed')).toBe('false')
+    expect(networkFilter.attributes('aria-pressed')).toBe('false')
+    expect(visibleIds().has('protocol')).toBe(false)
+    expect(visibleIds().has('network')).toBe(false)
+    expect(visibleIds().has('unknown')).toBe(true)
+    expect(visibleIds().has('ungrouped')).toBe(true)
+
+    await wrapper.get('input[aria-label="Search logs"]').setValue('protocol')
+    expect(wrapper.findAll('.log-entry-container')).toHaveLength(0)
+    expect(wrapper.get('.empty-logs').text())
+      .toBe('No logs match your search: "protocol"')
+  })
+
   it('normalizes source classes, marks backend text as monospaced, and styles panic distinctly', () => {
     const wrapper = mount(LogsPanel, {
       props: {
@@ -86,7 +176,13 @@ describe('LogsPanel', () => {
         logs: [
           log({ id: 'app', source: 'Layout Tools', message: 'Layout complete' }),
           log({ id: 'api', source: 'Backend', level: 'error', message: 'HTTP request failed' }),
-          log({ id: 'sim', source: 'QuantumSavory', level: 'warning', message: 'Simulator warning' }),
+          log({
+            id: 'sim',
+            source: 'QuantumSavory',
+            level: 'warning',
+            group: 'protocol',
+            message: 'Simulator warning'
+          }),
           log({
             id: 'panic',
             source: 'Simulator',
@@ -106,6 +202,7 @@ describe('LogsPanel', () => {
     expect(wrapper.get('[data-log-id="api"]').classes()).toContain('is-backend-source')
     expect(wrapper.get('[data-log-id="api"] .log-source').text()).toBe('[Web API]')
     expect(wrapper.get('[data-log-id="sim"]').classes()).toContain('log-source-simulator')
+    expect(wrapper.get('[data-log-id="sim"] .log-source').text()).toBe('[Simulator · Protocol]')
     expect(wrapper.get('[data-log-id="panic"]').classes()).toContain('log-panic')
     expect(wrapper.get('[data-log-id="panic"] .log-message').text()).toBe('Unexpected simulator exception')
     expect(wrapper.findAll('.is-backend-source')).toHaveLength(3)
@@ -120,7 +217,7 @@ describe('LogsPanel', () => {
       fullMessage: 'BoundsError: attempt to access [1, 2, 3] at index [100]',
       exceptionType: 'BoundsError',
       stacktrace: 'Stacktrace:\n [1] getindex at essentials.jl:14\n [2] run at mock.jl:8',
-      raw: { id: 'panic-123', keyword_field: { slot: 100 } }
+      raw: { id: 'panic-123', group: 'simulation', keyword_field: { slot: 100 } }
     })
     const original = structuredClone(panic)
     const wrapper = mount(LogsPanel, { props: { logs: [panic] } })
@@ -144,6 +241,7 @@ describe('LogsPanel', () => {
     expect(messageButton.attributes('aria-expanded')).toBe('true')
     expect(rawButton.attributes('aria-expanded')).toBe('true')
     expect(wrapper.get('.raw-json-content').text()).toContain('"keyword_field"')
+    expect(wrapper.get('.raw-json-content').text()).toContain('"group": "simulation"')
     expect(wrapper.get('.raw-json-content').text()).toContain('"slot": 100')
 
     await messageButton.trigger('click')

@@ -81,6 +81,8 @@ import { generateStarNetwork } from './utils/starNetwork.js'
 import { generateGraphNetwork, GRAPH_TOPOLOGIES } from './utils/graphNetwork.js'
 import { frontendBuildInfo } from './utils/frontendBuildInfo.js'
 import {
+  areConsecutiveLogsEqual,
+  normalizeLogGroup,
   normalizeLogSeverity,
   normalizeLogSource,
   parseRawLogDetails
@@ -132,15 +134,24 @@ function addLog(level, message, source = 'App', extendedInfo = null, options = {
     if (existing) return existing
   }
 
+  const suppliedRaw = options.raw ?? parseRawLogDetails(extendedInfo)
+  const rawGroup = suppliedRaw && typeof suppliedRaw === 'object' && !Array.isArray(suppliedRaw)
+    ? suppliedRaw.group
+    : null
+  const normalizedGroup = normalizedSource.source === 'Simulator'
+    ? normalizeLogGroup(options.group ?? rawGroup)
+    : null
+  const incomingLog = {
+    level: normalizedLevel,
+    message,
+    source: normalizedSource.source,
+    subsystem: normalizedSource.subsystem,
+    group: normalizedGroup
+  }
+
   // Check if this message is the same as the last log entry
   const lastLog = applicationLogs.value[applicationLogs.value.length - 1];
-  if (
-    lastLog
-    && lastLog.message === message
-    && lastLog.source === normalizedSource.source
-    && lastLog.subsystem === normalizedSource.subsystem
-    && lastLog.level === normalizedLevel
-  ) {
+  if (lastLog && areConsecutiveLogsEqual(lastLog, incomingLog)) {
     // Update the timestamp of the existing log entry
     lastLog.timestamp = options.timestamp || new Date().toISOString();
     lastLog.count = (lastLog.count || 1) + 1;
@@ -148,7 +159,6 @@ function addLog(level, message, source = 'App', extendedInfo = null, options = {
     return lastLog;
   }
 
-  const suppliedRaw = options.raw ?? parseRawLogDetails(extendedInfo)
   const raw = suppliedRaw && typeof suppliedRaw === 'object' && !Array.isArray(suppliedRaw)
     ? { ...suppliedRaw }
     : suppliedRaw === null
@@ -166,6 +176,7 @@ function addLog(level, message, source = 'App', extendedInfo = null, options = {
     message,
     source: normalizedSource.source,
     subsystem: normalizedSource.subsystem,
+    group: normalizedGroup,
     extendedInfo,
     raw,
     fullMessage: options.fullMessage || null,
@@ -1006,7 +1017,8 @@ onMounted( async () => {
   // state is shell-owned so simulation polling never drives the global spinner.
   await Promise.allSettled([
     api.init(),
-    api.fetchPlatformInfo()
+    api.fetchPlatformInfo(),
+    api.fetchSimulationLogGroups()
   ])
   applicationMetadataPending.value = false
   // One-time migration: ensure metadata index exists for existing projects
@@ -1278,6 +1290,7 @@ onUnmounted(() => {
         :max-logs="200"
         :show-timestamps="true"
         :allow-clear="true"
+        :simulation-log-groups="api.config.value.simulationLogGroups || []"
         :helpers-disabled="isNetworkEditingDisabled"
         :curve-editing-enabled="curveEditingEnabled"
         :show-physical-badges="showPhysicalBadges"

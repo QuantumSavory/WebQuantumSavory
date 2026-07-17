@@ -347,6 +347,7 @@ describe('simulation controller polling ownership', () => {
       timestamp: '2026-07-13T12:00:00.000Z',
       source: 'Simulator',
       severity: 'error',
+      group: 'protocol',
       message: 'ordinary simulator error',
       protocol: 'ExampleProtocol'
     }
@@ -362,7 +363,12 @@ describe('simulation controller polling ownership', () => {
       record.message,
       'Simulator',
       JSON.stringify(record, null, 2),
-      expect.objectContaining({ id: 'log-1', raw: record, fullMessage: record.message })
+      expect.objectContaining({
+        id: 'log-1',
+        group: 'protocol',
+        raw: record,
+        fullMessage: record.message
+      })
     )
     stop()
   })

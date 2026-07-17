@@ -153,6 +153,7 @@
               :max-logs="maxLogs"
               :show-timestamps="showTimestamps"
               :allow-clear="allowClear"
+              :simulation-log-groups="simulationLogGroups"
               @clear-logs="emit('clear-logs')"
               @log-click="forwardLogClick"
             />
@@ -320,6 +321,10 @@ const props = defineProps({
   allowClear: {
     type: Boolean,
     default: true
+  },
+  simulationLogGroups: {
+    type: Array,
+    default: () => []
   },
   helpersDisabled: {
     type: Boolean,

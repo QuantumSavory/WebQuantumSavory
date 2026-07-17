@@ -2670,6 +2670,51 @@
   end
 
   @testset "Log Management" begin
+    expected_log_groups = String[
+      string(group) for group in values(QuantumSavory.LOG_GROUPS)
+    ]
+    @test WebQuantumSavory.Logger.simulation_log_groups() == expected_log_groups
+
+    canonical_group = QuantumSavory.LOG_GROUPS.protocol
+    @test WebQuantumSavory.Logger._canonical_log_group(
+      canonical_group,
+      pairs((; _group_4=QuantumSavory.LOG_GROUPS.network)),
+    ) == canonical_group
+    @test WebQuantumSavory.Logger._canonical_log_group(
+      :ProtocolZoo,
+      pairs((; _group_4=canonical_group)),
+    ) == canonical_group
+    @test WebQuantumSavory.Logger._canonical_log_group(
+      :ProtocolZoo,
+      pairs((; _group=QuantumSavory.LOG_GROUPS.simulation)),
+    ) == QuantumSavory.LOG_GROUPS.simulation
+    @test WebQuantumSavory.Logger._canonical_log_group(
+      :ProtocolZoo,
+      pairs((; group=canonical_group, _group_label=canonical_group, _group_4=:unknown)),
+    ) == :ProtocolZoo
+
+    Core.eval(QuantumSavory, quote
+      @resumable function __webquantumsavory_test_resumable_log_group__(sim)
+        @debug "resumable group probe" _group=LOG_GROUPS.protocol
+        @yield timeout(sim, 0.0)
+      end
+    end)
+    actual_resumable_state = WebQuantumSavory.State(name="actual_resumable_log_group")
+    actual_resumable_logger = WebQuantumSavory.Logger.make_logger(
+      actual_resumable_state;
+      console=Logging.NullLogger(),
+    )
+    actual_resumable_sim = ConcurrentSim.Simulation()
+    Logging.with_logger(actual_resumable_logger) do
+      ConcurrentSim.Process(
+        QuantumSavory.__webquantumsavory_test_resumable_log_group__,
+        actual_resumable_sim,
+      )
+      ConcurrentSim.run(actual_resumable_sim)
+    end
+    @test only(actual_resumable_state.log_events)["group"] ==
+      string(QuantumSavory.LOG_GROUPS.protocol)
+
     structured_state = WebQuantumSavory.State(name="structured_logs")
     captured_error, captured_backtrace = try
       error("structured logger failure")
@@ -2682,7 +2727,7 @@
       Logging.Error,
       "ordinary simulator error",
       QuantumSavory,
-      :unit,
+      QuantumSavory.LOG_GROUPS.protocol,
       :ordinary_error,
       @__FILE__,
       @__LINE__;
@@ -2701,6 +2746,7 @@
     @test captured["source"] == "Simulator"
     @test captured["severity"] == "error"
     @test captured["message"] == "ordinary simulator error"
+    @test captured["group"] == string(QuantumSavory.LOG_GROUPS.protocol)
     @test captured["attempt"] == 2
     @test captured["context"] == Dict("slot" => 3, "active" => true)
     @test captured["exception"]["exception_type"] == "ErrorException"
@@ -2709,7 +2755,29 @@
     @test structured_state.log_events[2]["severity"] == "success"
     @test all(log["source"] == "Simulator" for log in structured_state.log_events)
     @test length(unique(log["id"] for log in structured_state.log_events)) == 2
-    @test JSON.parse(JSON.json(structured_state.log_events)) isa Vector
+    round_tripped_logs = JSON.parse(JSON.json(structured_state.log_events))
+    @test round_tripped_logs isa Vector
+    @test round_tripped_logs[1]["group"] == string(QuantumSavory.LOG_GROUPS.protocol)
+
+    resumable_state = WebQuantumSavory.State(name="resumable_structured_logs")
+    resumable_logger = WebQuantumSavory.Logger.make_logger(
+      resumable_state;
+      console=Logging.NullLogger(),
+    )
+    Logging.handle_message(
+      resumable_logger,
+      Logging.Debug,
+      "resumable protocol log",
+      QuantumSavory.ProtocolZoo,
+      :ProtocolZoo,
+      :resumable_debug,
+      @__FILE__,
+      @__LINE__;
+      _group_4=QuantumSavory.LOG_GROUPS.protocol,
+    )
+    resumable_event = only(resumable_state.log_events)
+    @test resumable_event["group"] == string(QuantumSavory.LOG_GROUPS.protocol)
+    @test resumable_event["_group_4"] == string(QuantumSavory.LOG_GROUPS.protocol)
 
     silent_state = WebQuantumSavory.State(name="silent_structured_logs")
     silent_logger = WebQuantumSavory.Logger.make_logger(

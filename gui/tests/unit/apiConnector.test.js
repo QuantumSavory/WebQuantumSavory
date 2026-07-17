@@ -173,6 +173,34 @@ describe('ApiConnector project namespaces', () => {
     })
   })
 
+  it('fetches and caches the authoritative simulation log groups', async () => {
+    const groups = ['backend', 'network', 'protocol', 'simulation', 'visualization']
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ simulation_log_groups: groups })
+    }))
+    const connector = new ApiConnector('http://api.test')
+
+    await expect(connector.fetchSimulationLogGroups()).resolves.toEqual(groups)
+    await expect(connector.fetchSimulationLogGroups()).resolves.toEqual(groups)
+
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls[0][0]).toBe('http://api.test/simulation_log_groups')
+    expect(connector.config.value.simulationLogGroups).toEqual(groups)
+  })
+
+  it('rejects malformed simulation log group catalogs without caching them', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ simulation_log_groups: ['protocol', ''] })
+    }))
+    const connector = new ApiConnector('http://api.test')
+
+    await expect(connector.fetchSimulationLogGroups())
+      .rejects.toThrow('Simulation log groups response is invalid')
+    expect(connector.config.value.simulationLogGroups).toBeUndefined()
+  })
+
   it('shares in-flight tag catalogs without letting one caller abort the other', async () => {
     const response = {
       named_tags: [],

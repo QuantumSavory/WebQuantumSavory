@@ -21,6 +21,19 @@ async function mockBackendMetadata(page) {
     contentType: 'application/json',
     json: { states_zoo_types: [] },
   }))
+  await page.route('**/simulation_log_groups', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: {
+      simulation_log_groups: [
+        'backend',
+        'network',
+        'protocol',
+        'simulation',
+        'visualization',
+      ],
+    },
+  }))
   await page.route('**/platform_info', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -45,8 +58,11 @@ async function loadApp(page) {
   const protocolTypesLoaded = page.waitForResponse(
     response => response.url().endsWith('/protocol_types') && response.ok(),
   )
+  const simulationLogGroupsLoaded = page.waitForResponse(
+    response => response.url().endsWith('/simulation_log_groups') && response.ok(),
+  )
   await page.goto('/')
-  await protocolTypesLoaded
+  await Promise.all([protocolTypesLoaded, simulationLogGroupsLoaded])
   await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 })
 }
 
@@ -69,7 +85,7 @@ async function replaceApplicationLogs(page, logs) {
   })))
 }
 
-test.describe('Bottom panel log counters', () => {
+test.describe('Bottom panel logs', () => {
   test.beforeEach(async ({ page }) => {
     await loadApp(page)
   })
@@ -125,6 +141,96 @@ test.describe('Bottom panel log counters', () => {
     await panel.getByRole('button', { name: 'Clear' }).click()
     await expect(logsTab.locator('.log-count-badge')).toHaveCount(0)
     await expect(panel.locator('.empty-logs')).toHaveText('No logs available')
+  })
+
+  test('composes severity, source, and Simulator group filters', async ({ page }) => {
+    const panel = page.locator('#logsPanel')
+    const logEntries = panel.getByRole('article')
+    const bottomTabs = panel.locator('.bottom-tabs').getByRole('tab')
+
+    await expect(bottomTabs).toHaveCount(7)
+    await replaceApplicationLogs(page, [
+      {
+        level: 'info',
+        source: 'Map',
+        message: 'Map interaction completed',
+      },
+      {
+        level: 'warning',
+        source: 'Backend',
+        message: 'Web request needs attention',
+      },
+      {
+        level: 'warning',
+        source: 'QuantumSavory',
+        group: 'protocol',
+        message: 'Protocol retry scheduled',
+      },
+      {
+        level: 'error',
+        source: 'Simulator',
+        group: 'network',
+        message: 'Network delivery failed',
+      },
+    ])
+
+    await expect(logEntries).toHaveCount(4)
+
+    const simulatorGroupFilters = panel.getByRole('group', {
+      name: 'Filter Simulator logs by group',
+    })
+    await expect(simulatorGroupFilters.getByRole('button')).toHaveText([
+      'Backend',
+      'Network',
+      'Protocol',
+      'Simulation',
+      'Visualization',
+    ])
+
+    const protocolLog = panel.getByRole('article', {
+      name: 'warning log from Simulator · Protocol',
+      exact: true,
+    })
+    await expect(protocolLog.locator('.log-source')).toHaveText('[Simulator · Protocol]')
+    await protocolLog.getByRole('button', {
+      name: 'Show raw JSON for Simulator · Protocol log',
+      exact: true,
+    }).click()
+    await expect(protocolLog.locator('[aria-label="Raw log JSON"]'))
+      .toContainText('"group": "protocol"')
+
+    const errorFilter = panel.getByRole('button', {
+      name: 'Filter Error severity logs',
+      exact: true,
+    })
+    const webApiFilter = panel.getByRole('button', {
+      name: 'Filter Web API source logs',
+      exact: true,
+    })
+    const protocolFilter = simulatorGroupFilters.getByRole('button', {
+      name: 'Filter Protocol simulation group logs',
+      exact: true,
+    })
+
+    await expect(errorFilter).toHaveAttribute('aria-pressed', 'true')
+    await expect(webApiFilter).toHaveAttribute('aria-pressed', 'true')
+    await expect(protocolFilter).toHaveAttribute('aria-pressed', 'true')
+
+    await errorFilter.click()
+    await expect(errorFilter).toHaveAttribute('aria-pressed', 'false')
+    await expect(logEntries).toHaveCount(3)
+    await expect(panel.getByText('Network delivery failed', { exact: true })).toHaveCount(0)
+
+    await webApiFilter.click()
+    await expect(webApiFilter).toHaveAttribute('aria-pressed', 'false')
+    await expect(logEntries).toHaveCount(2)
+    await expect(panel.getByText('Web request needs attention', { exact: true })).toHaveCount(0)
+
+    await protocolFilter.click()
+    await expect(protocolFilter).toHaveAttribute('aria-pressed', 'false')
+    await expect(logEntries).toHaveCount(1)
+    await expect(panel.getByText('Protocol retry scheduled', { exact: true })).toHaveCount(0)
+    await expect(panel.getByText('Map interaction completed', { exact: true })).toBeVisible()
   })
 
   test('retains roving focus and keyboard tab selection', async ({ page }) => {
