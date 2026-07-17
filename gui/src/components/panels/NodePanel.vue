@@ -291,8 +291,8 @@ const bgNoiseOptions = api.config.value.bgNoiseOptions;
 function typeIcon(type) {
   if (!type) return '•'
   const t = type; //.trim().toLowerCase()
-  if (t == "Qubit") return '<span style="color: #48ca82;">Q</span>' // Qubit/Qudit
-  if (t == "Qumode") return '<span style="color: #ff9700;">M</span>' // Mode
+  if (t == "Qubit") return '<span style="color: var(--app-color-qubit);">Q</span>' // Qubit/Qudit
+  if (t == "Qumode") return '<span style="color: var(--app-color-qmode);">M</span>' // Mode
   return t.charAt(0).toUpperCase()
 }
 

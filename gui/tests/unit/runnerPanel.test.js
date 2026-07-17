@@ -24,7 +24,15 @@ function mountRunner(overrides = {}) {
       capabilities: capabilities(),
       foregroundRequest: null,
       ...overrides
-    }
+    },
+    global: {
+      directives: {
+        tooltip: {
+          mounted() {},
+          updated() {}
+        }
+      }
+    },
   })
 }
 
@@ -100,5 +108,66 @@ describe('RunnerPanel foreground loading feedback', () => {
     expect(wrapper.get('.prepare-network-graph-btn').attributes('disabled')).toBeDefined()
     expect(wrapper.get('.prepare-simulation-btn').attributes('disabled')).toBeDefined()
     expect(wrapper.get('.reset-btn').attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('RunnerPanel representation controls', () => {
+  it('offers trait-compatible, colored defaults and persists selected values', async () => {
+    const projectData = {
+      simulationConfig: {
+        time: 1,
+        qubitRepresentation: 'QuantumOpticsRepr',
+        qumodeRepresentation: 'QuantumOpticsRepr'
+      }
+    }
+    const wrapper = mountRunner({ projectData })
+
+    await wrapper.get('.settings-toggle-btn').trigger('click')
+
+    const qubitSelect = wrapper.get('#qubit-representation')
+    const qumodeSelect = wrapper.get('#qumode-representation')
+    expect(qubitSelect.findAll('option').map(option => option.attributes('value'))).toEqual([
+      'QuantumOpticsRepr',
+      'QuantumMCRepr',
+      'CliffordRepr'
+    ])
+    expect(qumodeSelect.findAll('option').map(option => option.attributes('value'))).toEqual([
+      'QuantumOpticsRepr',
+      'QuantumMCRepr',
+      'GabsRepr'
+    ])
+    expect(wrapper.get('.qubit-representation-control').classes()).toContain(
+      'qubit-representation-control'
+    )
+    expect(wrapper.get('.qumode-representation-control').classes()).toContain(
+      'qumode-representation-control'
+    )
+
+    await qubitSelect.setValue('CliffordRepr')
+    await qumodeSelect.setValue('GabsRepr')
+
+    expect(projectData.simulationConfig).toMatchObject({
+      qubitRepresentation: 'CliffordRepr',
+      qumodeRepresentation: 'GabsRepr'
+    })
+    expect(wrapper.get('[aria-label="About CliffordRepr"]').text()).toBe('')
+    expect(wrapper.get('[aria-label="About GabsRepr"]').text()).toBe('')
+    expect(qubitSelect.find('option[value="QuantumMCRepr"]').attributes('title')).toContain(
+      'stochastic pure-state trajectories'
+    )
+  })
+
+  it('defaults legacy projects and locks representation changes after parsing', async () => {
+    const wrapper = mountRunner({
+      projectData: { simulationConfig: { time: 1 } },
+      phase: 'parsed',
+      capabilities: capabilities({ editingDisabled: true })
+    })
+
+    await wrapper.get('.settings-toggle-btn').trigger('click')
+    expect(wrapper.get('#qubit-representation').element.value).toBe('QuantumOpticsRepr')
+    expect(wrapper.get('#qumode-representation').element.value).toBe('QuantumOpticsRepr')
+    expect(wrapper.get('#qubit-representation').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('#qumode-representation').attributes('disabled')).toBeDefined()
   })
 })

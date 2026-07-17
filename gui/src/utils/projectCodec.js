@@ -10,6 +10,7 @@ import {
   resolveEdgePhysicalProperties,
 } from './edgeGeometry'
 import { isMapPosition } from './layoutTemplates'
+import { normalizeRepresentationConfig } from './representations'
 
 export const PROJECT_SCHEMA_VERSION = 1
 
@@ -354,6 +355,7 @@ export function createEmptyProject(name = DEFAULT_PROJECT_NAME) {
     simulationConfig: {
       time: DEFAULT_SIMULATION_TIME,
       timeStep: DEFAULT_SIMULATION_TIME_STEP,
+      ...normalizeRepresentationConfig(),
     },
     net: {
       nodes: [],
@@ -394,6 +396,7 @@ export function decodeStoredProject(raw, context = {}) {
     source.simulationConfig?.timeStep,
     DEFAULT_SIMULATION_TIME_STEP,
   )
+  const representationConfig = normalizeRepresentationConfig(source.simulationConfig)
   const rawUiGlobal = isRecord(source.uiGlobal) ? source.uiGlobal : {}
   const map = normalizeMap(rawUiGlobal.map, context)
 
@@ -421,9 +424,15 @@ export function decodeStoredProject(raw, context = {}) {
         })
       : [],
     simulationConfig: {
-      ...omitFields(source.simulationConfig, new Set(['time', 'timeStep'])),
+      ...omitFields(source.simulationConfig, new Set([
+        'time',
+        'timeStep',
+        'qubitRepresentation',
+        'qumodeRepresentation',
+      ])),
       time: Math.max(minimumTime, configuredTime),
       timeStep: Math.max(minimumTimeStep, configuredTimeStep),
+      ...representationConfig,
     },
     net: {
       ...omitFields(source.net, new Set(['nodes', 'edges', 'protocols', 'physicalConfig'])),
@@ -464,6 +473,7 @@ export function encodeStoredProject(project, context = {}) {
     map: normalizeMap(mapSource, context),
   }
   const platformInfo = context.platformInfo ?? source.platformInfo
+  const representationConfig = normalizeRepresentationConfig(sourceSimulationConfig)
 
   return {
     ...omitFields(source, new Set([
@@ -481,9 +491,15 @@ export function encodeStoredProject(project, context = {}) {
     annotations: normalizeAnnotations(source.annotations),
     variables: Array.isArray(source.variables) ? source.variables.map(plainVariable) : [],
     simulationConfig: {
-      ...omitFields(sourceSimulationConfig, new Set(['time', 'timeStep'])),
+      ...omitFields(sourceSimulationConfig, new Set([
+        'time',
+        'timeStep',
+        'qubitRepresentation',
+        'qumodeRepresentation',
+      ])),
       time: finiteNumber(sourceSimulationConfig.time, DEFAULT_SIMULATION_TIME),
       timeStep: finiteNumber(sourceSimulationConfig.timeStep, DEFAULT_SIMULATION_TIME_STEP),
+      ...representationConfig,
     },
     ...(isRecord(platformInfo) ? { platformInfo: cloneValue(platformInfo) } : {}),
     net: {
@@ -562,6 +578,7 @@ export function toSimulationPayload(project) {
       'variables',
       'net',
     ])),
+    simulationConfig: normalizeRepresentationConfig(source.simulationConfig),
     variables: Array.isArray(source.variables)
       ? source.variables.map(variable => ({
           id: variable?.id,
@@ -633,11 +650,16 @@ export function toSimulationPayload(project) {
  */
 export function toScriptExportPayloadFromSimulationPayload(payload, simulationConfig) {
   const sourceConfig = isRecord(simulationConfig) ? simulationConfig : {}
+  const representationConfig = normalizeRepresentationConfig({
+    ...(isRecord(payload?.simulationConfig) ? payload.simulationConfig : {}),
+    ...sourceConfig,
+  })
   return {
     ...payload,
     simulationConfig: {
       time: finiteNumber(sourceConfig.time, DEFAULT_SIMULATION_TIME),
       timeStep: finiteNumber(sourceConfig.timeStep, DEFAULT_SIMULATION_TIME_STEP),
+      ...representationConfig,
     },
   }
 }

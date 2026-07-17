@@ -620,6 +620,16 @@ end
                     type: number
                     minimum: 0
                     exclusiveMinimum: true
+                  qubitRepresentation:
+                    type: string
+                    enum: [QuantumOpticsRepr, QuantumMCRepr, CliffordRepr]
+                    default: QuantumOpticsRepr
+                    description: Default numerical representation for Qubit slots
+                  qumodeRepresentation:
+                    type: string
+                    enum: [QuantumOpticsRepr, QuantumMCRepr, GabsRepr]
+                    default: QuantumOpticsRepr
+                    description: Default numerical representation for Qumode slots
               net:
                 type: object
                 required:
@@ -734,6 +744,20 @@ end
                               type: object
                               additionalProperties:
                                 type: number
+              simulationConfig:
+                type: object
+                description: >-
+                  Optional global numerical-representation defaults; omitted fields use
+                  QuantumOpticsRepr
+                properties:
+                  qubitRepresentation:
+                    type: string
+                    enum: [QuantumOpticsRepr, QuantumMCRepr, CliffordRepr]
+                    default: QuantumOpticsRepr
+                  qumodeRepresentation:
+                    type: string
+                    enum: [QuantumOpticsRepr, QuantumMCRepr, GabsRepr]
+                    default: QuantumOpticsRepr
               net:
                 type: object
                 required:

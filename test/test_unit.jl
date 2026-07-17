@@ -15,7 +15,12 @@
   @testset "Julia Script Export" begin
     payload = JSON.parsefile(joinpath(@__DIR__, "..", "gui", "src", "demos", "1.Entangler.Example.json"))
     payload["name"] = "../Export Demo?"
-    payload["simulationConfig"] = Dict("time" => 0.02, "timeStep" => 0.01)
+    payload["simulationConfig"] = Dict(
+      "time" => 0.02,
+      "timeStep" => 0.01,
+      "qubitRepresentation" => "CliffordRepr",
+      "qumodeRepresentation" => "GabsRepr",
+    )
     payload["variables"] = Any[
       Dict(
         "id" => "state-variable",
@@ -89,6 +94,10 @@
     @test occursin("QuantumSavory.T2Dephasing(; t2 = 5.0)", script)
     @test occursin("# Registers", script)
     @test occursin(
+      "representations = [QuantumSavory.CliffordRepr(), QuantumSavory.CliffordRepr()]",
+      script,
+    )
+    @test occursin(
       "push!(registers, QuantumSavory.Register(traits, representations, backgrounds))\n\n" *
       "# Resolve GUI node names to their one-based register indices.",
       script,
@@ -133,6 +142,17 @@
     @test count(==("Graphs.add_edge!(graph, 1, 2)"), eachline(IOBuffer(virtual_script))) == 1
     @test occursin("virtual-consumer", virtual_script)
     @test count(==("    (1, 2) => 0.125,"), eachline(IOBuffer(virtual_script))) == 1
+
+    mixed_representation_payload = deepcopy(payload)
+    mixed_representation_payload["net"]["nodes"][1]["data"]["slots"][1]["type"] = "Qumode"
+    mixed_representation_script =
+      WebQuantumSavory.generate_julia_script(mixed_representation_payload)
+    @test occursin(
+      "representations = [" *
+      "QuantumSavory.GabsRepr(QuantumSavory.Gabs.QuadBlockBasis), " *
+      "QuantumSavory.CliffordRepr()]",
+      mixed_representation_script,
+    )
 
     counterpart_id = "QuantumSavory.ProtocolZoo.EntanglementCounterpart"
     tagged_payload = deepcopy(payload)
@@ -525,6 +545,30 @@
     @test invalid_config_error isa WebQuantumSavory.APIError
     @test invalid_config_error.status_code == 400
     @test occursin("positive finite", invalid_config_error.message)
+
+    incompatible_representation = deepcopy(payload)
+    incompatible_representation["simulationConfig"]["qubitRepresentation"] = "GabsRepr"
+    incompatible_representation_error = try
+      WebQuantumSavory.generate_julia_script(incompatible_representation)
+      nothing
+    catch error
+      error
+    end
+    @test incompatible_representation_error isa WebQuantumSavory.APIError
+    @test incompatible_representation_error.status_code == 400
+    @test occursin("does not support Qubit slots", incompatible_representation_error.message)
+
+    unknown_representation = deepcopy(payload)
+    unknown_representation["simulationConfig"]["qumodeRepresentation"] = "UnknownRepr"
+    unknown_representation_error = try
+      WebQuantumSavory.generate_julia_script(unknown_representation)
+      nothing
+    catch error
+      error
+    end
+    @test unknown_representation_error isa WebQuantumSavory.APIError
+    @test unknown_representation_error.status_code == 400
+    @test occursin("Unknown representation", unknown_representation_error.message)
 
     invalid_protocol = deepcopy(payload)
     invalid_protocol["net"]["edges"][1]["data"]["protocols"][1]["type"] = "Main.NotAProtocol"
@@ -2068,6 +2112,11 @@
       @test isa(registers[1], Register)
       @test isa(slot_mapping, Dict)
       @test !isempty(slot_mapping)  # Should have some slots from node1
+      @test all(
+        representation isa QuantumOpticsRepr
+        for register in registers
+        for representation in register.reprs
+      )
 
       # No-noise slots still need a positional `nothing` entry so background
       # operations can index the register by slot. Exercise object, string, and
@@ -2086,6 +2135,19 @@
       @test isnothing(default_noise_registers[1].backgrounds[1])
       @test default_noise_registers[1].backgrounds[2] isa QuantumSavory.T1Decay
       @test all(isnothing, default_noise_registers[2].backgrounds)
+
+      selected_representation_payload = deepcopy(default_noise_payload)
+      selected_representation_payload["simulationConfig"] = Dict(
+        "qubitRepresentation" => "QuantumMCRepr",
+        "qumodeRepresentation" => "GabsRepr",
+      )
+      selected_representation_payload["net"]["nodes"][1]["data"]["slots"][2]["type"] = "Qumode"
+      selected_representation_validation =
+        WebQuantumSavory.validate_payload(selected_representation_payload)
+      selected_representation_registers, _, _ =
+        WebQuantumSavory.create_registers_from_nodes(selected_representation_validation)
+      @test selected_representation_registers[1].reprs[1] isa QuantumMCRepr
+      @test selected_representation_registers[1].reprs[2] isa QuantumSavory.GabsRepr
 
       # This is the operation that exposed the malformed background vector in
       # SwapperProt after it selected an assigned slot.

@@ -137,7 +137,12 @@ describe('createEmptyProject', () => {
       description: '',
       annotations: [],
       variables: [],
-      simulationConfig: { time: 1, timeStep: 0.1 },
+      simulationConfig: {
+        time: 1,
+        timeStep: 0.1,
+        qubitRepresentation: 'QuantumOpticsRepr',
+        qumodeRepresentation: 'QuantumOpticsRepr',
+      },
       net: {
         nodes: [],
         edges: [],
@@ -182,6 +187,8 @@ describe('decodeStoredProject', () => {
       time: 1,
       timeStep: 0.1,
       futureConfigField: 7,
+      qubitRepresentation: 'QuantumOpticsRepr',
+      qumodeRepresentation: 'QuantumOpticsRepr',
     })
 
     const [nodeB, nodeA] = decoded.project.net.nodes
@@ -234,7 +241,12 @@ describe('decodeStoredProject', () => {
       description: '',
       annotations: [],
       variables: [],
-      simulationConfig: { time: 1, timeStep: 0.1 },
+      simulationConfig: {
+        time: 1,
+        timeStep: 0.1,
+        qubitRepresentation: 'QuantumOpticsRepr',
+        qumodeRepresentation: 'QuantumOpticsRepr',
+      },
       net: {
         nodes: [],
         edges: [],
@@ -499,7 +511,10 @@ describe('backend payload codecs', () => {
     expect(payload).not.toHaveProperty('schemaVersion')
     expect(payload).not.toHaveProperty('description')
     expect(payload).not.toHaveProperty('annotations')
-    expect(payload).not.toHaveProperty('simulationConfig')
+    expect(payload.simulationConfig).toEqual({
+      qubitRepresentation: 'QuantumOpticsRepr',
+      qumodeRepresentation: 'QuantumOpticsRepr',
+    })
     expect(payload).not.toHaveProperty('platformInfo')
     expect(payload).not.toHaveProperty('uiGlobal')
     expect(payload.variables).toEqual([{
@@ -544,7 +559,7 @@ describe('backend payload codecs', () => {
     expect(project.net.nodes[0].data.protocols[0].parameters[2].selectedType).toBe('Float64')
   })
 
-  it('adds only the requested simulation configuration for script export', () => {
+  it('adds run and representation configuration for script export', () => {
     const project = createEmptyProject('Script')
     project.description = 'Not simulator input'
     project.annotations.push({
@@ -555,10 +570,22 @@ describe('backend payload codecs', () => {
       borderColor: '#000000',
       area: null,
     })
+    project.simulationConfig.qubitRepresentation = 'CliffordRepr'
+    project.simulationConfig.qumodeRepresentation = 'GabsRepr'
 
-    const payload = toScriptExportPayload(project, { time: 2.5, timeStep: 0.25, ui: true })
+    const payload = toScriptExportPayload(project, {
+      ...project.simulationConfig,
+      time: 2.5,
+      timeStep: 0.25,
+      ui: true,
+    })
 
-    expect(payload.simulationConfig).toEqual({ time: 2.5, timeStep: 0.25 })
+    expect(payload.simulationConfig).toEqual({
+      time: 2.5,
+      timeStep: 0.25,
+      qubitRepresentation: 'CliffordRepr',
+      qumodeRepresentation: 'GabsRepr',
+    })
     expect(payload).not.toHaveProperty('description')
     expect(payload).not.toHaveProperty('annotations')
     expect(payload).not.toHaveProperty('schemaVersion')
@@ -575,7 +602,27 @@ describe('backend payload codecs', () => {
     expect(payload).not.toBe(simulationPayload)
     expect(payload.net).toBe(simulationPayload.net)
     expect(payload.variables).toBe(simulationPayload.variables)
-    expect(payload.simulationConfig).toEqual({ time: 3, timeStep: 0.2 })
+    expect(payload.simulationConfig).toEqual({
+      time: 3,
+      timeStep: 0.2,
+      qubitRepresentation: 'QuantumOpticsRepr',
+      qumodeRepresentation: 'QuantumOpticsRepr',
+    })
+  })
+
+  it('normalizes stale representation choices at every payload boundary', () => {
+    const project = createEmptyProject('Stale representations')
+    project.simulationConfig.qubitRepresentation = 'GabsRepr'
+    project.simulationConfig.qumodeRepresentation = 'CliffordRepr'
+
+    expect(toSimulationPayload(project).simulationConfig).toEqual({
+      qubitRepresentation: 'QuantumOpticsRepr',
+      qumodeRepresentation: 'QuantumOpticsRepr',
+    })
+    expect(encodeStoredProject(project).simulationConfig).toMatchObject({
+      qubitRepresentation: 'QuantumOpticsRepr',
+      qumodeRepresentation: 'QuantumOpticsRepr',
+    })
   })
 })
 

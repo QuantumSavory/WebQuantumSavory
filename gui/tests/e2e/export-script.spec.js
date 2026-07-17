@@ -53,6 +53,14 @@ async function updateProject(page, update) {
     projectData.name = projectUpdate.name ?? projectData.name
     projectData.simulationConfig.time = projectUpdate.time ?? projectData.simulationConfig.time
     projectData.simulationConfig.timeStep = projectUpdate.timeStep ?? projectData.simulationConfig.timeStep
+    projectData.simulationConfig.qubitRepresentation = (
+      projectUpdate.qubitRepresentation
+      ?? projectData.simulationConfig.qubitRepresentation
+    )
+    projectData.simulationConfig.qumodeRepresentation = (
+      projectUpdate.qumodeRepresentation
+      ?? projectData.simulationConfig.qumodeRepresentation
+    )
     if (projectUpdate.variable) projectData.variables.push(projectUpdate.variable)
   }, update)
 }
@@ -90,6 +98,8 @@ test.describe('Export Script panel', () => {
       name: 'Export Demo',
       time: 2.5,
       timeStep: 0.25,
+      qubitRepresentation: 'CliffordRepr',
+      qumodeRepresentation: 'GabsRepr',
       variable: {
         id: 'variable-1',
         name: 'fidelity',
@@ -106,7 +116,12 @@ test.describe('Export Script panel', () => {
     await expect.poll(() => requests.length).toBe(1)
 
     expect(requests[0].name).toBe('Export Demo')
-    expect(requests[0].simulationConfig).toEqual({ time: 2.5, timeStep: 0.25 })
+    expect(requests[0].simulationConfig).toEqual({
+      time: 2.5,
+      timeStep: 0.25,
+      qubitRepresentation: 'CliffordRepr',
+      qumodeRepresentation: 'GabsRepr',
+    })
     expect(requests[0].variables).toEqual([{
       id: 'variable-1',
       name: 'fidelity',
