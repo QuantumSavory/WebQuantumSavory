@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added composable log filtering by severity, normalized App/Web API/Simulator source, and authoritative QuantumSavory simulator group, including canonical recovery for resumable protocol logs while retaining their structured metadata in searchable Raw JSON.
+
 ## 1.9.0
 
 - Added dependency-backed Bézier routing for physical links with typed smooth/sharp anchors, geodesic distance and propagation-delay badges, editable physical defaults and per-edge overrides, and schema-v1 legacy normalization.
