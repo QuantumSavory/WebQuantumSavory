@@ -267,20 +267,21 @@ Notes:
 
 ### CI checks
 
-GitHub Actions and Buildkite run the same four repository scripts:
+GitHub Actions and Buildkite run the same five repository scripts:
 
 ```bash
 ./ci/backend-unit.sh
+./ci/mcp-unit.sh
 ./ci/frontend-build.sh
 ./ci/backend-integration.sh
 ./ci/browser.sh
 ```
 
 Each script installs the locked project dependencies it needs, so it can run
-from a clean checkout once its language runtimes are available. The integration
-and browser scripts start a test-mode backend, wait up to 120 seconds for
-`/status`, and always stop it. On failure they preserve the backend log and any
-Playwright traces under the ignored `ci-artifacts/` directory.
+from a clean checkout once its language runtimes are available. The MCP,
+integration, and browser scripts start a test-mode backend, wait up to 120
+seconds for `/status`, and always stop it. On failure they preserve the backend
+log and any Playwright traces under the ignored `ci-artifacts/` directory.
 
 The browser script downloads the Chromium version locked by Playwright. On a
 new Linux machine, install the locked npm dependencies and its system packages
@@ -296,16 +297,16 @@ For Buildkite, configure the pipeline's upload step as
 uses an isolated, pipeline-specific depot. The official mise plugin installs
 the pinned mise release and the Node.js 24 toolchain declared in `mise.toml`.
 The browser step installs the locked Chromium binary and its Linux packages
-through Playwright. The integration and browser jobs share a concurrency group
-so overlapping builds cannot contend for ports 8000 and 5173.
+through Playwright. The MCP, integration, and browser jobs share a concurrency
+group so overlapping builds cannot contend for their fixed local ports.
 
 Each Linux agent must still provide Git, Bash, curl, wget, tar, and Python 3.
 Browser agents must use a Playwright-supported Debian/Ubuntu base and let the
 job install apt packages as root or through passwordless `sudo`. Agents must be
 able to download Julia, mise, Node.js, npm packages, and Chromium, and ports
-8000 and 5173 must be available. No queue name, secret, or container image is
-assumed by `.buildkite/pipeline.yml`. Configure Buildkite's GitHub integration
-to create builds for pull requests and pushes to `main`.
+8000, 8001, 5173, and 18001 must be available. No queue name, secret, or
+container image is assumed by `.buildkite/pipeline.yml`. Configure Buildkite's
+GitHub integration to create builds for pull requests and pushes to `main`.
 
 ## Automatic Cleanup of Inactive Simulations
 

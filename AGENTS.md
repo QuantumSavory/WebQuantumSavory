@@ -129,6 +129,7 @@ The checked-in CI entry points install their own project dependencies and can al
 
 ```sh
 ./ci/backend-unit.sh
+./ci/mcp-unit.sh
 ./ci/frontend-build.sh
 ./ci/backend-integration.sh
 ./ci/browser.sh
@@ -136,7 +137,11 @@ The checked-in CI entry points install their own project dependencies and can al
 
 `ci/frontend-build.sh` installs the locked frontend dependencies, runs the Vitest unit suite, and then creates the production build. The backend-integration and browser entry points reuse it, so GitHub Actions and Buildkite enforce the same unit-test-and-build sequence.
 
-`ci/run-with-server.sh` provides bounded readiness polling, failure logs, and cleanup for the integration and browser entry points. GitHub Actions and Buildkite use Julia 1.12 and Node.js 24. Buildkite provisions Julia, Node.js, and the Playwright Chromium dependencies during each relevant job; its smaller host baseline is documented in `README.md`.
+`ci/run-with-server.sh` provides bounded readiness polling, failure logs, and
+cleanup for the MCP, integration, and browser entry points. GitHub Actions and
+Buildkite use Julia 1.12 and Node.js 24. Buildkite provisions Julia, Node.js,
+and the Playwright Chromium dependencies during each relevant job; its smaller
+host baseline is documented in `README.md`.
 
 ## Change discipline
 
@@ -147,7 +152,9 @@ The checked-in CI entry points install their own project dependencies and can al
 - Frontend codec, session, lifecycle, composable, utility, or shared UI changes require `npm run test:unit` in `gui/` in addition to the broader checks appropriate to the behavior.
 - Keep strict annotation validation at codec/import boundaries and interactive geometry in `gui/src/utils/annotationGeometry.js`; world-wrapped pointer coordinates must be canonicalized or fail soft rather than throwing from rendering and drag handlers. Choose an attached area's edge from the free corner's displacement normalized to the annotation dimensions, ensure every nondegenerate area shares a positive edge segment, and expand that overlap to the full edge when the selection extends beyond the annotation along the tangent axis. Keep map layer IDs/order in `gui/src/utils/mapLayers.js`, marker ownership in `useMaplibreMarker`, and marker stacking in the shared `--app-z-map-*` tokens. Reuse the existing rectangle-layer and resize-handle styling; map components must preserve selected annotation object identity and release layers, sources, markers, and listeners during project transitions and unmount.
 - Prefer the smallest relevant check first, then broaden based on risk. Run backend unit tests for `src/` changes, integration tests for routes/contracts, and the GUI checks in `gui/AGENTS.md` for frontend-facing changes.
-- GitHub Actions and Buildkite both run backend unit, frontend unit/version/build, backend integration, and full headless Chromium checks through the shared `ci/` scripts.
+- GitHub Actions and Buildkite both run backend unit, MCP unit/transport,
+  frontend unit/version/build, backend integration, and full headless Chromium
+  checks through the shared `ci/` scripts.
 - Do not commit root or test manifests, `node_modules`, logs, SQLite runtime files, Genie build/cache/session output, Playwright results, or generated Vite output under `public/`.
 - Edit `gui/index.html`, `gui/public/`, or `gui/src/` for frontend changes; never edit generated `public/index.html`, `public/vite.svg`, or `public/assets/`.
 - Keep unrelated cleanup out of behavioral changes, avoid broad formatting churn, and preserve user work already present in the tree.

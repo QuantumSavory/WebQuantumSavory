@@ -11,6 +11,17 @@ steps:
           version: "1.12"
     timeout_in_minutes: 45
 
+  - label: ":julia: MCP unit"
+    key: mcp-unit
+    command: ./ci/mcp-unit.sh
+    concurrency: 1
+    concurrency_group: "webquantumsavory/server"
+    plugins:
+      - JuliaCI/julia#v1:
+          version: "1.12"
+    artifact_paths: "ci-artifacts/**/*"
+    timeout_in_minutes: 60
+
   - label: ":nodejs: Frontend version and build"
     key: frontend-build
     command: ./ci/frontend-build.sh
