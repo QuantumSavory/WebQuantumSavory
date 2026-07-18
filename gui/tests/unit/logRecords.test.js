@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   areConsecutiveLogsEqual,
+  emptyStructuredLogFilters,
+  logMatchesStructuredFilters,
   normalizeLogGroup,
   normalizeLogRecord,
   normalizeLogSeverity,
   normalizeLogSource,
-  parseRawLogDetails
+  parseRawLogDetails,
+  structuredLogFacets
 } from '../../src/utils/logRecords'
 
 describe('log record normalization', () => {
@@ -91,5 +94,110 @@ describe('log record normalization', () => {
     expect(toJSON).not.toHaveBeenCalled()
     expect(normalized.rawText).toContain('complete backend state')
     expect(toJSON).toHaveBeenCalledOnce()
+  })
+
+  it('promotes structured fields, retains unknown metadata, and resolves related node names', () => {
+    const normalized = normalizeLogRecord({
+      id: 'structured-1',
+      timestamp: '2026-07-18T12:00:00.000Z',
+      source: 'Simulator',
+      severity: 'debug',
+      message: 'Entangled a pair',
+      raw: {
+        group: 'protocol',
+        event: 'pair_entangled',
+        sim_time: 2.5,
+        sim_process_id: '9007199254740992',
+        protocol: 'EntanglerProt',
+        nodes: [1, 2],
+        src_node: 1,
+        remote_nodes: [3],
+        pair_id: '9007199254740993',
+        slots: [2, 4]
+      }
+    }, {
+      nodes: [{ name: 'Amherst' }, { name: 'Cambridge' }, { name: 'Boston' }]
+    })
+
+    expect(normalized).toMatchObject({
+      group: 'protocol',
+      event: 'pair_entangled',
+      simTime: 2.5,
+      simProcessId: '9007199254740992',
+      protocol: 'EntanglerProt',
+      participatingNodeIds: ['1', '2'],
+      relatedNodeIds: ['1', '2', '3'],
+      nodeNames: ['Amherst', 'Cambridge', 'Boston'],
+      isStructured: true
+    })
+    expect(normalized.eventData).toMatchObject({
+      src_node: 1,
+      remote_nodes: [3],
+      pair_id: '9007199254740993',
+      slots: [2, 4]
+    })
+    expect(normalized.searchText).toContain('cambridge')
+    expect(normalized.searchText).toContain('pair_entangled')
+  })
+
+  it('combines filter categories with AND and values within a category with OR', () => {
+    const records = [
+      {
+        source: 'Simulator',
+        severity: 'debug',
+        message: 'first',
+        group: 'protocol',
+        event: 'pair_entangled',
+        protocol: 'EntanglerProt',
+        sim_time: 2,
+        nodes: [1, 2]
+      },
+      {
+        source: 'Simulator',
+        severity: 'warning',
+        message: 'second',
+        group: 'protocol',
+        event: 'pair_entangled',
+        protocol: 'CustomProtocol',
+        sim_time: 3,
+        client_nodes: [2, 3]
+      }
+    ].map(record => normalizeLogRecord(record))
+    const filters = {
+      ...emptyStructuredLogFilters(),
+      severity: ['debug', 'warning'],
+      source: ['Simulator'],
+      group: ['protocol'],
+      event: ['pair_entangled'],
+      node: ['2'],
+      timeFrom: '2',
+      timeTo: '3'
+    }
+
+    expect(records.map(record => logMatchesStructuredFilters(record, filters)))
+      .toEqual([true, true])
+    expect(logMatchesStructuredFilters(records[0], { ...filters, protocol: ['CustomProtocol'] }))
+      .toBe(false)
+    expect(logMatchesStructuredFilters(records[0], { ...filters, timeFrom: '2', timeTo: '2' }))
+      .toBe(true)
+    expect(logMatchesStructuredFilters(records[1], { ...filters, timeFrom: '2', timeTo: '2' }))
+      .toBe(false)
+  })
+
+  it('discovers custom event, protocol, and related-node facets', () => {
+    const facets = structuredLogFacets([
+      normalizeLogRecord({
+        source: 'Simulator',
+        message: 'custom',
+        group: 'protocol',
+        event: 'custom_event',
+        protocol: 'UserProtocol',
+        dst_node: 17
+      })
+    ])
+
+    expect(facets.event).toEqual(['custom_event'])
+    expect(facets.protocol).toEqual(['UserProtocol'])
+    expect(facets.node).toEqual(['17'])
   })
 })

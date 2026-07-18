@@ -2793,6 +2793,12 @@
       :ordinary_error,
       @__FILE__,
       @__LINE__;
+      event=:pair_entangled,
+      sim_time=1.25,
+      sim_process_id=Int128(9_007_199_254_740_992),
+      protocol=:ExampleProtocol,
+      nodes=(1, 2),
+      pair_id=Int128(9_007_199_254_740_993),
       attempt=2,
       context=Dict(:slot => 3, :active => true),
       exception=(captured_error, captured_backtrace),
@@ -2808,7 +2814,13 @@
     @test captured["source"] == "Simulator"
     @test captured["severity"] == "error"
     @test captured["message"] == "ordinary simulator error"
-    @test captured["group"] == string(QuantumSavory.LOG_GROUPS.protocol)
+    @test captured["group"] == "protocol"
+    @test captured["event"] == "pair_entangled"
+    @test captured["sim_time"] == 1.25
+    @test captured["sim_process_id"] == "9007199254740992"
+    @test captured["protocol"] == "ExampleProtocol"
+    @test captured["nodes"] == Any[1, 2]
+    @test captured["pair_id"] == "9007199254740993"
     @test captured["attempt"] == 2
     @test captured["context"] == Dict("slot" => 3, "active" => true)
     @test captured["exception"]["exception_type"] == "ErrorException"
@@ -2820,26 +2832,82 @@
     round_tripped_logs = JSON.parse(JSON.json(structured_state.log_events))
     @test round_tripped_logs isa Vector
     @test round_tripped_logs[1]["group"] == string(QuantumSavory.LOG_GROUPS.protocol)
+    @test WebQuantumSavory.Logger.json_safe(Int128(9_007_199_254_740_991)) ==
+      Int128(9_007_199_254_740_991)
+    @test WebQuantumSavory.Logger.json_safe(Int128(-9_007_199_254_740_991)) ==
+      Int128(-9_007_199_254_740_991)
+    @test WebQuantumSavory.Logger.json_safe(Int128(9_007_199_254_740_992)) ==
+      "9007199254740992"
+    @test WebQuantumSavory.Logger.json_safe(Int128(-9_007_199_254_740_992)) ==
+      "-9007199254740992"
 
     resumable_state = WebQuantumSavory.State(name="resumable_structured_logs")
     resumable_logger = WebQuantumSavory.Logger.make_logger(
       resumable_state;
       console=Logging.NullLogger(),
     )
+    resumable_fields = [
+      Symbol("_group_15") => QuantumSavory.LOG_GROUPS.protocol,
+      Symbol("event_16") => :pair_entangled,
+      Symbol("_fsmi.round_1") => 2,
+      Symbol("slots_23") => (1, 2),
+      Symbol("_fsmi.pair_id_22") => Int128(9_007_199_254_740_993),
+    ]
     Logging.handle_message(
       resumable_logger,
       Logging.Debug,
-      "resumable protocol log",
+      "resumable protocol event",
       QuantumSavory.ProtocolZoo,
       :ProtocolZoo,
-      :resumable_debug,
+      :resumable_event,
       @__FILE__,
       @__LINE__;
-      _group_4=QuantumSavory.LOG_GROUPS.protocol,
+      resumable_fields...,
     )
-    resumable_event = only(resumable_state.log_events)
-    @test resumable_event["group"] == string(QuantumSavory.LOG_GROUPS.protocol)
-    @test resumable_event["_group_4"] == string(QuantumSavory.LOG_GROUPS.protocol)
+    resumable_record = only(resumable_state.log_events)
+    @test resumable_record["group"] == "protocol"
+    @test resumable_record["event"] == "pair_entangled"
+    @test resumable_record["round"] == 2
+    @test resumable_record["slots"] == Any[1, 2]
+    @test resumable_record["pair_id"] == "9007199254740993"
+    @test !any(occursin(r"_\d+$", key) for key in keys(resumable_record))
+
+    custom_state = WebQuantumSavory.State(name="custom_module_structured_logs")
+    custom_logger = WebQuantumSavory.Logger.make_logger(
+      custom_state;
+      console=Logging.NullLogger(),
+    )
+    custom_module = Module(:CustomStructuredLogModule)
+    Core.eval(custom_module, :(using Logging))
+    Core.eval(custom_module, quote
+      function emit_test_records(logger, stable_group)
+        Logging.with_logger(logger) do
+          @debug(
+            "custom protocol event",
+            _group=stable_group,
+            event=:custom_event,
+            protocol=:CustomProtocol,
+          )
+          @debug("unrelated custom event", _group=:unrelated, event=:unrelated_event)
+        end
+      end
+    end)
+    Core.eval(custom_module, :emit_test_records)(
+      custom_logger,
+      QuantumSavory.LOG_GROUPS.protocol,
+    )
+    @test length(custom_state.log_events) == 1
+    @test only(custom_state.log_events)["message"] == "custom protocol event"
+    @test only(custom_state.log_events)["module"] == "Main.CustomStructuredLogModule"
+    @test only(custom_state.log_events)["group"] == "protocol"
+    @test only(custom_state.log_events)["event"] == "custom_event"
+    @test !Logging.shouldlog(
+      custom_logger,
+      Logging.Debug,
+      custom_module,
+      :unrelated,
+      :unrelated_event,
+    )
 
     silent_state = WebQuantumSavory.State(name="silent_structured_logs")
     silent_logger = WebQuantumSavory.Logger.make_logger(

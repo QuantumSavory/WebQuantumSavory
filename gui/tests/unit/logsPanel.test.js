@@ -21,6 +21,32 @@ function log(overrides = {}) {
   }
 }
 
+function structuredLog(overrides = {}) {
+  return log({
+    source: 'Simulator',
+    level: 'debug',
+    message: 'Entangled a pair',
+    raw: {
+      group: 'protocol',
+      event: 'pair_entangled',
+      sim_time: 2.5,
+      sim_process_id: '9007199254740992',
+      protocol: 'EntanglerProt',
+      nodes: [1, 2],
+      pair_id: '9007199254740993',
+      slots: [2, 4]
+    },
+    ...overrides
+  })
+}
+
+function checkboxWithLabel(wrapper, label) {
+  const option = wrapper.findAll('.filter-options label')
+    .find(candidate => candidate.text() === label)
+  if (!option) throw new Error(`Missing filter option: ${label}`)
+  return option.get('input')
+}
+
 describe('log record presentation model', () => {
   it('normalizes legacy sources, preserves simulator severity, and searches structured fields', () => {
     const normalized = normalizeLogRecord(log({
@@ -43,9 +69,14 @@ describe('log record presentation model', () => {
     expect(normalized.searchText).toContain('simulator')
   })
 
-  it('only collapses consecutive records when message, severity, and source all match', () => {
+  it('never collapses distinct stable backend records with matching messages', () => {
     const base = log({ message: 'same' })
-    expect(areConsecutiveLogsEqual(base, { ...base, id: 'log-2' })).toBe(true)
+    expect(areConsecutiveLogsEqual(base, { ...base, id: 'log-2' })).toBe(false)
+    expect(areConsecutiveLogsEqual(base, { ...base })).toBe(true)
+    expect(areConsecutiveLogsEqual(
+      { ...base, id: undefined },
+      { ...base, id: undefined }
+    )).toBe(true)
     expect(areConsecutiveLogsEqual(base, { ...base, id: 'log-2', level: 'error' })).toBe(false)
     expect(areConsecutiveLogsEqual(base, { ...base, id: 'log-2', source: 'Simulator' })).toBe(false)
     expect(areConsecutiveLogsEqual(base, {
@@ -122,19 +153,18 @@ describe('LogsPanel', () => {
     const visibleIds = () => new Set(
       wrapper.findAll('.log-entry-container').map(entry => entry.attributes('data-log-id'))
     )
-    const warningFilter = wrapper.get('[data-log-level-filter="warning"]')
-    const apiFilter = wrapper.get('[data-log-source-filter="Web API"]')
-    const protocolFilter = wrapper.get('[data-log-group-filter="protocol"]')
-    const networkFilter = wrapper.get('[data-log-group-filter="network"]')
+    const filterFieldset = label => wrapper.findAll('.filter-fieldset')
+      .find(fieldset => fieldset.find('legend').text() === label)
+    const warningFilter = filterFieldset('Severity').get('input[value="warning"]')
+    const apiFilter = filterFieldset('Source').get('input[value="Web API"]')
+    const protocolFilter = filterFieldset('Group').get('input[value="protocol"]')
+    const networkFilter = filterFieldset('Group').get('input[value="network"]')
 
-    expect(wrapper.findAll('[data-log-level-filter]')).toHaveLength(6)
-    expect(wrapper.findAll('[data-log-source-filter]')).toHaveLength(3)
-    expect(wrapper.findAll('[data-log-group-filter]')).toHaveLength(2)
-    expect(warningFilter.attributes('aria-label')).toBe('Filter Warning severity logs')
-    expect(apiFilter.attributes('aria-label')).toBe('Filter Web API source logs')
-    expect(protocolFilter.attributes('aria-label'))
-      .toBe('Filter Protocol simulation group logs')
-    expect(warningFilter.attributes('aria-pressed')).toBe('true')
+    expect(filterFieldset('Severity').findAll('input[type="checkbox"]')).toHaveLength(6)
+    expect(filterFieldset('Source').findAll('input[type="checkbox"]')).toHaveLength(3)
+    expect(filterFieldset('Group').findAll('input[type="checkbox"]')).toHaveLength(3)
+    expect(filterFieldset('Group').text()).toContain('custom')
+    expect(warningFilter.element.checked).toBe(false)
     expect(visibleIds()).toEqual(new Set([
       'app',
       'api',
@@ -146,27 +176,20 @@ describe('LogsPanel', () => {
     expect(wrapper.get('[data-log-id="unknown"] .log-source').text())
       .toBe('[Simulator · Custom]')
 
-    await warningFilter.trigger('click')
-    expect(warningFilter.attributes('aria-pressed')).toBe('false')
-    expect(visibleIds().has('protocol')).toBe(false)
-    await warningFilter.trigger('click')
+    await warningFilter.setValue(true)
+    expect(visibleIds()).toEqual(new Set(['protocol']))
+    await warningFilter.setValue(false)
 
-    await apiFilter.trigger('click')
-    expect(visibleIds().has('api')).toBe(false)
+    await apiFilter.setValue(true)
+    expect(visibleIds()).toEqual(new Set(['api']))
+    await apiFilter.setValue(false)
 
-    await protocolFilter.trigger('click')
-    await networkFilter.trigger('click')
-    expect(protocolFilter.attributes('aria-pressed')).toBe('false')
-    expect(networkFilter.attributes('aria-pressed')).toBe('false')
-    expect(visibleIds().has('protocol')).toBe(false)
-    expect(visibleIds().has('network')).toBe(false)
-    expect(visibleIds().has('unknown')).toBe(true)
-    expect(visibleIds().has('ungrouped')).toBe(true)
+    await protocolFilter.setValue(true)
+    await networkFilter.setValue(true)
+    expect(visibleIds()).toEqual(new Set(['protocol', 'network']))
 
     await wrapper.get('input[aria-label="Search logs"]').setValue('protocol')
-    expect(wrapper.findAll('.log-entry-container')).toHaveLength(0)
-    expect(wrapper.get('.empty-logs').text())
-      .toBe('No logs match your search: "protocol"')
+    expect(visibleIds()).toEqual(new Set(['protocol']))
   })
 
   it('normalizes source classes, marks backend text as monospaced, and styles panic distinctly', () => {
@@ -329,5 +352,160 @@ describe('LogsPanel', () => {
     })
     expect(wrapper.get('.message-disclosure').attributes('aria-expanded')).toBe('true')
     expect(wrapper.get('.log-message-details').text()).toContain('Replacement object')
+  })
+
+  it('uses simulated time, resolved node names, and structured metadata labels', () => {
+    const wrapper = mount(LogsPanel, {
+      props: {
+        nodes: [{ name: 'Amherst' }, { name: 'Cambridge' }],
+        logs: [structuredLog()]
+      }
+    })
+
+    expect(wrapper.get('.log-sim-time').text()).toBe('t=2.5')
+    expect(wrapper.get('.log-sim-time').attributes('title')).toContain('Captured')
+    expect(wrapper.findAll('.log-metadata-badge').map(badge => badge.text())).toEqual([
+      'debug',
+      'protocol / pair_entangled',
+      'EntanglerProt',
+      'Amherst',
+      'Cambridge'
+    ])
+    expect(wrapper.get('.log-match-count').text()).toBe('1 matching / 1 total')
+  })
+
+  it('discovers custom facets and applies AND/OR filters with inclusive time bounds', async () => {
+    const wrapper = mount(LogsPanel, {
+      props: {
+        nodes: [{ name: 'Amherst' }, { name: 'Cambridge' }, { name: 'Boston' }],
+        logs: [
+          structuredLog({ id: 'first' }),
+          structuredLog({
+            id: 'second',
+            level: 'warning',
+            raw: {
+              group: 'protocol',
+              event: 'pair_entangled',
+              sim_time: 3,
+              protocol: 'CustomProtocol',
+              nodes: [2, 3]
+            }
+          }),
+          structuredLog({
+            id: 'third',
+            raw: {
+              group: 'network',
+              event: 'message_forwarded',
+              sim_time: 3,
+              protocol: 'RoutingProtocol',
+              nodes: [1, 3]
+            }
+          })
+        ]
+      }
+    })
+
+    await wrapper.get('.log-filters summary').trigger('click')
+    expect(wrapper.get('.log-filter-popover').text()).toContain('CustomProtocol')
+    expect(wrapper.get('.log-filter-popover').text()).toContain('message_forwarded')
+
+    await checkboxWithLabel(wrapper, 'Debug').setValue(true)
+    await checkboxWithLabel(wrapper, 'Warning').setValue(true)
+    await checkboxWithLabel(wrapper, 'protocol').setValue(true)
+    await checkboxWithLabel(wrapper, 'pair_entangled').setValue(true)
+    await checkboxWithLabel(wrapper, 'Cambridge').setValue(true)
+    await wrapper.get('input[aria-label="Simulated time from"]').setValue('2.5')
+    await wrapper.get('input[aria-label="Simulated time to"]').setValue('3')
+
+    expect(wrapper.findAll('.log-entry-container').map(entry => entry.attributes('data-log-id')))
+      .toEqual(['second', 'first'])
+    expect(wrapper.get('.log-match-count').text()).toBe('2 matching / 3 total')
+
+    await checkboxWithLabel(wrapper, 'CustomProtocol').setValue(true)
+    expect(wrapper.findAll('.log-entry-container')).toHaveLength(1)
+    expect(wrapper.get('.log-entry-container').attributes('data-log-id')).toBe('second')
+  })
+
+  it('searches resolved node names and exposes removable chips and clear-all', async () => {
+    const wrapper = mount(LogsPanel, {
+      props: {
+        nodes: [{ name: 'Amherst' }, { name: 'Cambridge' }],
+        logs: [structuredLog()]
+      }
+    })
+
+    await wrapper.get('input[aria-label="Search logs"]').setValue('Cambridge')
+    expect(wrapper.findAll('.log-entry-container')).toHaveLength(1)
+    await wrapper.get('.log-filters summary').trigger('click')
+    await checkboxWithLabel(wrapper, 'pair_entangled').setValue(true)
+    expect(wrapper.get('.active-filter-chip').text()).toContain('Event: pair_entangled')
+
+    await wrapper.get('.active-filter-chip').trigger('click')
+    expect(wrapper.find('.active-filter-chip').exists()).toBe(false)
+
+    await checkboxWithLabel(wrapper, 'protocol').setValue(true)
+    await wrapper.get('.clear-all-filters').trigger('click')
+    expect(wrapper.get('input[aria-label="Search logs"]').element.value).toBe('')
+    expect(wrapper.find('.active-filter-chip').exists()).toBe(false)
+    expect(wrapper.findAll('.log-entry-container')).toHaveLength(1)
+  })
+
+  it('shows an explicit latest-match limit and resets explorer state on clear and project change', async () => {
+    const wrapper = mount(LogsPanel, {
+      props: {
+        projectKey: 'project-a',
+        maxLogs: 1,
+        logs: [
+          structuredLog({ id: 'first' }),
+          structuredLog({ id: 'second', raw: { event: 'custom_event', sim_time: 4 } })
+        ]
+      }
+    })
+
+    expect(wrapper.get('.log-display-limit-notice').text())
+      .toBe('Showing the latest 1 of 2 matching logs.')
+    await wrapper.get('input[aria-label="Search logs"]').setValue('custom_event')
+    await wrapper.get('.message-disclosure').trigger('click')
+    await wrapper.get('.raw-json-button').trigger('click')
+    expect(wrapper.find('.log-message-details').exists()).toBe(true)
+
+    await wrapper.setProps({ projectKey: 'project-b' })
+    expect(wrapper.get('input[aria-label="Search logs"]').element.value).toBe('')
+    expect(wrapper.find('.log-message-details').exists()).toBe(false)
+    expect(wrapper.find('.log-raw-details').exists()).toBe(false)
+
+    await wrapper.get('input[aria-label="Search logs"]').setValue('custom_event')
+    await wrapper.get('.clear-logs-btn').trigger('click')
+    expect(wrapper.emitted('clear-logs')).toHaveLength(1)
+    expect(wrapper.get('input[aria-label="Search logs"]').element.value).toBe('')
+  })
+
+  it('renders structured context, generic event data, and complete panic fields', async () => {
+    const wrapper = mount(LogsPanel, {
+      props: {
+        nodes: [{ name: 'Amherst' }, { name: 'Cambridge' }],
+        logs: [structuredLog({
+          id: 'panic-structured',
+          level: 'panic',
+          message: 'Protocol failed',
+          fullMessage: 'BoundsError: complete exception message',
+          exceptionType: 'BoundsError',
+          stacktrace: 'frame one\nframe two'
+        })]
+      }
+    })
+
+    await wrapper.get('.message-disclosure').trigger('click')
+    const details = wrapper.get('.log-message-details')
+    expect(details.attributes('aria-label')).toBe('Structured simulator details')
+    expect(details.text()).toContain('Wall time')
+    expect(details.text()).toContain('Simulation time')
+    expect(details.text()).toContain('Amherst (#1), Cambridge (#2)')
+    expect(details.text()).toContain('Pair Id')
+    expect(details.text()).toContain('9007199254740993')
+    expect(details.get('.panic-exception-message').text())
+      .toBe('BoundsError: complete exception message')
+    expect(details.get('.panic-exception-type').text()).toBe('BoundsError')
+    expect(details.get('.panic-stacktrace').text()).toContain('frame two')
   })
 })

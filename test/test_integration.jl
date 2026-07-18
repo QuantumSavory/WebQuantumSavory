@@ -877,7 +877,33 @@
       @test final_state["simulation"]["simulation_error"] === nothing
       @test final_state["simulation"]["simulation_progress"] >= 10
 
-      # 5. Clean up
+      # 5. Retrieve a real structured Simulator record through the public route.
+      logs_response = make_request(
+        "GET",
+        "/logs/$workflow_name",
+        query=Dict("purge" => "false"),
+      )
+      @test logs_response.status == 200
+      logs_data = parse_response(logs_response)
+      structured_record = findfirst(logs_data["logs"]) do record
+        get(record, "source", nothing) == "Simulator" &&
+          get(record, "group", nothing) == "protocol" &&
+          haskey(record, "event") &&
+          haskey(record, "sim_time") &&
+          haskey(record, "sim_process_id") &&
+          haskey(record, "protocol") &&
+          haskey(record, "nodes")
+      end
+      @test structured_record !== nothing
+      if structured_record !== nothing
+        record = logs_data["logs"][structured_record]
+        @test record["event"] isa String
+        @test record["sim_time"] isa Number
+        @test record["protocol"] isa String
+        @test record["nodes"] isa Vector
+      end
+
+      # 6. Clean up
       destroy_response = make_request("POST", "/destroy_simulation", body=Dict("name" => workflow_name))
       @test destroy_response.status == 200
       destroy_data = parse_response(destroy_response)

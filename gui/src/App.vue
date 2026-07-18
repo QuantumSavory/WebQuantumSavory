@@ -110,6 +110,7 @@ const annotationCreationEnabled = ref(false)
 // Log management functions
 const applicationLogs = ref([])
 const maxLogs = ref(1000)
+const logsResetKey = ref(0)
 const applicationLogIds = new Map()
 
 function rememberApplicationLogId(id, logEntry) {
@@ -151,7 +152,11 @@ function addLog(level, message, source = 'App', extendedInfo = null, options = {
 
   // Check if this message is the same as the last log entry
   const lastLog = applicationLogs.value[applicationLogs.value.length - 1];
-  if (lastLog && areConsecutiveLogsEqual(lastLog, incomingLog)) {
+  if (
+    !stableId
+    && lastLog
+    && areConsecutiveLogsEqual(lastLog, incomingLog)
+  ) {
     // Update the timestamp of the existing log entry
     lastLog.timestamp = options.timestamp || new Date().toISOString();
     lastLog.count = (lastLog.count || 1) + 1;
@@ -667,6 +672,7 @@ const appVersion = frontendBuildInfo.appVersion
 function clearLogs() {
   applicationLogs.value = []
   applicationLogIds.clear()
+  logsResetKey.value += 1
 }
 
 function openRepeaterChainGenerator() {
@@ -1287,6 +1293,7 @@ onUnmounted(() => {
     <div ref="bottomPanelContainerElement" class="logs-panel-container">
       <BottomPanel
         :logs="applicationLogs"
+        :logs-reset-key="logsResetKey"
         :max-logs="200"
         :show-timestamps="true"
         :allow-clear="true"

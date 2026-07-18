@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Added composable log filtering by severity, normalized App/Web API/Simulator source, and authoritative QuantumSavory simulator group, including canonical recovery for resumable protocol logs while retaining their structured metadata in searchable Raw JSON.
+- Added a structured simulation log explorer with extensible group, event, protocol,
+  node, severity, source, and simulated-time filtering; exact large identities;
+  node-name resolution; structured event context; and legacy-log compatibility.
 
 ## 1.9.0
 

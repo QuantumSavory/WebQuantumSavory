@@ -13,6 +13,45 @@ const MAX_LEVEL = Logging.Error
 const EVENT_SEQUENCE = Base.Threads.Atomic{UInt64}(0)
 const DEFAULT_SOURCE = "Simulator"
 const RESERVED_LOG_GROUP_KEY = r"^_group(?:_\d+)?$"
+const JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991
+const STABLE_LOG_GROUPS = Set(values(QuantumSavory.LOG_GROUPS))
+const RESUMABLE_LOG_FIELDS = Set([
+  "_group",
+  "assigned",
+  "attempts",
+  "client_nodes",
+  "client_slot",
+  "component",
+  "correction",
+  "dims",
+  "dst_node",
+  "dst_slot",
+  "event",
+  "flow_id",
+  "local_chief_idx",
+  "locked",
+  "measurement_xx",
+  "measurement_zz",
+  "message_type",
+  "node",
+  "nqubits",
+  "observed_subsystems",
+  "pair_id",
+  "permit_forward",
+  "remote_nodes",
+  "retry_after_s",
+  "round",
+  "rounds",
+  "sequence_number",
+  "slot",
+  "slots",
+  "src",
+  "src_node",
+  "src_slot",
+  "switch_slot",
+  "syndrome",
+  "wait_mode",
+])
 
 ultimateparent(mod) = mod === parentmodule(mod) ? mod : ultimateparent(parentmodule(mod))
 
@@ -104,7 +143,9 @@ function json_safe(value, depth::Int=0)
   value isa Symbol && return string(value)
   value isa Dates.TimeType && return string(value)
   value isa Logging.LogLevel && return severity_name(value)
-  value isa Integer && return value
+  if value isa Integer
+    return -JS_MAX_SAFE_INTEGER <= value <= JS_MAX_SAFE_INTEGER ? value : string(value)
+  end
   if value isa AbstractFloat
     return isfinite(value) ? value : string(value)
   end
@@ -168,6 +209,30 @@ function _add_extra_fields!(event::Dict{String,Any}, fields)
   return event
 end
 
+function _canonical_captured_key(raw_key)
+  key = string(raw_key)
+  startswith(key, "_fsmi.") && (key = key[7:end])
+  matched = match(r"^(.*)_\d+$", key)
+  if matched !== nothing && matched.captures[1] in RESUMABLE_LOG_FIELDS
+    return matched.captures[1]
+  end
+  return key
+end
+
+function _canonical_captured_fields(fields)
+  canonical = Pair{String,Any}[]
+  group_override = nothing
+  for (raw_key, value) in fields
+    key = _canonical_captured_key(raw_key)
+    if key == "_group" && value in STABLE_LOG_GROUPS
+      group_override = value
+    else
+      push!(canonical, key => value)
+    end
+  end
+  return canonical, group_override
+end
+
 # Custom logger that captures logs into state while also displaying them.
 struct CapturingLogger{L<:Logging.AbstractLogger} <: Logging.AbstractLogger
   console::L
@@ -177,22 +242,24 @@ end
 Logging.min_enabled_level(logger::CapturingLogger) = MIN_LEVEL
 
 function Logging.shouldlog(logger::CapturingLogger, level, _module, group, id)
-  # Only QuantumSavory internals are intercepted here. WebQuantumSavory emits
-  # its own records explicitly through `log_event`.
-  return MIN_LEVEL <= level <= MAX_LEVEL && ultimateparent(_module) === QuantumSavory
+  # QuantumSavory's module remains a fallback for legacy records that predate
+  # stable groups. External protocol modules opt in by using an exported group.
+  trusted_origin = ultimateparent(_module) === QuantumSavory || group in STABLE_LOG_GROUPS
+  return MIN_LEVEL <= level <= MAX_LEVEL && trusted_origin
 end
 
 Logging.catch_exceptions(logger::CapturingLogger) = false
 
 function Logging.handle_message(logger::CapturingLogger, level, message, _module, group, id, filepath, line; kwargs...)
   try
+    fields, group_override = _canonical_captured_fields(kwargs)
     event = _base_event(level, message)
     event["module"] = string(_module)
-    event["group"] = json_safe(_canonical_log_group(group, kwargs))
+    event["group"] = json_safe(something(group_override, _canonical_log_group(group, kwargs)))
     event["logging_id"] = json_safe(id)
     event["file"] = string(filepath)
     event["line"] = line
-    _add_extra_fields!(event, kwargs)
+    _add_extra_fields!(event, fields)
     push!(logger.state.log_events, event)
   catch error
     # Log capture is best effort and must never interrupt the simulation.
