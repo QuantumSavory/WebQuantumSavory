@@ -337,6 +337,12 @@
       ),
     )
     @test fetch(concurrently_waiting) == fetch(retry_waiting)
+    retry_activity = filter(
+      record -> get(record, "phase", "") == "queued" &&
+        get(record, "operation_id", "") == "concurrent-retry",
+      WebQuantumSavory.mcp_activity(hub; limit=500)["activity"],
+    )
+    @test length(retry_activity) == 1
 
     cached = WebQuantumSavory.enqueue_browser_command!(
       hub,
@@ -374,14 +380,18 @@
       "binding_id" => binding["binding_id"],
       "generation" => 1,
     )
-    waiting = @async WebQuantumSavory.enqueue_browser_command!(
-      hub,
-      Dict("type" => "design_command");
-      operation_id="stale-success",
-      expected_revision=0,
-      mutates_design=true,
-      timeout_seconds=2,
-    )
+    waiting = @async try
+      WebQuantumSavory.enqueue_browser_command!(
+        hub,
+        Dict("type" => "design_command");
+        operation_id="stale-success",
+        expected_revision=0,
+        mutates_design=true,
+        timeout_seconds=2,
+      )
+    catch error
+      error
+    end
     command = WebQuantumSavory.next_browser_command!(hub, owner; timeout_seconds=1)
     WebQuantumSavory.commit_gui_snapshot!(
       hub,
@@ -415,12 +425,108 @@
     @test mismatch isa WebQuantumSavory.APIError
     @test mismatch.error_code == "PROJECT_CHANGED"
     @test WebQuantumSavory.collaboration_status(hub)["binding"]["desynchronized"]
+    outcome = fetch(waiting)
+    @test outcome isa WebQuantumSavory.APIError
+    @test outcome.error_code == "OUTCOME_UNKNOWN"
+    @test isempty(hub.pending)
     @test WebQuantumSavory.unbind_editor!(hub, owner)["success"]
-    @test_throws TaskFailedException fetch(waiting)
+  end
+
+  @testset "acknowledgement mismatches immediately cancel pending commands" begin
+    function start_pending_command(; deliver::Bool)
+      hub = WebQuantumSavory.CollaborationHub()
+      binding = WebQuantumSavory.bind_editor!(hub, binding_request())
+      owner = Dict(
+        "binding_id" => binding["binding_id"],
+        "generation" => 1,
+      )
+      waiting = @async try
+        WebQuantumSavory.enqueue_browser_command!(
+          hub,
+          Dict("type" => "design_command");
+          operation_id="mismatch-operation",
+          expected_revision=0,
+          mutates_design=true,
+          timeout_seconds=2,
+        )
+      catch error
+        error
+      end
+      @test timedwait(
+        () -> lock(hub.lock) do
+          !isempty(hub.pending)
+        end,
+        1;
+        pollint=0.01,
+      ) == :ok
+      command = deliver ?
+        WebQuantumSavory.next_browser_command!(hub, owner; timeout_seconds=1) :
+        nothing
+      return (; hub, owner, waiting, command)
+    end
+
+    undelivered = start_pending_command(deliver=false)
+    unknown_command = try
+      WebQuantumSavory.commit_browser_command!(
+        undelivered.hub,
+        Dict(
+          undelivered.owner...,
+          "command_id" => "unknown-command",
+          "base_revision" => 0,
+          "success" => false,
+        ),
+      )
+      nothing
+    catch error
+      error
+    end
+    @test unknown_command isa WebQuantumSavory.APIError
+    @test unknown_command.error_code == "PROJECT_CHANGED"
+    undelivered_outcome = fetch(undelivered.waiting)
+    @test undelivered_outcome isa WebQuantumSavory.APIError
+    @test undelivered_outcome.error_code == "OPERATION_CANCELLED"
+    @test isempty(undelivered.hub.pending)
+    @test WebQuantumSavory.collaboration_status(
+      undelivered.hub,
+    )["binding"]["desynchronized"]
+
+    for mismatch in (:base_revision, :operation_id)
+      delivered = start_pending_command(deliver=true)
+      acknowledgement = Dict{String,Any}(
+        delivered.owner...,
+        "command_id" => delivered.command["command_id"],
+        "operation_id" => "mismatch-operation",
+        "base_revision" => 0,
+        "success" => false,
+      )
+      mismatch == :base_revision && (acknowledgement["base_revision"] = 1)
+      mismatch == :operation_id &&
+        (acknowledgement["operation_id"] = "different-operation")
+      mismatch_error = try
+        WebQuantumSavory.commit_browser_command!(
+          delivered.hub,
+          acknowledgement,
+        )
+        nothing
+      catch error
+        error
+      end
+      @test mismatch_error isa WebQuantumSavory.APIError
+      @test mismatch_error.error_code == "PROJECT_CHANGED"
+      delivered_outcome = fetch(delivered.waiting)
+      @test delivered_outcome isa WebQuantumSavory.APIError
+      @test delivered_outcome.error_code == "OUTCOME_UNKNOWN"
+      @test isempty(delivered.hub.pending)
+      @test WebQuantumSavory.collaboration_status(
+        delivered.hub,
+      )["binding"]["desynchronized"]
+    end
   end
 
   @testset "activity is bounded and sanitized" begin
     hub = WebQuantumSavory.CollaborationHub()
+    utc_now = Dates.now(Dates.UTC)
+    @test abs(Dates.value(hub.clock() - utc_now)) < 5_000
     WebQuantumSavory.record_mcp_activity!(
       hub,
       "tool",

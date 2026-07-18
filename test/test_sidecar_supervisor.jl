@@ -50,15 +50,87 @@ const TEST_MCP_CONFIGURATION = WQS.MCPConfiguration(
     "body = \\\"{\\\\\\\"capability\\\\\\\":\\\\\\\"escaped-capability-canary\\\\\\\"}\\\"",
     "HTTP.Request body={\"api_key\":\"api-key-canary\"}",
   )
-  @test all(unstructured_sensitive_lines) do line
-    WQS._sanitize_sidecar_diagnostic_line(line) ==
-      "[omitted sensitive diagnostic]"
+  sanitized_sensitive_lines =
+    WQS._sanitize_sidecar_diagnostic_line.(unstructured_sensitive_lines)
+  @test !occursin("canary", join(sanitized_sensitive_lines))
+  @test startswith(sanitized_sensitive_lines[1], "raw_body=")
+  @test startswith(sanitized_sensitive_lines[2], "request_body=")
+  @test startswith(sanitized_sensitive_lines[3], "body =")
+  @test startswith(sanitized_sensitive_lines[4], "HTTP.Request body=")
+
+  safe_http_context = (
+    "HTTP.Request failed while connecting to 127.0.0.1",
+    "request: HTTP.Messages.Request at HTTP/src/Messages.jl:42",
+    "response: HTTP.Messages.Response at HTTP/src/Messages.jl:84",
+  )
+  @test WQS._sanitize_sidecar_diagnostic_line.(safe_http_context) ==
+    safe_http_context
+
+  structured_http_context = WQS.JSON.parse(
+    WQS._sanitize_sidecar_diagnostic_line(
+      """
+      {"request_type":"HTTP.Request","response_status":500,"request_body":"body-canary"}
+      """,
+    ),
+  )
+  @test structured_http_context["request_type"] == "HTTP.Request"
+  @test structured_http_context["response_status"] == 500
+  @test structured_http_context["request_body"] == "[omitted]"
+
+  contextual_sensitive_lines = (
+    "Error token=token-canary at supervisor.jl:10",
+    "X-MCP-Capability: capability-canary; stack=supervisor.jl:11",
+    "authorization=Bearer authorization-canary at supervisor.jl:12",
+    "escaped=\\\"{\\\\\\\"capability\\\\\\\":\\\\\\\"escaped-canary\\\\\\\"}\\\"",
+    "request: {\\\"capability\\\":\\\"first-canary\\\",\\\"session_id\\\":\\\"second-canary\\\"}",
+    "token=prefix-token-canary request_body={x}",
+    "authorization=Bearer prefix-auth-canary body={\"token\":\"inner-canary\"}",
+    "capability=prefix-capability-canary raw_response={x}",
+    "Bearer prefix-bearer-canary request_body={x}",
+  )
+  sanitized_contextual_lines =
+    WQS._sanitize_sidecar_diagnostic_line.(contextual_sensitive_lines)
+  @test !occursin("canary", join(sanitized_contextual_lines))
+  @test endswith(sanitized_contextual_lines[1], " at supervisor.jl:10")
+  @test endswith(sanitized_contextual_lines[2], "; stack=supervisor.jl:11")
+  @test endswith(sanitized_contextual_lines[3], " at supervisor.jl:12")
+  @test startswith(sanitized_contextual_lines[6], "token=[omitted] request_body=")
+  @test sanitized_contextual_lines[7] == "authorization=[omitted]"
+  @test startswith(
+    sanitized_contextual_lines[8],
+    "capability=[omitted] raw_response=",
+  )
+  @test startswith(
+    sanitized_contextual_lines[9],
+    "Bearer [omitted] request_body=",
+  )
+
+  private_key_lines = (
+    "safe before",
+    "-----BEGIN PRIVATE KEY-----",
+    "private-key-interior-canary",
+    "-----END PRIVATE KEY-----",
+    "safe after",
+  )
+  private_key_open = false
+  retained_private_key_lines = String[]
+  for line in private_key_lines
+    sanitized_line, private_key_open =
+      WQS._sanitize_private_key_stream_line(line, private_key_open)
+    sanitized_line === nothing || push!(retained_private_key_lines, sanitized_line)
   end
+  @test !private_key_open
+  @test retained_private_key_lines == [
+    "safe before",
+    "[omitted private key diagnostic]",
+    "safe after",
+  ]
+  @test !occursin("canary", join(retained_private_key_lines))
 
   diagnostics = WQS.sidecar_status(supervisor)["diagnostics"]
   @test occursin("retained", diagnostics[1]["message"])
   @test !occursin("canary", join(getindex.(diagnostics, "message")))
-  @test diagnostics[2]["message"] == "[omitted sensitive diagnostic]"
+  @test diagnostics[2]["message"] == "authorization=[omitted]"
   @test all(
     diagnostic -> ncodeunits(diagnostic["message"]) <=
       WQS.SIDECAR_DIAGNOSTIC_BYTE_LIMIT,

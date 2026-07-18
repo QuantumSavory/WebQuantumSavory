@@ -25,6 +25,9 @@
   ModelContextProtocol.jl. It must not import WebQuantumSavory; it communicates
   only through loopback internal routes. Tool metadata and wire schemas live in
   `contracts/mcp/v1/tools.json`.
+- Keep ModelContextProtocol.jl exactly pinned with the source-annotated
+  single-session transport adapter. When upgrading it, re-diff the adapter
+  against upstream and run `./ci/mcp-unit.sh` plus the MCP browser scenario.
 - `src/parser.jl` discovers QuantumSavory metadata, validates request payloads, constructs graphs/registers/networks, converts parameters, and instantiates protocols.
 - `src/script_export.jl` translates validated project payloads into standalone, pedagogical QuantumSavory Julia scripts without creating server-side simulation state.
 - `src/tag_metadata.jl` owns runtime discovery of QuantumSavory tag converters and signatures, the allowlisted tag/query codec, live-register target resolution, entry serialization, and tag/message mutation helpers.

@@ -453,6 +453,22 @@ describe('TypedValueInput disabled code values', () => {
     expect(parameter.value).toBe(0.73)
   })
 
+  it('uses shared numeric boundaries for draft validity', async () => {
+    const parameter = { name: 'rounds', value: 1, min: 1, max: 3 }
+    const wrapper = mount(TypedValueInput, {
+      props: { parameter, type: 'Int64', category: 'edge' }
+    })
+    const input = wrapper.get('input[type="number"]')
+
+    expect(input.attributes('aria-invalid')).toBe('false')
+    await input.setValue('1.5')
+    expect(input.attributes('aria-invalid')).toBe('true')
+    await input.setValue('3')
+    expect(input.attributes('aria-invalid')).toBe('false')
+    await input.setValue('4')
+    expect(input.attributes('aria-invalid')).toBe('true')
+  })
+
   it('does not open or overwrite a collapsed Lambda while disabled', async () => {
     const parameter = { name: 'nodeL', value: 'x -> x < self' }
     const wrapper = mount(TypedValueInput, {

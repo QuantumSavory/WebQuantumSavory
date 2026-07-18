@@ -550,6 +550,10 @@ let mcpSnapshotTimer = null
 function scheduleMcpSnapshotSafetyNet() {
   clearTimeout(mcpSnapshotTimer)
   mcpSnapshotTimer = setTimeout(() => {
+    if (!mcpState.value.bound) {
+      mcpSnapshotTimer = null
+      return
+    }
     if (designInteractionCount.value > 0) {
       scheduleMcpSnapshotSafetyNet()
       return
@@ -563,9 +567,16 @@ function scheduleMcpSnapshotSafetyNet() {
 }
 
 watch(
-  projectData,
-  () => {
-    if (!mcpBridge.binding) return
+  () => (mcpState.value.bound ? projectData.value : null),
+  (boundProject, previousProject) => {
+    if (!boundProject) {
+      clearTimeout(mcpSnapshotTimer)
+      mcpSnapshotTimer = null
+      return
+    }
+    // Binding itself publishes the current snapshot. Only later deep changes
+    // need the safety net.
+    if (previousProject == null) return
     scheduleMcpSnapshotSafetyNet()
   },
   { deep: true, flush: 'post' }
@@ -908,7 +919,9 @@ function toggleMainMenu(event){
 
 // addNodeClickHandler wrapper for the template
 function addNodeClickHandler() {
-  addNewNode(null, 'city', mapCenter.value)
+  void addNewNode(null, 'city', mapCenter.value).catch(error => {
+    showAlert('Unable to create node', error?.message || 'The node could not be created.')
+  })
 }
 
 // Demo projects list

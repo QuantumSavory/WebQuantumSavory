@@ -77,6 +77,30 @@ export function parameterTypeIsNumber(typeOrParameter) {
   return lower === 'int' || lower === 'int64' || lower.startsWith('float')
 }
 
+export function parseNumericParameterValue(type, rawValue, parameter = {}) {
+  if (rawValue == null || rawValue === '') {
+    return { valid: true, empty: true, value: null }
+  }
+
+  const value = Number(rawValue)
+  const normalizedType = String(type || '').toLowerCase()
+  const minimum = Number(parameter.min)
+  const maximum = Number(parameter.max)
+  const valid = Number.isFinite(value)
+    && (
+      (normalizedType !== 'int' && normalizedType !== 'int64')
+      || Number.isInteger(value)
+    )
+    && (!Number.isFinite(minimum) || value >= minimum)
+    && (!Number.isFinite(maximum) || value <= maximum)
+
+  return {
+    valid,
+    empty: false,
+    value: valid ? value : null,
+  }
+}
+
 export function parameterTypeIsKnown(type) {
   return KNOWN_PARAMETER_TYPES.includes(type) || isWildcardType(type) || isSymbolicType(type)
 }

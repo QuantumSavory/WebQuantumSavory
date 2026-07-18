@@ -80,6 +80,21 @@ describe('McpEditorBridge', () => {
     expect(bridge.revision).toBe(0)
   })
 
+  it('does not publish an unclassified fallback after a classified GUI commit', async () => {
+    const { bridge, client, project } = bridgeFixture()
+    await bridge.initialize()
+
+    project.description = 'Classified GUI change'
+    await bridge.publishGuiCommit('GUI applied 1 design operation.')
+    await bridge.publishGuiCommit('Unclassified GUI design change')
+
+    expect(client.commit).toHaveBeenCalledOnce()
+    expect(client.commit).toHaveBeenCalledWith(expect.objectContaining({
+      origin: 'gui',
+      summary: 'GUI applied 1 design operation.',
+    }))
+  })
+
   it('relays lifecycle changes through exactly one browser controller action', async () => {
     const { bridge, client, simulationController } = bridgeFixture()
     await bridge.initialize()

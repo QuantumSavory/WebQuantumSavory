@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import Edge from '../../src/models/Edge'
+import FloatingProtocol from '../../src/models/FloatingProtocol'
 import Node from '../../src/models/Node'
+import Variable from '../../src/models/Variable'
 import {
+  DUPLICATE_PHYSICAL_EDGE_REASON,
   DesignCommandError,
   DesignCommandService,
   operationsForTool,
@@ -122,6 +126,161 @@ describe('DesignCommandService', () => {
 
     expect(encodeDesignDocument(project)).toEqual(before)
     expect(markDirty).not.toHaveBeenCalled()
+  })
+
+  it('retains every durable entity identity across candidate reconciliation', async () => {
+    const project = createEmptyProject('Identity')
+    const nodeProtocol = new FloatingProtocol({
+      id: 'node_protocol',
+      type: 'NodeProtocol',
+    })
+    const nodeA = new Node({
+      id: 'node_a',
+      name: 'A',
+      position: [0, 0],
+      data: {
+        type: 'City',
+        slots: [{
+          id: 'slot_a',
+          type: 'Qubit',
+          backgroundNoise: { type: 'NoNoise', parameters: [] },
+          renderedResult: '<runtime>',
+        }],
+        protocols: [nodeProtocol],
+      },
+    })
+    const nodeB = new Node({
+      id: 'node_b',
+      name: 'B',
+      position: [1, 1],
+      data: { type: 'City', slots: [], protocols: [] },
+    })
+    const edgeProtocol = new FloatingProtocol({
+      id: 'edge_protocol',
+      type: 'EdgeProtocol',
+    })
+    const edge = new Edge({
+      id: 'edge_a',
+      source: nodeA,
+      target: nodeB,
+      data: {
+        type: 'connection',
+        protocols: [edgeProtocol],
+        curvePoints: [],
+        physicalOverrides: null,
+      },
+    })
+    const floatingProtocol = new FloatingProtocol({
+      id: 'floating_protocol',
+      type: 'FloatingProtocol',
+    })
+    const variable = new Variable({
+      id: 'variable_a',
+      name: 'rate',
+      type: 'Float64',
+      value: 0.5,
+    })
+    const annotation = {
+      id: 'annotation_a',
+      markdown: 'Retained',
+      bounds: { west: -1, south: -1, east: 1, north: 1 },
+      backgroundColor: '#ffffff',
+      borderColor: '#000000',
+      area: null,
+    }
+    project.net.nodes.push(nodeA, nodeB)
+    project.net.edges.push(edge)
+    project.net.protocols.push(floatingProtocol)
+    project.variables.push(variable)
+    project.annotations.push(annotation)
+    const slot = nodeA.data.slots[0]
+
+    await serviceFor(project).execute({
+      operations: [{
+        kind: 'design.update',
+        value: { description: 'Reconciled' },
+      }],
+    })
+
+    expect(project.net.nodes).toEqual([nodeA, nodeB])
+    expect(project.net.nodes[0].data.slots[0]).toBe(slot)
+    expect(slot.renderedResult).toBe('<runtime>')
+    expect(project.net.nodes[0].data.protocols[0]).toBe(nodeProtocol)
+    expect(project.net.edges[0]).toBe(edge)
+    expect(edge.source).toBe(nodeA)
+    expect(edge.target).toBe(nodeB)
+    expect(edge.data.protocols[0]).toBe(edgeProtocol)
+    expect(project.net.protocols[0]).toBe(floatingProtocol)
+    expect(project.variables[0]).toBe(variable)
+    expect(project.annotations[0]).toBe(annotation)
+  })
+
+  it('does not expose candidate changes when asynchronous validation fails late', async () => {
+    const project = createEmptyProject('Async rollback')
+    const retainedNode = new Node({
+      id: 'node_a',
+      name: 'A',
+      position: [0, 0],
+    })
+    project.net.nodes.push(retainedNode)
+    const before = encodeDesignDocument(project)
+    const markDirty = vi.fn()
+    const clearDeletedSelection = vi.fn()
+    const onCommitted = vi.fn()
+    const service = serviceFor(project, {
+      statesCatalog: () => [{ id: 'WeightedBell', weighted: true }],
+      previewState: vi.fn(async () => {
+        throw new Error('Preview unavailable')
+      }),
+      markDirty,
+      clearDeletedSelection,
+      onCommitted,
+    })
+
+    await expect(service.execute({
+      operations: [
+        {
+          kind: 'design.update',
+          value: { description: 'Candidate-only change' },
+        },
+        {
+          kind: 'states.create',
+          id: 'state_a',
+          value: { name: 'rho', state_type: 'WeightedBell', parameters: {} },
+        },
+      ],
+    })).rejects.toThrow('Preview unavailable')
+
+    expect(encodeDesignDocument(project)).toEqual(before)
+    expect(project.net.nodes[0]).toBe(retainedNode)
+    expect(markDirty).not.toHaveBeenCalled()
+    expect(clearDeletedSelection).not.toHaveBeenCalled()
+    expect(onCommitted).not.toHaveBeenCalled()
+  })
+
+  it('returns a structured reason for duplicate physical endpoint pairs', async () => {
+    const project = createEmptyProject('Duplicate edges')
+    const nodeA = new Node({ id: 'node_a', name: 'A', position: [0, 0] })
+    const nodeB = new Node({ id: 'node_b', name: 'B', position: [1, 1] })
+    const nodeC = new Node({ id: 'node_c', name: 'C', position: [2, 2] })
+    project.net.nodes.push(nodeA, nodeB, nodeC)
+    project.net.edges.push(
+      new Edge({ id: 'edge_ab', source: nodeA, target: nodeB }),
+      new Edge({ id: 'edge_ac', source: nodeA, target: nodeC }),
+    )
+    const service = serviceFor(project)
+
+    await expect(service.execute({
+      operations: [{
+        kind: 'topology.update_edge',
+        id: 'edge_ac',
+        value: { target: 'node_b' },
+      }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      details: { reason: DUPLICATE_PHYSICAL_EDGE_REASON },
+    })
+    expect(project.net.edges[1].target).toBe(nodeC)
   })
 
   it('allocates MCP-created IDs in the browser and exposes client_ref aliases', async () => {

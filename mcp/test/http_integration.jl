@@ -44,6 +44,29 @@ function control_status()
     return response, parse_body(response)
 end
 
+function control_activity()
+    response = HTTP.get(
+        "$BACKEND_URL/_mcp/activity?cursor=0&limit=500",
+        [
+            "Accept" => "application/json",
+            "Origin" => BACKEND_URL,
+            "Sec-Fetch-Site" => "same-origin",
+        ];
+        status_exception=false,
+        readtimeout=10,
+    )
+    return response, parse_body(response)
+end
+
+function initialized_session_activity_count()
+    response, body = control_activity()
+    response.status == 200 || return -1
+    return count(body["activity"]) do record
+        record["category"] == "session" &&
+            record["phase"] == "initialized"
+    end
+end
+
 function rpc_request(message; session_id=nothing)
     headers = [
         "Accept" => "application/json, text/event-stream",
@@ -138,11 +161,27 @@ end
     @test initial_body["success"] === true
     @test initial_body["server"]["state"] == "stopped"
 
+    cleared = control_post("/_mcp/activity/clear")
+    @test cleared.status == 200
+    @test parse_body(cleared)["success"] === true
+
     first_session = nothing
     try
         started = control_post("/_mcp/start")
         @test started.status == 200
         @test parse_body(started)["server"]["state"] == "running"
+        assert_running_control_status()
+
+        stopped_without_session = control_post("/_mcp/stop")
+        @test stopped_without_session.status == 200
+        @test parse_body(stopped_without_session)["server"]["state"] == "stopped"
+        assert_stopped_control_status()
+        @test timedwait(sidecar_is_unavailable, 5; pollint=0.05) == :ok
+        @test initialized_session_activity_count() == 0
+
+        restarted_without_session = control_post("/_mcp/start")
+        @test restarted_without_session.status == 200
+        @test parse_body(restarted_without_session)["server"]["state"] == "running"
         assert_running_control_status()
 
         initialize, initialize_body, first_session = initialize_session(1)
@@ -151,6 +190,11 @@ end
         @test initialize_body["id"] == 1
         @test initialize_body["result"]["protocolVersion"] == PROTOCOL_VERSION
         @test initialize_body["result"]["serverInfo"]["name"] == "webquantumsavory"
+        @test timedwait(
+            () -> initialized_session_activity_count() == 1,
+            5;
+            pollint=0.05,
+        ) == :ok
 
         initialized = send_initialized(first_session)
         @test initialized.status == 202
@@ -202,6 +246,7 @@ end
             "Only one MCP client session",
             rejected_body["error"]["message"],
         )
+        @test initialized_session_activity_count() == 1
 
         stopped = control_post("/_mcp/stop")
         @test stopped.status == 200
@@ -219,6 +264,11 @@ end
         @test !isempty(fresh_session)
         @test fresh_session != first_session
         @test fresh_body["result"]["protocolVersion"] == PROTOCOL_VERSION
+        @test timedwait(
+            () -> initialized_session_activity_count() == 2,
+            5;
+            pollint=0.05,
+        ) == :ok
 
         fresh_initialized = send_initialized(fresh_session)
         @test fresh_initialized.status == 202

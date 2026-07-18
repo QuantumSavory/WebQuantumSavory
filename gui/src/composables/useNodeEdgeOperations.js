@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { generateUUid } from '../utils/Utils'
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../utils/projectCodec'
+import { DUPLICATE_PHYSICAL_EDGE_REASON } from '../domain/design/DesignCommandService'
 import { SIMULATION_EDITING_LOCK_MESSAGE } from './uiServices'
 
 /**
@@ -17,6 +18,10 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
   const selectedItem = ref(null)
   const selectedType = ref(null)
   const justCreatedNode = ref(false)
+
+  function showDesignOperationFailure(title, fallbackMessage, error) {
+    showAlert(title, error?.message || fallbackMessage)
+  }
 
   function handleSelectLocal(item, type) {
     selectedItem.value = item
@@ -53,7 +58,13 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
   function handleMapClick( event ) {
     let coords = [event.lngLat.lng, event.lngLat.lat]
     if( event.originalEvent.altKey ){
-      addNewNode( null, "City", coords)
+      void addNewNode(null, 'City', coords).catch(error => {
+        showDesignOperationFailure(
+          'Unable to create node',
+          'The node could not be created.',
+          error,
+        )
+      })
     }
   }
 
@@ -119,8 +130,8 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
       }])
       addLog('info', `Created new edge: ${edge.source.name} to ${edge.target.name}`, 'Map')
     } catch (error) {
-      const duplicatePhysicalEdge = error?.message
-        === 'Only one physical edge may connect a pair of nodes.'
+      const duplicatePhysicalEdge = error?.details?.reason
+        === DUPLICATE_PHYSICAL_EDGE_REASON
       showAlert(
         duplicatePhysicalEdge ? 'Duplicate physical edge' : 'Unable to create edge',
         error?.message || 'The edge could not be created.',
@@ -151,6 +162,12 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
       to_index: toIndex,
     }]).then(() => {
       addLog('info', `Changed ${node.name} to node ID ${toIndex + 1}`, 'Map')
+    }).catch(error => {
+      showDesignOperationFailure(
+        'Unable to reorder node',
+        'The node order could not be changed.',
+        error,
+      )
     })
     return true
   }

@@ -20,6 +20,9 @@ effective values before routes load, otherwise a command-line override could
 change the listener after the loopback check. Only those two options are
 inspected here because other process arguments may belong to an embedding
 caller, such as the test runner's positional file selectors.
+
+Keep this parser synchronized with Genie 5.35.15's `src/Commands.jl`
+`parse_commandline_args` host and port assignments.
 """
 function effective_genie_server_endpoint(
   config=Genie.config;
@@ -82,6 +85,48 @@ function is_loopback_host(host::AbstractString)
   return false
 end
 
+"""Strictly parse the MCP feature flag and listener port without starting Genie."""
+function _read_mcp_environment_settings(environment=ENV)
+  enabled = _strict_environment_boolean(
+    get(environment, MCP_ENABLE_ENV_VAR, nothing),
+    MCP_ENABLE_ENV_VAR,
+  )
+  port = _configured_port(
+    get(environment, MCP_PORT_ENV_VAR, nothing),
+    MCP_PORT_ENV_VAR,
+    DEFAULT_MCP_PORT,
+  )
+  return (; enabled, port)
+end
+
+function _mcp_configuration(
+  settings;
+  backend_host::AbstractString,
+  backend_port::Integer,
+)
+  settings.enabled || return MCPConfiguration(
+    false,
+    settings.port,
+    string(backend_host),
+    Int(backend_port),
+  )
+
+  is_loopback_host(backend_host) || throw(
+    ArgumentError(
+      "$MCP_ENABLE_ENV_VAR=true requires the Genie server host to be loopback-only",
+    ),
+  )
+  settings.port == backend_port && throw(
+    ArgumentError("$MCP_PORT_ENV_VAR must differ from the Genie server port"),
+  )
+  return MCPConfiguration(
+    true,
+    settings.port,
+    string(backend_host),
+    Int(backend_port),
+  )
+end
+
 """
 Read and validate the opt-in local MCP configuration.
 
@@ -93,34 +138,21 @@ function read_mcp_configuration(
   backend_host::AbstractString=string(Genie.config.server_host),
   backend_port::Integer=Genie.config.server_port,
 )
-  enabled = _strict_environment_boolean(
-    get(environment, MCP_ENABLE_ENV_VAR, nothing),
-    MCP_ENABLE_ENV_VAR,
+  return _mcp_configuration(
+    _read_mcp_environment_settings(environment);
+    backend_host,
+    backend_port,
   )
-  port = _configured_port(
-    get(environment, MCP_PORT_ENV_VAR, nothing),
-    MCP_PORT_ENV_VAR,
-    DEFAULT_MCP_PORT,
-  )
-  if !enabled
-    return MCPConfiguration(false, port, string(backend_host), Int(backend_port))
-  end
+end
 
-  is_loopback_host(backend_host) || throw(
-    ArgumentError(
-      "$MCP_ENABLE_ENV_VAR=true requires the Genie server host to be loopback-only",
-    ),
-  )
-  port == backend_port && throw(
-    ArgumentError("$MCP_PORT_ENV_VAR must differ from the Genie server port"),
-  )
-  return MCPConfiguration(true, port, string(backend_host), Int(backend_port))
+function _configure_mcp!(settings; kwargs...)
+  configuration = _mcp_configuration(settings; kwargs...)
+  MCP_CONFIGURATION[] = configuration
+  return configuration
 end
 
 function configure_mcp!(; kwargs...)
-  configuration = read_mcp_configuration(ENV; kwargs...)
-  MCP_CONFIGURATION[] = configuration
-  return configuration
+  return _configure_mcp!(_read_mcp_environment_settings(ENV); kwargs...)
 end
 
 function mcp_configuration()

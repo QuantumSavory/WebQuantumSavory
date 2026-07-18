@@ -87,7 +87,8 @@ import {
   isCodeType,
   isSymbolicType,
   isWildcardType,
-  parameterTypeIsNumber
+  parameterTypeIsNumber,
+  parseNumericParameterValue
 } from '../../utils/parameterTypes'
 
 const CodeEditorWithSymbols = defineAsyncComponent(() => import('./CodeEditorWithSymbols.vue'))
@@ -135,20 +136,11 @@ const selectableFunctions = computed(() => api.getKnownFunctions().filter(func =
 )))
 const codeEditorOpen = ref(false)
 const codeDraftDirty = ref(false)
-const numericValueInvalid = computed(() => {
-  const value = props.parameter.value
-  if (value == null || value === '') return false
-  const number = Number(value)
-  if (!Number.isFinite(number)) return true
-  const normalizedType = String(props.type || '').toLowerCase()
-  if ((normalizedType === 'int' || normalizedType === 'int64') && !Number.isInteger(number)) {
-    return true
-  }
-  const minimum = Number(props.parameter.min)
-  const maximum = Number(props.parameter.max)
-  return (Number.isFinite(minimum) && number < minimum)
-    || (Number.isFinite(maximum) && number > maximum)
-})
+const numericValueInvalid = computed(() => !parseNumericParameterValue(
+  props.type,
+  props.parameter.value,
+  props.parameter,
+).valid)
 const codeDraftInvalid = computed(() => (
   Boolean(props.parameter.error) || codeDraftDirty.value
 ))

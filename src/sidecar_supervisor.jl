@@ -1,3 +1,12 @@
+# The MCP listener runs in a supervised child process because
+# ModelContextProtocol 0.6.0 installs a process-global logger and carries an
+# optional dependency graph that must never affect the main Genie process when
+# MCP is disabled. `epoch` and `current` identify the only generation allowed
+# to report ready; each generation owns its pipes, drain tasks, and one-shot
+# cleanup. Process waits, cleanup, and injected test seams must run outside the
+# supervisor lock so start, stop, ready callbacks, and child exit can race
+# without deadlocking or promoting a stale generation.
+
 const SIDECAR_START_TIMEOUT_SECONDS = 15
 const SIDECAR_STOP_TIMEOUT_SECONDS = 5
 const SIDECAR_DIAGNOSTIC_LIMIT = 200
@@ -105,35 +114,142 @@ end
 function _sensitive_diagnostic_key(key)
   normalized = _normalized_sensitive_key(key)
   return _sensitive_activity_key(key) ||
-    any(fragment -> occursin(fragment, normalized), ("raw", "request", "response"))
+    any(
+      fragment -> occursin(fragment, normalized),
+      (
+        "rawbody",
+        "rawmessage",
+        "rawpayload",
+        "rawrequest",
+        "rawresponse",
+        "requestbody",
+        "requestpayload",
+        "responsebody",
+        "responsepayload",
+      ),
+    )
+end
+
+const SENSITIVE_DIAGNOSTIC_ASSIGNMENT = r"(?i)\b(?:api[_ -]?key|authorization|capability|cookie|credential|password|passwd|passphrase|private[_ -]?key|secret|session[_ -]?id|token)\s*(?:\\+)?\"?\s*[:=]\s*"
+const DIAGNOSTIC_RAW_ASSIGNMENT = r"(?i)\b(?:raw(?:[_ -]?(?:body|message|payload|request|response))?|request[_ -]?(?:body|payload)|response[_ -]?(?:body|payload))\s*[:=]\s*"
+const DIAGNOSTIC_BODY_ASSIGNMENT = r"(?i)\b(?:body|payload)\s*[:=]\s*"
+const PRIVATE_KEY_BEGIN = r"(?i)-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----"
+const PRIVATE_KEY_END = r"(?i)-----END(?: [A-Z0-9]+)* PRIVATE KEY-----"
+
+function _omit_diagnostic_assignment(text::String, range::UnitRange{Int})
+  return text[firstindex(text):last(range)] * "[omitted]"
+end
+
+function _diagnostic_scalar_end(text::String, start::Int)
+  start > lastindex(text) && return nothing
+  if text[start] == '"'
+    index = nextind(text, start)
+    escaped = false
+    while index <= lastindex(text)
+      character = text[index]
+      if character == '"' && !escaped
+        return index
+      end
+      if character == '\\'
+        escaped = !escaped
+      else
+        escaped = false
+      end
+      index = nextind(text, index)
+    end
+    return nothing
+  elseif text[start] == '\\'
+    opening_quote = nextind(text, start)
+    if opening_quote <= lastindex(text) && text[opening_quote] == '"'
+      index = nextind(text, opening_quote)
+      while index <= lastindex(text)
+        if text[index] == '\\'
+          quote_index = nextind(text, index)
+          quote_index <= lastindex(text) &&
+            text[quote_index] == '"' &&
+            return quote_index
+        end
+        index = nextind(text, index)
+      end
+      return nothing
+    end
+  end
+
+  index = start
+  last_value_index = nothing
+  while index <= lastindex(text)
+    character = text[index]
+    (isspace(character) || character in (',', ';')) && break
+    last_value_index = index
+    index = nextind(text, index)
+  end
+  return last_value_index
+end
+
+function _redact_diagnostic_scalar(text::String, range::UnitRange{Int})
+  value_start = nextind(text, last(range))
+  value_start > lastindex(text) && return _omit_diagnostic_assignment(text, range)
+
+  value_end = _diagnostic_scalar_end(text, value_start)
+  value_end === nothing && return _omit_diagnostic_assignment(text, range)
+
+  # Authorization values commonly consist of a scheme and a token. Consume the
+  # second token as well while retaining any following exception or stack text.
+  value = lowercase(text[value_start:value_end])
+  if value in ("bearer", "basic")
+    token_start = nextind(text, value_end)
+    while token_start <= lastindex(text) && isspace(text[token_start])
+      token_start = nextind(text, token_start)
+    end
+    token_end = _diagnostic_scalar_end(text, token_start)
+    token_end === nothing || (value_end = token_end)
+  end
+
+  prefix = text[firstindex(text):last(range)]
+  suffix_start = nextind(text, value_end)
+  suffix = suffix_start <= lastindex(text) ? text[suffix_start:lastindex(text)] : ""
+  return prefix * "[omitted]" * suffix
 end
 
 function _sanitize_diagnostic_text(value::AbstractString)
   text = String(value)
-  normalized = _normalized_sensitive_key(text)
-  if any(
-    fragment -> occursin(fragment, normalized),
-    (
-      MCP_SENSITIVE_DETAIL_KEY_FRAGMENTS...,
-      "rawbody",
-      "rawmessage",
-      "rawpayload",
-      "rawrequest",
-      "rawresponse",
-      "requestbody",
-      "requestpayload",
-      "responsebody",
-      "responsepayload",
-      "httprequest",
-      "httpresponse",
-    ),
-  ) ||
-    occursin(r"(?i)\b(?:raw|request|response)\s*[:=]", text) ||
-    occursin(r"(?i)\bbearer\s+\S+", text) ||
-    occursin(r"(?i)-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----", text)
-    return "[omitted sensitive diagnostic]"
+  if occursin(PRIVATE_KEY_BEGIN, text)
+    return "[omitted private key diagnostic]"
   end
-  return text
+  sanitized = replace(text, r"(?i)\bbearer\s+\S+" => "Bearer [omitted]")
+  assignment = findfirst(SENSITIVE_DIAGNOSTIC_ASSIGNMENT, sanitized)
+  if assignment !== nothing
+    next_assignment = findnext(
+      SENSITIVE_DIAGNOSTIC_ASSIGNMENT,
+      sanitized,
+      nextind(sanitized, last(assignment)),
+    )
+    # Preserving arbitrary text between multiple sensitive values would require
+    # parsing the unstructured diagnostic. Keep its safe prefix instead.
+    next_assignment === nothing ||
+      return _omit_diagnostic_assignment(sanitized, assignment)
+    sanitized = _redact_diagnostic_scalar(sanitized, assignment)
+  end
+
+  # Redact scalar credentials before omitting a later body so the retained
+  # diagnostic prefix cannot leak a capability, token, or authorization value.
+  raw_assignment = findfirst(DIAGNOSTIC_RAW_ASSIGNMENT, sanitized)
+  raw_assignment === nothing ||
+    return _omit_diagnostic_assignment(sanitized, raw_assignment)
+
+  # Generic body labels are omitted when their value contains a sensitive key.
+  # Request/response/raw body labels above are always omitted.
+  normalized = _normalized_sensitive_key(sanitized)
+  contains_sensitive_key = any(
+    fragment -> occursin(fragment, normalized),
+    MCP_SENSITIVE_DETAIL_KEY_FRAGMENTS,
+  )
+  if contains_sensitive_key
+    body_assignment = findfirst(DIAGNOSTIC_BODY_ASSIGNMENT, sanitized)
+    body_assignment === nothing ||
+      return _omit_diagnostic_assignment(sanitized, body_assignment)
+  end
+  return sanitized
 end
 
 function _sanitize_diagnostic_value(value)
@@ -178,7 +294,7 @@ function _append_sidecar_diagnostic!(
     push!(
       supervisor.diagnostics,
       Dict(
-        "timestamp" => _activity_timestamp(Dates.now()),
+        "timestamp" => _activity_timestamp(Dates.now(Dates.UTC)),
         "stream" => String(stream),
         "message" => sanitized_message,
       ),
@@ -188,6 +304,21 @@ function _append_sidecar_diagnostic!(
   end
 end
 
+function _sanitize_private_key_stream_line(
+  line::AbstractString,
+  private_key_open::Bool,
+)
+  if private_key_open
+    return nothing, !occursin(PRIVATE_KEY_END, line)
+  elseif occursin(PRIVATE_KEY_BEGIN, line)
+    return (
+      "[omitted private key diagnostic]",
+      !occursin(PRIVATE_KEY_END, line),
+    )
+  end
+  return String(line), false
+end
+
 function _drain_sidecar_pipe!(
   supervisor::SidecarSupervisor,
   generation::SidecarGeneration,
@@ -195,8 +326,12 @@ function _drain_sidecar_pipe!(
   stream::String,
 )
   try
+    private_key_open = false
     for line in eachline(pipe)
-      _append_sidecar_diagnostic!(supervisor, stream, line)
+      sanitized_line, private_key_open =
+        _sanitize_private_key_stream_line(line, private_key_open)
+      sanitized_line === nothing ||
+        _append_sidecar_diagnostic!(supervisor, stream, sanitized_line)
     end
   catch error
     process = generation.process
@@ -760,7 +895,7 @@ end
 function note_sidecar_request!(supervisor::SidecarSupervisor=SIDECAR_SUPERVISOR)
   lock(supervisor.lock) do
     supervisor.state == :running || return false
-    supervisor.last_request_at = _activity_timestamp(Dates.now())
+    supervisor.last_request_at = _activity_timestamp(Dates.now(Dates.UTC))
     return true
   end
 end

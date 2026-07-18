@@ -24,12 +24,6 @@ end
 function bootstrap()
 # don't indent everything 
 unsafe_code_evaluation_enabled() # validate the operator override during startup
-# Genie has now loaded the selected environment configuration. Revalidate the
-# opt-in listener against the effective host before any MCP routes are created.
-WebQuantumSavory.configure_mcp!(
-  backend_host=string(Genie.config.server_host),
-  backend_port=Genie.config.server_port,
-)
 
 route("/") do
   Genie.Router.serve_static_file("index.html")

@@ -78,6 +78,15 @@ feature is enabled. For development, instantiate it directly with:
 julia --startup-file=no --project=mcp -e 'using Pkg; Pkg.instantiate()'
 ```
 
+The sidecar is intentionally a separate process. ModelContextProtocol 0.6.0
+installs a process-global logger, so loading it in Genie would let MCP transport
+lifecycle and client log-level requests affect the main application's logging.
+Process isolation also keeps the optional dependency graph unloaded when the
+feature is disabled and gives Initialize/Stop a clean session boundary. This
+cost can be reconsidered when the library exposes scoped logger, single-session,
+and lifecycle hooks. Until then, its exact compatibility pin and the annotated
+transport adapter must be revalidated together when upgrading the dependency.
+
 The browser remains authoritative for the live project, so a browser tab must
 stay bound for design edits and lifecycle actions. MCP edits update the visible
 project immediately and mark it unsaved; they never save automatically. One

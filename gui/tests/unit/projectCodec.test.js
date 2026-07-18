@@ -8,6 +8,7 @@ import {
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
   PROJECT_SCHEMA_VERSION,
+  TRANSIENT_SLOT_FIELDS,
   createEmptyProject,
   decodeStoredProject,
   encodeDesignDocument,
@@ -39,6 +40,7 @@ describe('collaborative design codec', () => {
           assignment: 'runtime',
           lastOperationTime: 5,
           representationType: 'png',
+          ui_expanded: true,
           renderedResult: '<binary>',
         }],
       },
@@ -51,11 +53,15 @@ describe('collaborative design codec', () => {
     expect(document).not.toHaveProperty('platformInfo')
     expect(document).not.toHaveProperty('uiGlobal')
     expect(document.net.nodes[0]).not.toHaveProperty('expanded')
-    expect(document.net.nodes[0].data.slots[0]).toEqual({
+    const canonicalSlot = document.net.nodes[0].data.slots[0]
+    expect(canonicalSlot).toEqual({
       id: 'slot_a',
       type: 'Qubit',
       backgroundNoise: DEFAULT_NOISE,
     })
+    for (const field of TRANSIENT_SLOT_FIELDS) {
+      expect(canonicalSlot).not.toHaveProperty(field)
+    }
     expect(document).toMatchObject({
       schemaVersion: PROJECT_SCHEMA_VERSION,
       name: 'Canonical',
@@ -530,6 +536,7 @@ describe('backend payload codecs', () => {
     slot.assignment = { node: 1 }
     slot.lastOperationTime = 5
     slot.representationType = 'density'
+    slot.renderedResult = '<runtime representation>'
     slot.backgroundNoise = {
       type: 'NoiseType',
       doc: 'Editor documentation',
@@ -581,8 +588,9 @@ describe('backend payload codecs', () => {
         parameters: [{ name: 'rate', value: 0.25 }],
       },
     })
-    expect(payload.net.nodes[0].data.slots[0]).not.toHaveProperty('ui_expanded')
-    expect(payload.net.nodes[0].data.slots[0]).not.toHaveProperty('isLocked')
+    for (const field of TRANSIENT_SLOT_FIELDS) {
+      expect(payload.net.nodes[0].data.slots[0]).not.toHaveProperty(field)
+    }
     expect(payload.net.nodes[0].data.slots[0].backgroundNoise).not.toHaveProperty('doc')
     expect(payload.net.nodes[0].data.protocols[0].parameters).toEqual([
       { name: 'kept', type: 'Float64', value: 0.5 },

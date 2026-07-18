@@ -22,12 +22,21 @@ export const DEFAULT_MAP_ZOOM = 4
 export const DEFAULT_PHYSICAL_CONFIG = Object.freeze({
   refractiveIndex: DEFAULT_REFRACTIVE_INDEX,
 })
+export const TRANSIENT_SLOT_FIELDS = Object.freeze([
+  'isLocked',
+  'assignment',
+  'lastOperationTime',
+  'representationType',
+  'ui_expanded',
+  'renderedResult',
+])
 
 const STORAGE_ONLY_PROJECT_FIELDS = new Set([
   'schemaVersion',
   'platformInfo',
   'uiGlobal',
 ])
+const TRANSIENT_SLOT_FIELD_SET = new Set(TRANSIENT_SLOT_FIELDS)
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -532,12 +541,7 @@ export function encodeDesignDocument(project) {
   for (const node of document.net?.nodes || []) {
     delete node.expanded
     for (const slot of node.data?.slots || []) {
-      delete slot.isLocked
-      delete slot.assignment
-      delete slot.lastOperationTime
-      delete slot.representationType
-      delete slot.ui_expanded
-      delete slot.renderedResult
+      for (const field of TRANSIENT_SLOT_FIELDS) delete slot[field]
     }
   }
   return document
@@ -636,13 +640,8 @@ export function toSimulationPayload(project) {
               data: {
                 ...sourceData,
                 slots: (sourceData.slots || []).map(slot => {
-                  const cleaned = cloneValue(slot)
+                  const cleaned = omitFields(slot, TRANSIENT_SLOT_FIELD_SET)
                   cleaned.backgroundNoise = cleanBackgroundNoise(cleaned.backgroundNoise)
-                  delete cleaned.ui_expanded
-                  delete cleaned.isLocked
-                  delete cleaned.assignment
-                  delete cleaned.lastOperationTime
-                  delete cleaned.representationType
                   return cleaned
                 }),
                 protocols: (sourceData.protocols || [])

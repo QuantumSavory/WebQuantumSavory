@@ -209,6 +209,19 @@ test.describe('Local MCP collaboration', () => {
       await description.getByRole('button', { name: 'Save project description' }).click()
       await mcpTab.click()
       await expect(statusValue('Revision')).toHaveText('4', { timeout: 10_000 })
+      await expect.poll(async () => {
+        const response = await fetch(`${BACKEND_URL}/_mcp/activity?cursor=0&limit=500`)
+        expect(response.status).toBe(200)
+        const { activity } = await response.json()
+        const guiCommit = activity.find(entry => (
+          entry.phase === 'gui_commit' && entry.revision_after === 4
+        ))
+        return guiCommit?.summary || null
+      }, { timeout: 10_000 }).toBe('GUI applied 1 design operation.')
+      const activityResponse = await fetch(`${BACKEND_URL}/_mcp/activity?cursor=0&limit=500`)
+      const { activity } = await activityResponse.json()
+      expect(activity.map(entry => entry.summary))
+        .not.toContain('Unclassified GUI design change')
 
       const stale = await callTool('topology_edit', {
         operation_id: 'browser-e2e-stale',

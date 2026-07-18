@@ -3,6 +3,18 @@ using Logging
 
 include(joinpath(@__DIR__, "..", "main.jl"))
 
+@testset "MCP transport dependency and lifecycle signal" begin
+    @test pkgversion(ModelContextProtocol) == v"0.6.0"
+
+    transport = SingleSessionHttpTransport(HttpTransport())
+    waiter = @async wait_for_session_initialization(transport)
+    yield()
+    ModelContextProtocol.close(transport)
+
+    @test timedwait(() -> istaskdone(waiter), 1) == :ok
+    @test fetch(waiter) === false
+end
+
 @testset "MCP logging cannot be lowered to raw debug output" begin
     previous_logger = Logging.global_logger()
     output = IOBuffer()

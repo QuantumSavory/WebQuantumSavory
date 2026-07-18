@@ -58,7 +58,7 @@ mutable struct CollaborationHub
   accepting::Bool
 end
 
-function CollaborationHub(; clock=Dates.now, id_source=nothing)
+function CollaborationHub(; clock=() -> Dates.now(Dates.UTC), id_source=nothing)
   hub = CollaborationHub(
     ReentrantLock(),
     Channel{Dict{String,Any}}(MCP_COMMAND_QUEUE_SIZE),
@@ -245,13 +245,17 @@ function _lease_live(hub::CollaborationHub, binding::EditorBinding)
   return hub.clock() - binding.heartbeat_at <= Dates.Second(MCP_EDITOR_LEASE_SECONDS)
 end
 
-function _cancel_pending_locked!(hub::CollaborationHub, code::String, message::String)
+function _cancel_pending_locked!(
+  hub::CollaborationHub,
+  code::String,
+  message::String;
+  unknown_message::String=
+    "The editor disappeared after command delivery; the outcome is unknown.",
+)
   for pending in values(hub.pending)
     error = Dict{String,Any}(
       "code" => pending.delivered ? "OUTCOME_UNKNOWN" : code,
-      "message" => pending.delivered ?
-        "The editor disappeared after command delivery; the outcome is unknown." :
-        message,
+      "message" => pending.delivered ? unknown_message : message,
       "retryable" => false,
       "details" => Dict{String,Any}(),
     )
@@ -262,6 +266,22 @@ function _cancel_pending_locked!(hub::CollaborationHub, code::String, message::S
   old_queue = hub.command_queue
   hub.command_queue = Channel{Dict{String,Any}}(MCP_COMMAND_QUEUE_SIZE)
   close(old_queue)
+end
+
+function _desynchronize_binding_locked!(
+  hub::CollaborationHub,
+  binding::EditorBinding,
+  message::String,
+)
+  binding.desynchronized = true
+  _cancel_pending_locked!(
+    hub,
+    "OPERATION_CANCELLED",
+    message;
+    unknown_message=
+      "The browser acknowledgement did not match the pending command; the outcome is unknown.",
+  )
+  return nothing
 end
 
 function _clear_binding_cache_locked!(hub::CollaborationHub)
@@ -607,16 +627,16 @@ function enqueue_browser_command!(
         ),
       )
     end
+    record_mcp_activity!(
+      hub,
+      "browser_command",
+      "queued";
+      summary=string(get(payload, "type", "command")),
+      status="pending",
+      operation_id=operation_id,
+      command_id=pending.command["command_id"],
+    )
   end
-  record_mcp_activity!(
-    hub,
-    "browser_command",
-    "queued";
-    summary=string(get(payload, "type", "command")),
-    status="pending",
-    operation_id=operation_id,
-    command_id=pending.command["command_id"],
-  )
 
   wait_result = timedwait(Float64(timeout_seconds); pollint=0.01) do
     isready(pending.response) && return true
@@ -704,7 +724,11 @@ function commit_browser_command!(
     command_id = string(get(request, "command_id", ""))
     pending = get(hub.pending, command_id, nothing)
     if pending === nothing
-      binding.desynchronized = true
+      _desynchronize_binding_locked!(
+        hub,
+        binding,
+        "The acknowledgement does not match a pending command.",
+      )
       throw(
         _mcp_error(
           "PROJECT_CHANGED",
@@ -714,7 +738,11 @@ function commit_browser_command!(
       )
     end
     Int(get(request, "base_revision", -1)) == pending.command["base_revision"] || begin
-      binding.desynchronized = true
+      _desynchronize_binding_locked!(
+        hub,
+        binding,
+        "The acknowledgement base revision does not match.",
+      )
       throw(
         _mcp_error(
           "PROJECT_CHANGED",
@@ -725,7 +753,11 @@ function commit_browser_command!(
     end
     if pending.operation_id !== nothing &&
       string(get(request, "operation_id", "")) != pending.operation_id
-      binding.desynchronized = true
+      _desynchronize_binding_locked!(
+        hub,
+        binding,
+        "The acknowledgement operation ID does not match.",
+      )
       throw(
         _mcp_error(
           "PROJECT_CHANGED",
@@ -754,7 +786,11 @@ function commit_browser_command!(
       )
     else
       hub.revision == pending.command["base_revision"] || begin
-        binding.desynchronized = true
+        _desynchronize_binding_locked!(
+          hub,
+          binding,
+          "The design revision changed before a successful acknowledgement.",
+        )
         throw(
           _mcp_error(
             "PROJECT_CHANGED",

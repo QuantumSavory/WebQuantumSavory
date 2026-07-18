@@ -4,109 +4,11 @@ using JSON3
 using Logging
 using ModelContextProtocol
 
+include(joinpath(@__DIR__, "src", "single_session_http_transport.jl"))
+
 const CONTRACT_FILE = normpath(
   joinpath(@__DIR__, "..", "contracts", "mcp", "v1", "tools.json"),
 )
-
-struct SingleSessionHttpTransport <: ModelContextProtocol.Transport
-  inner::HttpTransport
-end
-
-const SIDECAR_LOGGER = Logging.ConsoleLogger(stderr, Logging.Info)
-
-function install_safe_sidecar_logger!(logger=SIDECAR_LOGGER)
-  Logging.global_logger(logger)
-  return logger
-end
-
-function reject_session(stream, status::Int, message::String)
-  body = JSON3.write(Dict(
-    "jsonrpc" => "2.0",
-    "error" => Dict(
-      "code" => -32000,
-      "message" => message,
-    ),
-    "id" => nothing,
-  ))
-  HTTP.setstatus(stream, status)
-  HTTP.setheader(stream, "Content-Type" => "application/json")
-  HTTP.setheader(stream, "Content-Length" => string(ncodeunits(body)))
-  HTTP.startwrite(stream)
-  write(stream, body)
-  return nothing
-end
-
-function ModelContextProtocol.connect(transport::SingleSessionHttpTransport)
-  inner = transport.inner
-  inner.connected && return nothing
-  inner.connected = true
-  try
-    inner.server = HTTP.serve!(inner.host, inner.port; stream=true) do stream
-      request = stream.message
-      method = HTTP.method(request)
-      session_id = HTTP.header(request, "Mcp-Session-Id", "")
-      if method == "POST" &&
-        inner.session_id !== nothing &&
-        isempty(session_id)
-        reject_session(
-          stream,
-          409,
-          "Only one MCP client session is supported until the server is stopped.",
-        )
-      elseif method == "GET" &&
-        occursin("text/event-stream", HTTP.header(request, "Accept", ""))
-        if inner.session_id === nothing
-          reject_session(stream, 400, "Initialize an MCP session before opening SSE.")
-        elseif session_id != inner.session_id
-          reject_session(stream, 401, "A valid MCP session ID is required.")
-        else
-          ModelContextProtocol.handle_request(inner, stream)
-        end
-      else
-        ModelContextProtocol.handle_request(inner, stream)
-      end
-    end
-  catch
-    inner.connected = false
-    rethrow()
-  end
-  sleep(0.5)
-  return nothing
-end
-
-function ModelContextProtocol.read_message(transport::SingleSessionHttpTransport)
-  # ModelContextProtocol installs its mutable MCPLogger inside `start!`. An MCP
-  # client can otherwise lower that logger to Debug with `logging/setLevel`,
-  # which makes the dependency emit raw requests, responses, and session IDs.
-  # Replace it before every protocol message so the client preference is a no-op.
-  install_safe_sidecar_logger!()
-  return ModelContextProtocol.read_message(transport.inner)
-end
-ModelContextProtocol.write_message(
-  transport::SingleSessionHttpTransport,
-  message::String,
-) = ModelContextProtocol.write_message(transport.inner, message)
-ModelContextProtocol.pending_auth_context(transport::SingleSessionHttpTransport) =
-  ModelContextProtocol.pending_auth_context(transport.inner)
-ModelContextProtocol.capture_response_route(transport::SingleSessionHttpTransport) =
-  ModelContextProtocol.capture_response_route(transport.inner)
-ModelContextProtocol.deliver_response(
-  transport::SingleSessionHttpTransport,
-  route,
-  message::String,
-) = ModelContextProtocol.deliver_response(transport.inner, route, message)
-ModelContextProtocol.set_negotiated_version!(
-  transport::SingleSessionHttpTransport,
-  version::String,
-) = ModelContextProtocol.set_negotiated_version!(transport.inner, version)
-ModelContextProtocol.send_notification(
-  transport::SingleSessionHttpTransport,
-  message::String,
-) = ModelContextProtocol.send_notification(transport.inner, message)
-ModelContextProtocol.is_connected(transport::SingleSessionHttpTransport) =
-  ModelContextProtocol.is_connected(transport.inner)
-ModelContextProtocol.close(transport::SingleSessionHttpTransport) =
-  ModelContextProtocol.close(transport.inner)
 
 function plain_dictionary(value)
   value isa AbstractDict || return Dict{String,Any}()
@@ -338,10 +240,7 @@ function main()
   report_session_waiting(configuration)
 
   @async begin
-    while transport.inner.connected && isnothing(transport.inner.session_id)
-      sleep(0.1)
-    end
-    if !isnothing(transport.inner.session_id)
+    if wait_for_session_initialization(transport)
       try
         backend_request(
           configuration,
@@ -367,7 +266,7 @@ function main()
       catch
       end
       try
-        close(transport)
+        ModelContextProtocol.close(transport)
       catch
       end
     end

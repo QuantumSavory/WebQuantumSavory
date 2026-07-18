@@ -124,4 +124,33 @@ describe('shared MCP contract registry', () => {
     expect(source).toContain('new McpControlClient()')
     expect(source).not.toContain('new McpControlClient(api.baseUrl)')
   })
+
+  it('keeps the canonical snapshot safety net dormant while unbound', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/App.vue'), 'utf8')
+    const watcherStart = source.indexOf(
+      '() => (mcpState.value.bound ? projectData.value : null)',
+    )
+    const watcherEnd = source.indexOf('// Initialize app state composable', watcherStart)
+    const watcher = source.slice(watcherStart, watcherEnd)
+
+    expect(watcherStart).toBeGreaterThan(-1)
+    expect(watcher).toContain('if (!boundProject)')
+    expect(watcher).toContain('clearTimeout(mcpSnapshotTimer)')
+    expect(watcher).toContain('if (previousProject == null) return')
+    expect(source.slice(
+      source.indexOf('function scheduleMcpSnapshotSafetyNet'),
+      watcherStart,
+    )).toContain('if (!mcpState.value.bound)')
+  })
+
+  it('handles toolbar node-creation failures explicitly', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/App.vue'), 'utf8')
+    const handlerStart = source.indexOf('function addNodeClickHandler')
+    const handlerEnd = source.indexOf('// Demo projects list', handlerStart)
+    const handler = source.slice(handlerStart, handlerEnd)
+
+    expect(handler).toContain('void addNewNode')
+    expect(handler).toContain('.catch(')
+    expect(handler).toContain("'Unable to create node'")
+  })
 })

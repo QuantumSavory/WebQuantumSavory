@@ -107,14 +107,26 @@ function main()
   )
   # Fail before Genie starts if the diagnostic-protocol flag is malformed.
   mock_broken_protocol_enabled()
-  # Load the selected Genie environment before validating MCP. Calling
-  # `Genie.genie` directly would hide route-loading failures and would validate
-  # against Genie's defaults rather than the effective production host.
+  mcp_settings = _read_mcp_environment_settings(ENV)
+  if !mcp_settings.enabled
+    _configure_mcp!(
+      mcp_settings;
+      backend_host=string(Genie.config.server_host),
+      backend_port=Genie.config.server_port,
+    )
+    return Genie.genie(context=@__MODULE__)
+  end
+
+  # MCP needs a validation point after `Loader.loadenv` selects the environment
+  # but before routes load. Genie 5.35.15 does not expose that hook and applies
+  # CLI `-l`/`-p` overrides later in `Commands.execute`, so the enabled path
+  # mirrors `Genie.genie` from Genie.jl and the endpoint parsing in Commands.jl.
   server = Genie.Loader.loadenv(context=@__MODULE__)
   endpoint = effective_genie_server_endpoint()
   Genie.config.server_host = endpoint.host
   Genie.config.server_port = endpoint.port
-  configure_mcp!(
+  _configure_mcp!(
+    mcp_settings;
     backend_host=endpoint.host,
     backend_port=endpoint.port,
   )

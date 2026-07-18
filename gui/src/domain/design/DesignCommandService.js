@@ -12,6 +12,7 @@ import { generateUUid, setEdgeCorrectNodeOrder } from '../../utils/Utils.js'
 import {
   decodeDesignDocument,
   encodeDesignDocument,
+  TRANSIENT_SLOT_FIELDS,
 } from '../../utils/projectCodec.js'
 import {
   VARIABLE_PARAMETER_TYPES,
@@ -20,6 +21,7 @@ import {
   isWildcardType,
   parameterTypeIsNumber,
   parameterTypeSupportsVariableType,
+  parseNumericParameterValue,
   parseJuliaType,
   resetValueForType,
 } from '../../utils/parameterTypes.js'
@@ -33,14 +35,8 @@ import {
 } from '../../utils/representations.js'
 
 const SIMULATION_LOCK_MESSAGE = 'Reset the simulation before changing the design.'
-const RUNTIME_SLOT_FIELDS = new Set([
-  'isLocked',
-  'assignment',
-  'lastOperationTime',
-  'representationType',
-  'ui_expanded',
-  'renderedResult',
-])
+const RUNTIME_SLOT_FIELDS = new Set(TRANSIENT_SLOT_FIELDS)
+export const DUPLICATE_PHYSICAL_EDGE_REASON = 'DUPLICATE_PHYSICAL_EDGE'
 
 export class DesignCommandError extends Error {
   constructor(code, message, { retryable = false, details = {} } = {}) {
@@ -477,6 +473,10 @@ export class DesignCommandService {
     }
 
     const live = this.getProject()
+    // Handlers may mutate before later validation or asynchronous preview work
+    // fails, and generators may destructively rebuild topology. The candidate
+    // isolates those partial changes; the second codec pass applies shared
+    // structural normalization, and reconciliation is the atomic commit boundary.
     const candidate = decodeDesignDocument(encodeDesignDocument(live), {
       defaultBackgroundNoise: this.defaultBackgroundNoise,
       minimumTime: 0,
@@ -686,6 +686,7 @@ export class DesignCommandService {
         throw new DesignCommandError(
           'VALIDATION_FAILED',
           'Only one physical edge may connect a pair of nodes.',
+          { details: { reason: DUPLICATE_PHYSICAL_EDGE_REASON } },
         )
       }
     }
@@ -754,6 +755,7 @@ export class DesignCommandService {
       throw new DesignCommandError(
         'VALIDATION_FAILED',
         'Only one physical edge may connect a pair of nodes.',
+        { details: { reason: DUPLICATE_PHYSICAL_EDGE_REASON } },
       )
     }
     setEdgeCorrectNodeOrder(edge, project.net.nodes)
@@ -926,24 +928,14 @@ export class DesignCommandService {
       return value
     }
     if (parameterTypeIsNumber(type)) {
-      if (value === '') return null
-      const number = Number(value)
-      const normalizedType = String(type).toLowerCase()
-      const minimum = Number(parameter.min)
-      const maximum = Number(parameter.max)
-      if (
-        !Number.isFinite(number)
-        || ((normalizedType === 'int' || normalizedType === 'int64')
-          && !Number.isInteger(number))
-        || (Number.isFinite(minimum) && number < minimum)
-        || (Number.isFinite(maximum) && number > maximum)
-      ) {
+      const numeric = parseNumericParameterValue(type, value, parameter)
+      if (!numeric.valid) {
         throw new DesignCommandError(
           'VALIDATION_FAILED',
           `${label} is not a valid ${type} value.`,
         )
       }
-      return number
+      return numeric.value
     }
     if (type === 'Bool') {
       if (typeof value !== 'boolean') {

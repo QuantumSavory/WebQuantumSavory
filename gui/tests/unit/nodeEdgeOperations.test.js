@@ -5,7 +5,10 @@ import { useNodeEdgeOperations } from '../../src/composables/useNodeEdgeOperatio
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../../src/utils/projectCodec'
 import Edge from '../../src/models/Edge'
 import Node from '../../src/models/Node'
-import { DesignCommandService } from '../../src/domain/design/DesignCommandService'
+import {
+  DUPLICATE_PHYSICAL_EDGE_REASON,
+  DesignCommandService,
+} from '../../src/domain/design/DesignCommandService'
 
 function sharedExecutor(projectData) {
   const service = new DesignCommandService({
@@ -60,6 +63,77 @@ describe('node and edge operation map state', () => {
       isLogic: true,
     }))
     expect(projectData.value.net.edges).toHaveLength(2)
+  })
+
+  it('recognizes duplicate edges by structured reason rather than message text', async () => {
+    const nodeA = new Node({ id: 'a', name: 'A', position: [-72, 42] })
+    const nodeB = new Node({ id: 'b', name: 'B', position: [-71, 42] })
+    const projectData = ref({ net: { nodes: [nodeA, nodeB], edges: [] } })
+    const alert = vi.fn()
+    const error = Object.assign(new Error('Localized duplicate-edge message'), {
+      code: 'VALIDATION_FAILED',
+      details: { reason: DUPLICATE_PHYSICAL_EDGE_REASON },
+    })
+    const operations = useNodeEdgeOperations(projectData, ref(false), vi.fn(), {
+      showAlert: alert,
+      executeDesignOperations: vi.fn(async () => {
+        throw error
+      }),
+    })
+
+    await operations.handleEdgeCreated(new Edge({
+      id: 'duplicate',
+      source: nodeA,
+      target: nodeB,
+    }))
+
+    expect(alert).toHaveBeenCalledWith(
+      'Duplicate physical edge',
+      'Localized duplicate-edge message',
+    )
+  })
+
+  it('reports failed fire-and-forget node creation without logging success', async () => {
+    const projectData = ref({ net: { nodes: [], edges: [] } })
+    const alert = vi.fn()
+    const addLog = vi.fn()
+    const operations = useNodeEdgeOperations(projectData, ref(false), addLog, {
+      showAlert: alert,
+      executeDesignOperations: vi.fn(async () => {
+        throw new Error('Creation failed')
+      }),
+    })
+
+    operations.handleMapClick({
+      lngLat: { lng: -72, lat: 42 },
+      originalEvent: { altKey: true },
+    })
+
+    await vi.waitFor(() => {
+      expect(alert).toHaveBeenCalledWith('Unable to create node', 'Creation failed')
+    })
+    expect(addLog).not.toHaveBeenCalled()
+  })
+
+  it('reports failed fire-and-forget node reordering without logging success', async () => {
+    const nodeA = new Node({ id: 'a', name: 'A', position: [-72, 42] })
+    const nodeB = new Node({ id: 'b', name: 'B', position: [-71, 42] })
+    const projectData = ref({ net: { nodes: [nodeA, nodeB], edges: [] } })
+    const alert = vi.fn()
+    const addLog = vi.fn()
+    const operations = useNodeEdgeOperations(projectData, ref(false), addLog, {
+      showAlert: alert,
+      executeDesignOperations: vi.fn(async () => {
+        throw new Error('Reorder failed')
+      }),
+    })
+
+    expect(operations.moveNode(0, 1)).toBe(true)
+
+    await vi.waitFor(() => {
+      expect(alert).toHaveBeenCalledWith('Unable to reorder node', 'Reorder failed')
+    })
+    expect(addLog).not.toHaveBeenCalled()
   })
 
   it('deletes annotations while simulation editing is locked and preserves object identity until removal', async () => {
