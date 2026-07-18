@@ -154,6 +154,9 @@
               :show-timestamps="showTimestamps"
               :allow-clear="allowClear"
               :simulation-log-groups="simulationLogGroups"
+              :nodes="projectData.net?.nodes || []"
+              :project-key="projectName"
+              :reset-key="logsResetKey"
               @clear-logs="emit('clear-logs')"
               @log-click="forwardLogClick"
             />
@@ -309,6 +312,10 @@ const props = defineProps({
   logs: {
     type: Array,
     default: () => []
+  },
+  logsResetKey: {
+    type: Number,
+    default: 0
   },
   maxLogs: {
     type: Number,
@@ -619,11 +626,12 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   max-height: none;
+  overflow: visible;
 }
 
 .bottom-panel :deep(.panel-content) {
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .bottom-panel-body {
@@ -684,6 +692,10 @@ onMounted(() => {
   padding-top: 8px;
   overflow: auto;
   outline: none;
+}
+
+#bottom-panel-logs-content {
+  overflow: visible;
 }
 
 .bottom-tab-panel > * {

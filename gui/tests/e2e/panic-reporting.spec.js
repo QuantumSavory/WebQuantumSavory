@@ -216,13 +216,15 @@ test('reports a diagnostic protocol panic without uploading the project', async 
   const messageDisclosure = panicLog.getByRole('button', { name: /Show panic details/ })
   const rawDisclosure = panicLog.getByRole('button', { name: /Show raw JSON/ })
   await messageDisclosure.click()
-  await expect(panicLog.getByLabel('Complete simulator message')).toBeVisible()
+  await expect(panicLog.getByLabel('Structured simulator details')).toBeVisible()
+  await expect(panicLog.getByRole('heading', { name: 'Context' })).toBeVisible()
+  await expect(panicLog.getByRole('heading', { name: 'Panic details' })).toBeVisible()
   await expect(panicLog.locator('.panic-exception-type')).toContainText('BoundsError')
   await expect(panicLog.locator('.panic-stacktrace')).toContainText('MockBrokenProtocol')
   await expect(panicLog.getByLabel('Raw log JSON')).toHaveCount(0)
 
   await rawDisclosure.click()
-  await expect(panicLog.getByLabel('Complete simulator message')).toBeVisible()
+  await expect(panicLog.getByLabel('Structured simulator details')).toBeVisible()
   await expect(panicLog.getByLabel('Raw log JSON')).toBeVisible()
 
   await page.getByLabel('Search logs').fill('[100]')

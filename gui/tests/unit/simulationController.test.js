@@ -373,6 +373,28 @@ describe('simulation controller polling ownership', () => {
     stop()
   })
 
+  it('ingests consecutive stable-message events when their backend IDs differ', async () => {
+    const records = ['pair-1', 'pair-2'].map(id => ({
+      id,
+      timestamp: '2026-07-13T12:00:00.000Z',
+      source: 'Simulator',
+      severity: 'debug',
+      message: 'Entangled a pair',
+      group: 'protocol',
+      event: 'pair_entangled'
+    }))
+    const api = {
+      getBackendLogs: vi.fn(async () => ({ success: true, logs: records }))
+    }
+    const { controller, addLog, stop } = createController(api)
+
+    await controller.fetchBackendLogs()
+
+    expect(addLog).toHaveBeenCalledTimes(2)
+    expect(addLog.mock.calls.map(call => call[4].id)).toEqual(['pair-1', 'pair-2'])
+    stop()
+  })
+
   it('deduplicates a panic racing between state and log polling', async () => {
     const panic = {
       id: 'panic-1',

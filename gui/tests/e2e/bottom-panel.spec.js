@@ -85,6 +85,22 @@ async function replaceApplicationLogs(page, logs) {
   })))
 }
 
+async function replaceProjectNodes(page, names) {
+  await page.evaluate(nodeNames => {
+    const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+    const projectData = setupState?.projectData?.value ?? setupState?.projectData
+    if (!Array.isArray(projectData?.net?.nodes)) {
+      throw new Error('Reactive project nodes are unavailable')
+    }
+    projectData.net.nodes.splice(0, projectData.net.nodes.length, ...nodeNames.map((name, index) => ({
+      id: `node_${index + 1}`,
+      name,
+      position: [-72 + index, 42],
+      data: { slots: [], protocols: [] },
+    })))
+  }, names)
+}
+
 test.describe('Bottom panel logs', () => {
   test.beforeEach(async ({ page }) => {
     await loadApp(page)
@@ -176,16 +192,16 @@ test.describe('Bottom panel logs', () => {
 
     await expect(logEntries).toHaveCount(4)
 
-    const simulatorGroupFilters = panel.getByRole('group', {
-      name: 'Filter Simulator logs by group',
-    })
-    await expect(simulatorGroupFilters.getByRole('button')).toHaveText([
-      'Backend',
-      'Network',
-      'Protocol',
-      'Simulation',
-      'Visualization',
-    ])
+    await panel.locator('.log-filters summary').click()
+    for (const group of [
+      'backend',
+      'network',
+      'protocol',
+      'simulation',
+      'visualization',
+    ]) {
+      await expect(panel.getByLabel(group, { exact: true })).toBeAttached()
+    }
 
     const protocolLog = panel.getByRole('article', {
       name: 'warning log from Simulator · Protocol',
@@ -199,38 +215,22 @@ test.describe('Bottom panel logs', () => {
     await expect(protocolLog.locator('[aria-label="Raw log JSON"]'))
       .toContainText('"group": "protocol"')
 
-    const errorFilter = panel.getByRole('button', {
-      name: 'Filter Error severity logs',
-      exact: true,
-    })
-    const webApiFilter = panel.getByRole('button', {
-      name: 'Filter Web API source logs',
-      exact: true,
-    })
-    const protocolFilter = simulatorGroupFilters.getByRole('button', {
-      name: 'Filter Protocol simulation group logs',
-      exact: true,
-    })
+    const warningFilter = panel.getByLabel('Warning', { exact: true })
+    const simulatorFilter = panel.getByLabel('Simulator', { exact: true })
+    const protocolFilter = panel.getByLabel('protocol', { exact: true })
 
-    await expect(errorFilter).toHaveAttribute('aria-pressed', 'true')
-    await expect(webApiFilter).toHaveAttribute('aria-pressed', 'true')
-    await expect(protocolFilter).toHaveAttribute('aria-pressed', 'true')
-
-    await errorFilter.click()
-    await expect(errorFilter).toHaveAttribute('aria-pressed', 'false')
-    await expect(logEntries).toHaveCount(3)
-    await expect(panel.getByText('Network delivery failed', { exact: true })).toHaveCount(0)
-
-    await webApiFilter.click()
-    await expect(webApiFilter).toHaveAttribute('aria-pressed', 'false')
+    await warningFilter.check()
     await expect(logEntries).toHaveCount(2)
-    await expect(panel.getByText('Web request needs attention', { exact: true })).toHaveCount(0)
+    await expect(panel.getByText('Web request needs attention', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Protocol retry scheduled', { exact: true })).toBeVisible()
 
-    await protocolFilter.click()
-    await expect(protocolFilter).toHaveAttribute('aria-pressed', 'false')
+    await simulatorFilter.check()
     await expect(logEntries).toHaveCount(1)
-    await expect(panel.getByText('Protocol retry scheduled', { exact: true })).toHaveCount(0)
-    await expect(panel.getByText('Map interaction completed', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Protocol retry scheduled', { exact: true })).toBeVisible()
+
+    await protocolFilter.check()
+    await expect(logEntries).toHaveCount(1)
+    await expect(panel.locator('.log-match-count')).toHaveText('1 matching / 4 total')
   })
 
   test('retains roving focus and keyboard tab selection', async ({ page }) => {
@@ -314,5 +314,78 @@ test.describe('Bottom panel logs', () => {
     await page.keyboard.press('ArrowLeft')
     await expect(exportScriptTab).toBeFocused()
     await expect(exportScriptTab).toHaveAttribute('aria-selected', 'true')
+  })
+
+  test('filters structured pair events without changing Logs-tab severity counts', async ({ page }) => {
+    await replaceProjectNodes(page, ['Amherst', 'Cambridge', 'Boston'])
+    await replaceApplicationLogs(page, [
+      {
+        id: 'pair-a',
+        level: 'debug',
+        source: 'Simulator',
+        message: 'Entangled a pair',
+        raw: {
+          group: 'protocol',
+          event: 'pair_entangled',
+          sim_time: 1,
+          protocol: 'EntanglerProt',
+          nodes: [1, 2],
+        },
+      },
+      {
+        id: 'pair-b',
+        level: 'warning',
+        source: 'Simulator',
+        message: 'Entangled a pair',
+        raw: {
+          group: 'protocol',
+          event: 'pair_entangled',
+          sim_time: 2,
+          protocol: 'CustomProtocol',
+          nodes: [2, 3],
+        },
+      },
+      {
+        id: 'network-event',
+        level: 'error',
+        source: 'Simulator',
+        message: 'Forwarded a message',
+        raw: {
+          group: 'network',
+          event: 'message_forwarded',
+          sim_time: 2,
+          protocol: 'RoutingProtocol',
+          src_node: 1,
+          dst_node: 3,
+        },
+      },
+    ])
+
+    const panel = page.locator('#logsPanel')
+    const logsTab = page.locator('#bottom-panel-logs-tab')
+    await panel.locator('.log-filters summary').click()
+    await panel.getByLabel('Debug', { exact: true }).check()
+    await panel.getByLabel('Warning', { exact: true }).check()
+    await panel.getByLabel('Simulator', { exact: true }).check()
+    await panel.getByLabel('protocol', { exact: true }).check()
+    await panel.getByLabel('pair_entangled', { exact: true }).check()
+    await panel.getByLabel('Cambridge', { exact: true }).check()
+    await panel.getByLabel('Simulated time from').fill('1')
+    await panel.getByLabel('Simulated time to').fill('2')
+
+    await expect(panel.locator('.log-entry-container')).toHaveCount(2)
+    await expect(panel.locator('.log-match-count')).toHaveText('2 matching / 3 total')
+    await panel.getByLabel('CustomProtocol', { exact: true }).check()
+    await expect(panel.locator('.log-entry-container')).toHaveCount(1)
+    await expect(panel.locator('.log-entry-container')).toHaveAttribute('data-log-id', 'pair-b')
+
+    await expect(logsTab.locator('.badge-debug')).toHaveText('1')
+    await expect(logsTab.locator('.badge-warning')).toHaveText('1')
+    await expect(logsTab.locator('.badge-error')).toHaveText('1')
+
+    await panel.locator('.log-filters summary').click()
+    await panel.getByRole('button', { name: 'Clear all' }).click()
+    await expect(panel.locator('.log-entry-container')).toHaveCount(3)
+    await expect(panel.locator('.log-match-count')).toHaveText('3 matching / 3 total')
   })
 })

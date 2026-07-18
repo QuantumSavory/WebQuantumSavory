@@ -2247,7 +2247,36 @@ end
                       group:
                         type: string
                         nullable: true
-                        description: Optional canonical QuantumSavory group identifier, including groups recovered from hygienically renamed ResumableFunctions metadata
+                        description: Canonical QuantumSavory log family recovered from ordinary and hygienically renamed structured metadata; legacy records retain their original group
+                      event:
+                        type: string
+                        nullable: true
+                        description: Event identifier discovered from the emitting component; event vocabularies are extensible
+                      sim_time:
+                        type: number
+                        format: double
+                        nullable: true
+                        description: Simulated time at which the record was emitted
+                      sim_process_id:
+                        nullable: true
+                        description: ConcurrentSim process identity; oversized integer identities are exact decimal strings
+                        oneOf:
+                          - type: integer
+                          - type: string
+                            pattern: '^-?[0-9]+\$'
+                      protocol:
+                        type: string
+                        nullable: true
+                        description: Concrete protocol type associated with the record
+                      nodes:
+                        type: array
+                        nullable: true
+                        description: Ordered 1-based simulator node identities associated with the protocol
+                        items:
+                          oneOf:
+                            - type: integer
+                            - type: string
+                              pattern: '^-?[0-9]+\$'
                       logging_id:
                         type: string
                         nullable: true
@@ -2265,7 +2294,7 @@ end
                         nullable: true
                         description: Complete formatted stacktrace, present on panic records
                     additionalProperties: true
-                    description: Logger keyword arguments are retained as additional JSON-safe structured fields.
+                    description: Event-specific logger metadata is retained as additional JSON-safe fields. Integers outside JavaScript's safe range are serialized as exact decimal strings.
                 count:
                   type: integer
                   description: Number of log events returned
