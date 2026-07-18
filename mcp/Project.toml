@@ -1,0 +1,18 @@
+name = "WebQuantumSavoryMCP"
+uuid = "d3692f8a-3119-4d91-a4ec-510c2f0c862a"
+version = "1.0.0"
+
+[deps]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+ModelContextProtocol = "c58f755f-f2a7-4f48-bf29-4e9659b78499"
+
+[compat]
+Base64 = "1"
+HTTP = "1"
+JSON3 = "1"
+Logging = "1"
+ModelContextProtocol = "0.6"
+julia = "1.11"

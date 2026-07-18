@@ -27,11 +27,12 @@
     </div>
     <div class="protocol-container" v-if="isSelected">
       <ProtocolConstructorForm
-        :protocol="protocol"
+        :protocol="draftProtocol"
         :category="category"
         :variables="variables"
         :editing-locked="editingLocked"
         empty-text=""
+        @commit="commitDraft"
       />
     </div>
   </div>
@@ -40,10 +41,12 @@
 
 
 <script setup>
+import { ref, watch } from 'vue'
 import { ChartNoAxesCombined, Trash2 } from '@lucide/vue'
 import ProtocolConstructorForm from './ProtocolConstructorForm.vue'
 import { useUiServices } from '../../composables/uiServices'
 import { protocolSimpleName } from '../../utils/protocolConstructors.js'
+import { deepClone } from '../../utils/protocolConstructors.js'
 
 const props = defineProps({
   protocol: {
@@ -72,8 +75,24 @@ const props = defineProps({
     default: () => []
   }
 })
-const emit = defineEmits(['select', 'delete'])
+const emit = defineEmits(['select', 'delete', 'update'])
 const { showResultsView } = useUiServices()
+const draftProtocol = ref(deepClone(props.protocol))
+
+watch(
+  () => props.protocol,
+  protocol => {
+    draftProtocol.value = deepClone(protocol)
+  },
+  { deep: true },
+)
+
+function commitDraft() {
+  emit('update', {
+    id: props.protocol.id,
+    parameters: deepClone(draftProtocol.value.parameters || []),
+  })
+}
 
 function toggleDetails(){
   emit('select', props.protocol)

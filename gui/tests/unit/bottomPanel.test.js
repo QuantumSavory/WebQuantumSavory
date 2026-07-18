@@ -60,6 +60,10 @@ function mountPanel(availableBounds, extraProps = {}) {
         ExportScriptPanel: true,
         LayoutToolsPanel: LayoutToolsPanelStub,
         LogsPanel: true,
+        McpPanel: {
+          props: ['active'],
+          template: '<div data-testid="mcp-panel-stub" :data-active="active" />'
+        },
         StatesZooPanel: true,
         TagsQueriesPanel: true,
         VariablesPanel: true
@@ -172,5 +176,29 @@ describe('BottomPanel bounds contract', () => {
 
     await layoutTools.trigger('click')
     expect(wrapper.emitted('add-annotation')).toEqual([[]])
+  })
+
+  it('inserts the MCP tab only when the capability is available', async () => {
+    const wrapper = mountPanel(
+      { left: 0, right: 1000, top: 0, bottom: 800 },
+      { mcpAvailable: false }
+    )
+
+    expect(wrapper.find('#bottom-panel-mcp-tab').exists()).toBe(false)
+    await wrapper.setProps({
+      mcpAvailable: true,
+      mcpClient: {},
+      mcpBridge: {}
+    })
+    await nextTick()
+
+    const mcpTab = wrapper.get('#bottom-panel-mcp-tab')
+    await wrapper.get('#bottom-panel-logs-tab').trigger('keydown', { key: 'End' })
+    expect(mcpTab.attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-testid="mcp-panel-stub"]').attributes('data-active')).toBe('true')
+
+    await wrapper.setProps({ mcpAvailable: false })
+    await nextTick()
+    expect(wrapper.get('#bottom-panel-logs-tab').attributes('aria-selected')).toBe('true')
   })
 })

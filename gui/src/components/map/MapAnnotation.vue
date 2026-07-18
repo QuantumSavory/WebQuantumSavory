@@ -27,6 +27,8 @@
       :annotation="annotation"
       :is-selected="isSelected"
       @select="(...args) => emit('select', ...args)"
+      @update="annotation => emit('update', annotation)"
+      @interaction-busy="busy => emit('interactionBusy', busy)"
     />
   </div>
 </template>
@@ -48,7 +50,7 @@ const props = defineProps({
   nextAnnotationId: { type: String, default: '' },
 })
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'update', 'interactionBusy'])
 const annotationFeature = computed(() => annotationToGeoJSON(props.annotation))
 const areaFeature = computed(() => annotationAreaToGeoJSON(props.annotation))
 const nextAnnotationLayerId = computed(() => (

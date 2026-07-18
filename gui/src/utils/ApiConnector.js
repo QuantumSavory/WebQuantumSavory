@@ -255,8 +255,7 @@ export class ApiConnector {
   }
 
   async listTags(projectName, target, { signal } = {}) {
-    const uuid = this.getUserUuid()
-    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const namespace = pathSegment(this.getScopedSimulationName(projectName))
     const query = new URLSearchParams(tagTargetPayload(target))
     const res = await fetch(`${this.baseUrl}/tags/${namespace}?${query}`, {
       headers: this.requestHeaders,
@@ -266,8 +265,7 @@ export class ApiConnector {
   }
 
   async attachTag(projectName, target, tag, { signal } = {}) {
-    const uuid = this.getUserUuid()
-    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const namespace = pathSegment(this.getScopedSimulationName(projectName))
     const res = await fetch(`${this.baseUrl}/tags/${namespace}`, {
       headers: this.requestHeaders,
       method: 'POST',
@@ -278,8 +276,7 @@ export class ApiConnector {
   }
 
   async deleteTag(projectName, target, tagId, { signal } = {}) {
-    const uuid = this.getUserUuid()
-    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const namespace = pathSegment(this.getScopedSimulationName(projectName))
     const query = new URLSearchParams(tagTargetPayload(target))
     const res = await fetch(
       `${this.baseUrl}/tags/${namespace}/${pathSegment(tagId)}?${query}`,
@@ -293,8 +290,7 @@ export class ApiConnector {
   }
 
   async queryTags(projectName, target, querySpec, { signal } = {}) {
-    const uuid = this.getUserUuid()
-    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const namespace = pathSegment(this.getScopedSimulationName(projectName))
     const res = await fetch(`${this.baseUrl}/tag_queries/${namespace}`, {
       headers: this.requestHeaders,
       method: 'POST',
@@ -318,6 +314,10 @@ export class ApiConnector {
     return uuid
   }
 
+  getScopedSimulationName(projectName) {
+    return scopedProjectName(this.getUserUuid(), projectName)
+  }
+
   getDefaultBgNoise(){
     return {
       type: 'default',
@@ -329,7 +329,10 @@ export class ApiConnector {
   async init() {
     try {
       this._loading.value = true
-      await this.fetchKnownFunctions();
+      await Promise.all([
+        this.fetchKnownFunctions(),
+        this.fetchStatesZooTypes(),
+      ])
       // Get background noise types
       const res = await fetch(`${this.baseUrl}/background_types`, {
         headers: this.requestHeaders,
@@ -338,6 +341,15 @@ export class ApiConnector {
       const responseObject = await res.json()
       this._config.value.bgNoiseOptions = [ ...responseObject.background_types ];
       this._config.value.bgNoiseOptions.unshift( this.getDefaultBgNoise() );
+
+      const slotResponse = await fetch(`${this.baseUrl}/slot_types`, {
+        headers: this.requestHeaders,
+      })
+      if (!slotResponse.ok) throw new Error(`Slot types fetch failed: ${slotResponse.status}`)
+      const slotCatalog = await slotResponse.json()
+      this._config.value.slotTypes = Array.isArray(slotCatalog.slot_types)
+        ? [ ...slotCatalog.slot_types ]
+        : ['Qubit', 'Qumode']
 
       // Get protocol types
       const resProtTypes = await fetch(`${this.baseUrl}/protocol_types`, {
@@ -422,11 +434,10 @@ export class ApiConnector {
   async destroySimulation(projectName){
     try{
       this._loading.value = true
-      const uuid = this.getUserUuid()
       const res = await fetch(`${this.baseUrl}/destroy_simulation`, {
         headers: this.requestHeaders,
         method: 'POST',
-        body: JSON.stringify({ name: scopedProjectName(uuid, projectName) })
+        body: JSON.stringify({ name: this.getScopedSimulationName(projectName) })
       })
       return res.json()
     } catch (e) {
@@ -441,10 +452,9 @@ export class ApiConnector {
   async parseNetworkGraph(data){
     try{
       this._loading.value = true
-      const uuid = this.getUserUuid()
       const modifiedData = {
         ...data,
-        name: scopedProjectName(uuid, data.name)
+        name: this.getScopedSimulationName(data.name)
       }
       const res = await fetch(`${this.baseUrl}/parse_network_graph`, {
         headers: this.requestHeaders,
@@ -463,11 +473,10 @@ export class ApiConnector {
   async prepareSimulation(data){
     try{
       this._loading.value = true
-      const uuid = this.getUserUuid()
       const res = await fetch(`${this.baseUrl}/prepare_simulation`, {
         headers: this.requestHeaders,
         method: 'POST',
-        body: JSON.stringify({ name: scopedProjectName(uuid, data.name) })
+        body: JSON.stringify({ name: this.getScopedSimulationName(data.name) })
       })
       return res.json()
     } catch (e) {
@@ -484,8 +493,7 @@ export class ApiConnector {
       : projectNameOrData?.name
     try{
       this._loading.value = true
-      const uuid = this.getUserUuid()
-      const query = new URLSearchParams({ name: scopedProjectName(uuid, projectName) })
+      const query = new URLSearchParams({ name: this.getScopedSimulationName(projectName) })
       const res = await fetch(`${this.baseUrl}/get_state?${query}`, {
         headers: this.requestHeaders,
         method: 'GET',
@@ -507,11 +515,10 @@ export class ApiConnector {
   async runSimulation( projectName, time_units){
     try{
       this._loading.value = true
-      const uuid = this.getUserUuid()
       const res = await fetch(`${this.baseUrl}/run_simulation`, {
         headers: this.requestHeaders,
         method: 'POST',
-        body: JSON.stringify({ name: scopedProjectName(uuid, projectName), time_units })
+        body: JSON.stringify({ name: this.getScopedSimulationName(projectName), time_units })
       })
       return res.json()
     } catch (e) {
@@ -525,11 +532,10 @@ export class ApiConnector {
   async pauseSimulation( projectName ){
     try{
       this._loading.value = true
-      const uuid = this.getUserUuid()
       const res = await fetch(`${this.baseUrl}/pause_simulation`, {
         headers: this.requestHeaders,
         method: 'POST',
-        body: JSON.stringify({ name: scopedProjectName(uuid, projectName) })
+        body: JSON.stringify({ name: this.getScopedSimulationName(projectName) })
       })
       return res.json()
     } catch (e) {
@@ -543,8 +549,7 @@ export class ApiConnector {
 
   
   async getProtocolResults( projectName, protocolObject, { signal } = {} ){
-    const uuid = this.getUserUuid()
-    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const namespace = pathSegment(this.getScopedSimulationName(projectName))
     const protocolId = pathSegment(protocolObject.id)
     const res = await fetch(`${this.baseUrl}/protocols/${namespace}/${protocolId}`, {
       headers: this.requestHeaders,
@@ -557,8 +562,7 @@ export class ApiConnector {
   }
   
   async getSlotResults( projectName, slotObject, { signal } = {} ){
-    const uuid = this.getUserUuid()
-    const namespace = pathSegment(scopedProjectName(uuid, projectName))
+    const namespace = pathSegment(this.getScopedSimulationName(projectName))
     const slotId = pathSegment(slotObject.id)
     const res = await fetch(`${this.baseUrl}/slots/${namespace}/${slotId}`, {
       headers: this.requestHeaders,
@@ -627,8 +631,7 @@ export class ApiConnector {
   async getBackendLogs( projectName, purge = true, { signal } = {} ){
     try{
       this._loading.value = true
-      const uuid = this.getUserUuid()
-      const namespace = pathSegment(scopedProjectName(uuid, projectName))
+      const namespace = pathSegment(this.getScopedSimulationName(projectName))
       const query = new URLSearchParams({ purge: String(purge) })
       const res = await fetch(`${this.baseUrl}/logs/${namespace}?${query}`, {
         headers: this.requestHeaders,

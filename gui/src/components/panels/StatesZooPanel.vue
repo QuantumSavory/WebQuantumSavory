@@ -38,7 +38,7 @@
           <label class="states-zoo-field states-zoo-name-field">
             <span>Name</span>
             <input
-              :value="variable.name"
+              :value="stateDraft(variable).name"
               type="text"
               class="states-zoo-name-input"
               :class="{ 'invalid-states-zoo-name': !!variableNameError(variable) }"
@@ -76,17 +76,18 @@
               <span>State type</span>
               <select
                 class="states-zoo-type-select"
-                :value="variable.value.state_type"
+                :value="stateDraft(variable).value.state_type"
                 :aria-label="`State type for ${variable.name || variable.id}`"
+                :aria-invalid="!stateType(stateDraft(variable).value.state_type)"
                 :disabled="disabled || typesLoading || statesZooTypes.length === 0"
                 @change="changeStateType(variable, $event.target.value)"
               >
                 <option
-                  v-if="!stateType(variable.value.state_type)"
-                  :value="variable.value.state_type"
+                  v-if="!stateType(stateDraft(variable).value.state_type)"
+                  :value="stateDraft(variable).value.state_type"
                   disabled
                 >
-                  Unavailable type ({{ variable.value.state_type }})
+                  Unavailable type ({{ stateDraft(variable).value.state_type }})
                 </option>
                 <option
                   v-for="type in statesZooTypes"
@@ -119,8 +120,9 @@
                   :min="parameter.min"
                   :max="parameter.max"
                   step="any"
-                  :value="variable.value.parameters[parameter.name]"
+                  :value="stateDraft(variable).value.parameters[parameter.name]"
                   :aria-label="`${parameter.name} range for ${variable.name || variable.id}`"
+                  :aria-invalid="parameterValueInvalid(variable, parameter)"
                   :disabled="disabled"
                   @input="changeParameter(variable, parameter.name, $event.target.value)"
                 />
@@ -130,8 +132,9 @@
                   :min="parameter.min"
                   :max="parameter.max"
                   step="any"
-                  :value="variable.value.parameters[parameter.name]"
+                  :value="stateDraft(variable).value.parameters[parameter.name]"
                   :aria-label="`${parameter.name} value for ${variable.name || variable.id}`"
+                  :aria-invalid="parameterValueInvalid(variable, parameter)"
                   :disabled="disabled"
                   @input="changeParameter(variable, parameter.name, $event.target.value)"
                 />
@@ -139,7 +142,7 @@
             </div>
 
             <p
-              v-if="!stateType(variable.value.state_type) && !typesLoading"
+              v-if="!stateType(stateDraft(variable).value.state_type) && !typesLoading"
               class="states-zoo-row-type-error"
               role="alert"
             >
@@ -204,15 +207,16 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, toRaw, watch } from 'vue'
 import { LoaderCircle, Plus, Trash2 } from '@lucide/vue'
-import Variable, {
-  STATES_ZOO_VALUE_KIND,
+import { EDITOR_DRAFT_REGISTRY_KEY } from '../../composables/editorDraftRegistry'
+import {
   isStatesZooTraceVariable,
   isStatesZooVariable,
   isVariableReferenced
 } from '../../models/Variable'
 import { api } from '../../utils/ApiConnector'
+import { generateUUid } from '../../utils/Utils'
 
 const PREVIEW_DEBOUNCE_MS = 500
 
@@ -230,6 +234,7 @@ const props = defineProps({
     default: false
   }
 })
+const emit = defineEmits(['designOperations'])
 
 const statesZooTypes = ref([])
 const typesLoading = ref(false)
@@ -238,6 +243,11 @@ const previewStates = reactive({})
 const previewTimers = new Map()
 const previewControllers = new Map()
 const previewGenerations = new Map()
+const stateDrafts = reactive({})
+const dirtyStateDrafts = new Set()
+const stateDraftVersions = new Map()
+const pendingStateCommits = new Map()
+const draftRegistry = inject(EDITOR_DRAFT_REGISTRY_KEY, null)
 let catalogController = null
 let isUnmounted = false
 
@@ -268,7 +278,7 @@ function stateType(typeId) {
 }
 
 function parametersFor(variable) {
-  return stateType(variable.value.state_type)?.parameters || []
+  return stateType(stateDraft(variable).value.state_type)?.parameters || []
 }
 
 function defaultParameters(type) {
@@ -293,11 +303,11 @@ function traceVariable(variable) {
 }
 
 function isWeighted(variable) {
-  return stateType(variable.value.state_type)?.weighted === true
+  return stateType(stateDraft(variable).value.state_type)?.weighted === true
 }
 
 function traceName(variable) {
-  return `${variable.name}_tr`
+  return `${stateDraft(variable).name}_tr`
 }
 
 function traceIdCollisionError(variable) {
@@ -332,52 +342,9 @@ function clearTraceLifecycleError(variable) {
   if (state.error.startsWith('Cannot generate trace variable')) state.error = ''
 }
 
-function syncTraceVariableName(variable) {
-  const lifecycleError = traceLifecycleError(variable)
-  if (lifecycleError) throw new Error(lifecycleError)
-  const companion = traceVariable(variable)
-  if (!companion) return false
-  companion.name = traceName(variable)
-  return true
-}
-
-function updateTraceVariable(variable, rawTrace) {
-  const trace = Math.abs(Number(rawTrace))
-  if (!Number.isFinite(trace)) {
-    throw new Error('The server returned an invalid state trace')
-  }
-
-  const lifecycleError = traceLifecycleError(variable)
-  if (lifecycleError) throw new Error(lifecycleError)
-
-  const existing = traceVariable(variable)
-  if (existing) {
-    existing.name = traceName(variable)
-    existing.type = 'Float64'
-    existing.value = trace
-    return
-  }
-
-  props.variables.push(new Variable({
-    id: traceVariableId(variable),
-    name: traceName(variable),
-    type: 'Float64',
-    value: trace,
-    statesZooTraceSourceId: variable.id
-  }))
-}
-
 function traceIsReferenced(variable) {
   const companion = traceVariable(variable)
   return !!companion && isReferenced(companion.id)
-}
-
-function removeTraceVariable(variable) {
-  const companion = traceVariable(variable)
-  if (!companion || isReferenced(companion.id)) return false
-  const index = props.variables.indexOf(companion)
-  if (index !== -1) props.variables.splice(index, 1)
-  return true
 }
 
 function previewState(variableId) {
@@ -405,38 +372,41 @@ function nextVariableName() {
 function addStateVariable() {
   if (props.disabled || statesZooTypes.value.length === 0) return
   const type = statesZooTypes.value[0]
-  props.variables.push(new Variable({
-    name: nextVariableName(),
-    type: 'Symbolic',
-    value: {
-      kind: STATES_ZOO_VALUE_KIND,
-      state_type: type.id,
-      parameters: defaultParameters(type)
-    }
-  }))
+  const id = generateUUid('variable')
+  emit(
+    'designOperations',
+    [{
+      kind: 'states.create',
+      id,
+      value: {
+        name: nextVariableName(),
+        state_type: type.id,
+        parameters: defaultParameters(type),
+      },
+    }],
+    () => {
+      const variable = props.variables.find(candidate => candidate.id === id)
+      if (variable) schedulePreview(variable, 0)
+    },
+  )
 }
 
 function changeStateName(variable, rawName) {
   if (props.disabled) return
-  variable.name = rawName.trim()
-  if (!isWeighted(variable)) return
-  try {
-    const synchronized = syncTraceVariableName(variable)
-    clearTraceLifecycleError(variable)
-    if (!synchronized) schedulePreview(variable)
-  } catch (error) {
-    setTraceLifecycleError(variable, error.message)
-  }
+  const draft = stateDraft(variable)
+  draft.name = rawName
+  markStateDraftDirty(variable.id)
+  if (!draft.name.trim() || variableNameError(variable)) return
+  commitStateDraft(variable)
 }
 
 function deleteStateVariable(variable) {
   if (props.disabled || stateDeleteBlocked(variable)) return
   cleanupPreview(variable.id)
-  const companion = traceVariable(variable)
-  const removed = new Set([variable, companion].filter(Boolean))
-  for (let index = props.variables.length - 1; index >= 0; index -= 1) {
-    if (removed.has(props.variables[index])) props.variables.splice(index, 1)
-  }
+  emit('designOperations', [{
+    kind: 'states.remove',
+    variable_id: variable.id,
+  }])
 }
 
 function changeStateType(variable, typeId) {
@@ -450,17 +420,178 @@ function changeStateType(variable, typeId) {
     )
     return
   }
-  if (!type.weighted) removeTraceVariable(variable)
-  variable.value.state_type = type.id
-  variable.value.parameters = defaultParameters(type)
+  const draft = stateDraft(variable)
+  draft.value.state_type = type.id
+  draft.value.parameters = defaultParameters(type)
+  markStateDraftDirty(variable.id)
   schedulePreview(variable)
+  const lifecycleError = traceLifecycleError(variable)
+  if (type.weighted && lifecycleError) {
+    setTraceLifecycleError(variable, lifecycleError)
+    return
+  }
+  commitStateDraft(variable)
 }
 
 function changeParameter(variable, parameterName, rawValue) {
   if (props.disabled) return
-  variable.value.parameters[parameterName] = rawValue === '' ? null : Number(rawValue)
+  stateDraft(variable).value.parameters[parameterName] = rawValue === '' ? null : Number(rawValue)
+  markStateDraftDirty(variable.id)
   schedulePreview(variable)
 }
+
+function markStateDraftDirty(variableId) {
+  dirtyStateDrafts.add(variableId)
+  stateDraftVersions.set(variableId, (stateDraftVersions.get(variableId) || 0) + 1)
+}
+
+function parameterValueInvalid(variable, parameter) {
+  const rawValue = stateDraft(variable).value.parameters[parameter.name]
+  if (rawValue == null || rawValue === '') return true
+  const value = Number(rawValue)
+  return !Number.isFinite(value)
+    || value < Number(parameter.min)
+    || value > Number(parameter.max)
+}
+
+function stateDraft(variable) {
+  stateDrafts[variable.id] ||= stateDraftFromVariable(variable)
+  return stateDrafts[variable.id]
+}
+
+function stateDraftFromVariable(variable) {
+  return {
+    id: variable.id,
+    name: variable.name,
+    value: {
+      kind: variable.value.kind,
+      state_type: variable.value.state_type,
+      parameters: cloneParameters(variable.value.parameters),
+    },
+  }
+}
+
+function cloneParameters(parameters) {
+  return structuredClone(toRaw(parameters || {}))
+}
+
+function commitStateDraft(variable) {
+  const version = stateDraftVersions.get(variable.id) || 0
+  const pending = pendingStateCommits.get(variable.id)
+  if (pending?.version === version) return pending.promise
+
+  const draft = stateDraft(variable)
+  const value = {
+    name: draft.name.trim(),
+    state_type: draft.value.state_type,
+    parameters: cloneParameters(draft.value.parameters),
+  }
+  const entry = { version, promise: null }
+  entry.promise = new Promise(resolve => {
+    emit(
+      'designOperations',
+      [{
+        kind: 'states.update',
+        variable_id: variable.id,
+        value,
+      }],
+      () => {
+        if ((stateDraftVersions.get(variable.id) || 0) === version) {
+          dirtyStateDrafts.delete(variable.id)
+          stateDrafts[variable.id] = stateDraftFromVariable(variable)
+          clearTraceLifecycleError(variable)
+        }
+        resolve({ valid: true })
+      },
+      error => {
+        if ((stateDraftVersions.get(variable.id) || 0) === version) {
+          setTraceLifecycleError(variable, traceLifecycleError(variable) || error.message)
+        }
+        resolve({
+          valid: false,
+          details: {
+            variable_id: variable.id,
+            message: error?.message || 'The state draft could not be saved.',
+          },
+        })
+        return true
+      },
+    )
+  })
+  pendingStateCommits.set(variable.id, entry)
+  entry.promise.finally(() => {
+    if (pendingStateCommits.get(variable.id) === entry) {
+      pendingStateCommits.delete(variable.id)
+    }
+  })
+  return entry.promise
+}
+
+function validateStateDraft(variable) {
+  const type = stateType(stateDraft(variable).value.state_type)
+  if (!type) {
+    return {
+      valid: false,
+      details: { variable_id: variable.id, field: 'state_type' },
+    }
+  }
+  const nameError = variableNameError(variable)
+  if (nameError) {
+    return {
+      valid: false,
+      details: { variable_id: variable.id, field: 'name', message: nameError },
+    }
+  }
+  const invalidParameter = type.parameters.find(parameter => (
+    parameterValueInvalid(variable, parameter)
+  ))
+  if (invalidParameter) {
+    return {
+      valid: false,
+      details: {
+        variable_id: variable.id,
+        field: `parameters.${invalidParameter.name}`,
+      },
+    }
+  }
+  const lifecycleError = traceLifecycleError(variable)
+  if (type.weighted && lifecycleError) {
+    return {
+      valid: false,
+      details: { variable_id: variable.id, field: 'trace', message: lifecycleError },
+    }
+  }
+  return { valid: true }
+}
+
+async function flushStateDrafts() {
+  if (dirtyStateDrafts.size === 0) return { valid: true }
+  if (typesLoading.value) {
+    return { busy: true, details: { reason: 'catalog-loading' } }
+  }
+
+  for (const variableId of [...dirtyStateDrafts]) {
+    const variable = props.variables.find(candidate => candidate.id === variableId)
+    if (!variable) {
+      dirtyStateDrafts.delete(variableId)
+      continue
+    }
+    const validation = validateStateDraft(variable)
+    if (validation.valid === false) return validation
+
+    cancelPreviewWork(variableId)
+    previewGenerations.set(variableId, (previewGenerations.get(variableId) || 0) + 1)
+    previewState(variableId).busy = false
+    const result = await commitStateDraft(variable)
+    if (result?.valid === false) return result
+  }
+  return { valid: true }
+}
+
+const unregisterDraft = draftRegistry?.register({
+  id: 'states-zoo',
+  flush: flushStateDrafts,
+})
 
 function isReferenced(variableId) {
   return isVariableReferenced(props.projectData, variableId)
@@ -490,9 +621,12 @@ function unweightedTransitionTitle(variable, type) {
 }
 
 function variableNameError(variable) {
-  if (!variable.name?.trim()) return 'Name is required'
+  const name = stateDraft(variable).name
+  if (!name?.trim()) return 'Name is required'
   const duplicateCount = props.variables.filter(candidate => (
-    candidate.name?.trim() === variable.name.trim()
+    (isStatesZooVariable(candidate)
+      ? stateDraft(candidate).name
+      : candidate.name)?.trim() === name.trim()
   )).length
   if (duplicateCount > 1) return 'Name must be unique'
   return isWeighted(variable) ? traceNameCollisionError(variable) : ''
@@ -545,7 +679,8 @@ function previewImageUrl(response) {
 async function renderPreview(variable, generation) {
   const variableId = variable.id
   if (isUnmounted || previewGenerations.get(variableId) !== generation) return
-  if (!props.variables.some(candidate => candidate === variable)) return
+  const liveVariable = props.variables.find(candidate => candidate.id === variableId)
+  if (!liveVariable) return
 
   const state = previewState(variableId)
   const controller = new AbortController()
@@ -555,17 +690,21 @@ async function renderPreview(variable, generation) {
 
   try {
     const response = await api.fetchStatesZooPreview(
-      variable.value.state_type,
-      { ...variable.value.parameters },
+      stateDraft(liveVariable).value.state_type,
+      { ...stateDraft(liveVariable).value.parameters },
       { signal: controller.signal }
     )
     if (response?.success === false) {
       throw new Error(response.error || response.message || 'State preview failed')
     }
     if (previewGenerations.get(variableId) !== generation || isUnmounted) return
+    const lifecycleError = isWeighted(liveVariable)
+      ? traceLifecycleError(liveVariable)
+      : ''
+    if (lifecycleError) throw new Error(lifecycleError)
     const imageUrl = previewImageUrl(response)
-    if (isWeighted(variable)) updateTraceVariable(variable, response.trace)
     state.imageUrl = imageUrl
+    if (dirtyStateDrafts.has(variableId)) commitStateDraft(liveVariable)
   } catch (error) {
     if (error?.name === 'AbortError') return
     if (previewGenerations.get(variableId) !== generation || isUnmounted) return
@@ -628,17 +767,38 @@ watch(
 )
 
 watch(
-  () => props.variables,
-  (variables, previousVariables) => {
-    if (variables === previousVariables || statesZooTypes.value.length === 0) return
-    zooVariables.value.forEach(variable => schedulePreview(variable, 0))
-  }
+  () => props.variables.filter(isStatesZooVariable).map(variable => ({
+    id: variable.id,
+    name: variable.name,
+    value: variable.value,
+  })),
+  variables => {
+    const retained = new Set(variables.map(variable => variable.id))
+    Object.keys(stateDrafts).forEach(id => {
+      if (!retained.has(id)) {
+        delete stateDrafts[id]
+        dirtyStateDrafts.delete(id)
+        stateDraftVersions.delete(id)
+      }
+    })
+    variables.forEach(variable => {
+      if (!dirtyStateDrafts.has(variable.id)) {
+        stateDrafts[variable.id] = stateDraftFromVariable(variable)
+      }
+      if (statesZooTypes.value.length > 0 && !dirtyStateDrafts.has(variable.id)) {
+        const liveVariable = props.variables.find(candidate => candidate.id === variable.id)
+        if (liveVariable) schedulePreview(liveVariable, 0)
+      }
+    })
+  },
+  { immediate: true, deep: true },
 )
 
 onMounted(loadStatesZooTypes)
 
 onUnmounted(() => {
   isUnmounted = true
+  unregisterDraft?.()
   catalogController?.abort()
   catalogController = null
   for (const variableId of new Set([

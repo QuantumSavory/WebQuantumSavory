@@ -311,7 +311,7 @@ export function useSimulationController({
     }
   }
 
-  async function runSimulationWithSteps() {
+  async function runSimulationWithSteps(duration = null) {
     const foreground = startForegroundRequest('run', 'Initializing simulation...')
     if (!foreground) return false
     let context = null
@@ -319,7 +319,12 @@ export function useSimulationController({
       const payload = validatedPayload()
       if (!payload) return false
       context = currentContext()
-      const additionalTime = Number(projectData.value?.simulationConfig?.time || 1)
+      const additionalTime = Number(
+        duration ?? projectData.value?.simulationConfig?.time ?? 1
+      )
+      if (!Number.isFinite(additionalTime) || additionalTime <= 0) {
+        throw new Error('Simulation duration must be a finite positive number')
+      }
       const target = state.value.cumulativeTargetTime + additionalTime
       dispatch({ type: 'REQUEST', message: 'Initializing simulation...' })
       addLog('info', `Starting simulation: adding ${additionalTime}s (total target: ${target}s)`, 'Web API')

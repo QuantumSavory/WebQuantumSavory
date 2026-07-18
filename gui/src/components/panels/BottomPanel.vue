@@ -26,21 +26,33 @@
     >
       <template #content>
         <div class="bottom-panel-body">
-          <div class="bottom-tabs" role="tablist" aria-label="Bottom panel">
+          <div
+            class="bottom-tabs"
+            :class="{ 'mcp-available': mcpAvailable }"
+            role="tablist"
+            aria-label="Bottom panel"
+          >
             <button
-              id="bottom-panel-logs-tab"
+              v-for="tab in tabDescriptors"
+              :id="`bottom-panel-${tab.name}-tab`"
+              :key="tab.name"
               type="button"
               role="tab"
               class="bottom-tab"
-              :class="{ active: activeTab === 'logs' }"
-              :aria-selected="activeTab === 'logs'"
-              aria-controls="bottom-panel-logs-content"
-              :tabindex="activeTab === 'logs' ? 0 : -1"
-              @click="activeTab = 'logs'"
-              @keydown="handleTabKeydown($event, 0)"
+              :class="{ active: activeTab === tab.name }"
+              :aria-selected="activeTab === tab.name"
+              :aria-controls="`bottom-panel-${tab.name}-content`"
+              :aria-disabled="tab.disabled"
+              :disabled="tab.disabled"
+              :tabindex="activeTab === tab.name && !tab.disabled ? 0 : -1"
+              @click="activeTab = tab.name"
+              @keydown="handleTabKeydown($event, tab.name)"
             >
-              <span>Logs</span>
-              <span v-if="visibleLogBadges.length" class="log-tab-badges">
+              <span>{{ tab.label }}</span>
+              <span
+                v-if="tab.name === 'logs' && visibleLogBadges.length"
+                class="log-tab-badges"
+              >
                 <span
                   v-for="badge in visibleLogBadges"
                   :key="badge.level"
@@ -51,92 +63,6 @@
                   {{ badge.count }}
                 </span>
               </span>
-            </button>
-            <button
-              id="bottom-panel-description-tab"
-              type="button"
-              role="tab"
-              class="bottom-tab"
-              :class="{ active: activeTab === 'description' }"
-              :aria-selected="activeTab === 'description'"
-              aria-controls="bottom-panel-description-content"
-              :tabindex="activeTab === 'description' ? 0 : -1"
-              @click="activeTab = 'description'"
-              @keydown="handleTabKeydown($event, 1)"
-            >
-              Description
-            </button>
-            <button
-              id="bottom-panel-variables-tab"
-              type="button"
-              role="tab"
-              class="bottom-tab"
-              :class="{ active: activeTab === 'variables' }"
-              :aria-selected="activeTab === 'variables'"
-              aria-controls="bottom-panel-variables-content"
-              :tabindex="activeTab === 'variables' ? 0 : -1"
-              @click="activeTab = 'variables'"
-              @keydown="handleTabKeydown($event, 2)"
-            >
-              Variables
-            </button>
-            <button
-              id="bottom-panel-states-zoo-tab"
-              type="button"
-              role="tab"
-              class="bottom-tab"
-              :class="{ active: activeTab === 'states-zoo' }"
-              :aria-selected="activeTab === 'states-zoo'"
-              aria-controls="bottom-panel-states-zoo-content"
-              :tabindex="activeTab === 'states-zoo' ? 0 : -1"
-              @click="activeTab = 'states-zoo'"
-              @keydown="handleTabKeydown($event, 3)"
-            >
-              States Zoo
-            </button>
-            <button
-              id="bottom-panel-layout-tools-tab"
-              type="button"
-              role="tab"
-              class="bottom-tab"
-              :class="{ active: activeTab === 'layout-tools' }"
-              :aria-selected="activeTab === 'layout-tools'"
-              aria-controls="bottom-panel-layout-tools-content"
-              :tabindex="activeTab === 'layout-tools' ? 0 : -1"
-              @click="activeTab = 'layout-tools'"
-              @keydown="handleTabKeydown($event, 4)"
-            >
-              Layout Tools
-            </button>
-            <button
-              id="bottom-panel-export-script-tab"
-              type="button"
-              role="tab"
-              class="bottom-tab"
-              :class="{ active: activeTab === 'export-script' }"
-              :aria-selected="activeTab === 'export-script'"
-              aria-controls="bottom-panel-export-script-content"
-              :tabindex="activeTab === 'export-script' ? 0 : -1"
-              @click="activeTab = 'export-script'"
-              @keydown="handleTabKeydown($event, 5)"
-            >
-              Export Script
-            </button>
-            <button
-              id="bottom-panel-tags-queries-tab"
-              type="button"
-              role="tab"
-              class="bottom-tab"
-              :class="{ active: activeTab === 'tags-queries' }"
-              :aria-selected="activeTab === 'tags-queries'"
-              aria-controls="bottom-panel-tags-queries-content"
-              :aria-disabled="!tagsExplorerEnabled"
-              :disabled="!tagsExplorerEnabled"
-              :tabindex="activeTab === 'tags-queries' && tagsExplorerEnabled ? 0 : -1"
-              @click="activeTab = 'tags-queries'"
-              @keydown="handleTabKeydown($event, 6)"
-            >
-              Tags &amp; Queries
             </button>
           </div>
 
@@ -173,7 +99,7 @@
             <DescriptionPanel
               :key="projectData.name"
               :model-value="projectData.description"
-              @update:model-value="emit('update-description', $event)"
+              @update:model-value="(...args) => emit('update-description', ...args)"
             />
           </section>
 
@@ -189,6 +115,7 @@
               :variables="variables"
               :project-data="projectData"
               :disabled="variablesDisabled"
+              @design-operations="operations => emit('design-operations', operations)"
             />
           </section>
 
@@ -204,6 +131,7 @@
               :variables="variables"
               :project-data="projectData"
               :disabled="variablesDisabled"
+              @design-operations="(...args) => emit('design-operations', ...args)"
             />
           </section>
 
@@ -260,6 +188,23 @@
               :project-data="projectData"
             />
           </section>
+
+          <section
+            v-if="mcpAvailable"
+            v-show="activeTab === 'mcp'"
+            id="bottom-panel-mcp-content"
+            class="bottom-tab-panel mcp-tab-panel"
+            role="tabpanel"
+            aria-labelledby="bottom-panel-mcp-tab"
+            tabindex="0"
+          >
+            <McpPanel
+              :active="activeTab === 'mcp'"
+              :client="mcpClient"
+              :bridge="mcpBridge"
+              :bridge-state="mcpState"
+            />
+          </section>
         </div>
       </template>
     </BasePanel>
@@ -296,7 +241,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import ResizeBounding from 'vue3-resize-bounding'
 import BasePanel from './BasePanel.vue'
 import DescriptionPanel from './DescriptionPanel.vue'
@@ -307,6 +252,8 @@ import StatesZooPanel from './StatesZooPanel.vue'
 import VariablesPanel from './VariablesPanel.vue'
 import TagsQueriesPanel from '../tags/TagsQueriesPanel.vue'
 import { normalizeLogSeverity } from '../../utils/logRecords.js'
+
+const McpPanel = defineAsyncComponent(() => import('../../features/mcp/McpPanel.vue'))
 
 const props = defineProps({
   logs: {
@@ -369,6 +316,22 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  mcpAvailable: {
+    type: Boolean,
+    default: false
+  },
+  mcpState: {
+    type: Object,
+    default: () => ({})
+  },
+  mcpClient: {
+    type: Object,
+    default: null
+  },
+  mcpBridge: {
+    type: Object,
+    default: null
+  },
   projectName: {
     type: String,
     default: ''
@@ -404,19 +367,27 @@ const emit = defineEmits([
   'update:refractive-index',
   'update:curve-editing-enabled',
   'update:show-physical-badges',
-  'update:collapsed'
+  'update:collapsed',
+  'design-operations'
 ])
 
 const activeTab = ref('logs')
-const tabNames = [
-  'logs',
-  'description',
-  'variables',
-  'states-zoo',
-  'layout-tools',
-  'export-script',
-  'tags-queries'
-]
+const tabDescriptors = computed(() => [
+  { name: 'logs', label: 'Logs', disabled: false },
+  { name: 'description', label: 'Description', disabled: false },
+  { name: 'variables', label: 'Variables', disabled: false },
+  { name: 'states-zoo', label: 'States Zoo', disabled: false },
+  { name: 'layout-tools', label: 'Layout Tools', disabled: false },
+  { name: 'export-script', label: 'Export Script', disabled: false },
+  {
+    name: 'tags-queries',
+    label: 'Tags & Queries',
+    disabled: !props.tagsExplorerEnabled
+  },
+  ...(props.mcpAvailable
+    ? [{ name: 'mcp', label: 'MCP', disabled: false }]
+    : [])
+])
 
 const PANEL_SIZE_STORAGE_KEY = 'bottomPanel_size'
 const DEFAULT_PANEL_WIDTH = 800
@@ -482,6 +453,13 @@ watch(
   () => props.tagsExplorerEnabled,
   enabled => {
     if (!enabled && activeTab.value === 'tags-queries') activeTab.value = 'logs'
+  }
+)
+
+watch(
+  () => props.mcpAvailable,
+  available => {
+    if (!available && activeTab.value === 'mcp') activeTab.value = 'logs'
   }
 )
 
@@ -582,30 +560,29 @@ function handleResizeKeydown(dimension, event) {
   persistPanelSize()
 }
 
-function handleTabKeydown(event, currentIndex) {
-  const enabledIndexes = tabNames
-    .map((name, index) => ({ name, index }))
-    .filter(({ name }) => name !== 'tags-queries' || props.tagsExplorerEnabled)
-    .map(({ index }) => index)
-  const enabledPosition = enabledIndexes.indexOf(currentIndex)
-  let nextIndex = currentIndex
+function handleTabKeydown(event, currentName) {
+  const enabledTabs = tabDescriptors.value.filter(tab => !tab.disabled)
+  const enabledPosition = enabledTabs.findIndex(tab => tab.name === currentName)
+  let nextPosition = enabledPosition
 
   if (event.key === 'ArrowRight') {
-    nextIndex = enabledIndexes[(enabledPosition + 1) % enabledIndexes.length]
+    nextPosition = (enabledPosition + 1) % enabledTabs.length
   } else if (event.key === 'ArrowLeft') {
-    nextIndex = enabledIndexes[(enabledPosition - 1 + enabledIndexes.length) % enabledIndexes.length]
+    nextPosition = (enabledPosition - 1 + enabledTabs.length) % enabledTabs.length
   } else if (event.key === 'Home') {
-    nextIndex = enabledIndexes[0]
+    nextPosition = 0
   } else if (event.key === 'End') {
-    nextIndex = enabledIndexes[enabledIndexes.length - 1]
+    nextPosition = enabledTabs.length - 1
   } else {
     return
   }
 
   event.preventDefault()
-  activeTab.value = tabNames[nextIndex]
+  const nextName = enabledTabs[nextPosition].name
+  activeTab.value = nextName
   const tabs = event.currentTarget.parentElement?.querySelectorAll('[role="tab"]')
-  tabs?.[nextIndex]?.focus()
+  const descriptorIndex = tabDescriptors.value.findIndex(tab => tab.name === nextName)
+  tabs?.[descriptorIndex]?.focus()
 }
 
 onMounted(() => {
@@ -663,6 +640,11 @@ onMounted(() => {
   background: transparent;
   color: #666;
   font-weight: 600;
+}
+
+.bottom-tabs.mcp-available .bottom-tab {
+  padding-right: 8px;
+  padding-left: 8px;
 }
 
 .bottom-tab:hover {
@@ -755,6 +737,11 @@ onMounted(() => {
 }
 
 .tags-queries-tab-panel {
+  padding-right: 4px;
+  padding-bottom: 4px;
+}
+
+.mcp-tab-panel {
   padding-right: 4px;
   padding-bottom: 4px;
 }

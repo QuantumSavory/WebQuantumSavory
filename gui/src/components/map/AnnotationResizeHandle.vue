@@ -22,7 +22,7 @@ const props = defineProps({
   corner: { type: String, default: null },
 })
 
-const emit = defineEmits(['activate', 'move'])
+const emit = defineEmits(['activate', 'move', 'interactionBusy', 'commit'])
 const element = ref(null)
 
 const markerController = useMaplibreMarker({
@@ -35,9 +35,16 @@ const markerController = useMaplibreMarker({
   },
   ariaLabel: () => props.label,
   events: {
-    dragstart: () => emit('activate'),
+    dragstart: () => {
+      emit('activate')
+      emit('interactionBusy', true)
+    },
     drag: () => emit('move', markerController.getPosition()),
-    dragend: () => emit('move', markerController.getPosition()),
+    dragend: () => {
+      emit('move', markerController.getPosition())
+      emit('commit')
+      emit('interactionBusy', false)
+    },
   },
 })
 </script>

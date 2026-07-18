@@ -14,6 +14,7 @@
         :protocolClass="FloatingProtocol"
         :editingLocked="editingLocked"
         :variables="props.variables"
+        @design-operations="(...args) => emit('designOperations', ...args)"
       />
     </template>
   </BasePanel>
@@ -52,7 +53,12 @@ function handleSelect(protocol) {
   protocolsManager.value.handleSelect(protocol)
 }
 
-const emit = defineEmits(['select', 'handleAddProtocolClick', 'update:collapsed'])
+const emit = defineEmits([
+  'select',
+  'handleAddProtocolClick',
+  'update:collapsed',
+  'designOperations',
+])
 
 defineExpose({
   handleSelect

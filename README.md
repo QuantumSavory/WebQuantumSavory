@@ -44,6 +44,53 @@ For the bundled UI, API requests default to the current browser origin in produc
 frontend aligned with the Genie server automatically. If you need to point the built UI at a different
 API host, set `VITE_API_BASE_URL` when running `npm run build`.
 
+## Local MCP collaboration
+
+WebQuantumSavory includes an optional local Model Context Protocol sidecar for
+collaborative design and simulation control. It is disabled by default, binds
+only to `127.0.0.1`, and starts only after the user opens the MCP Tools tab and
+clicks **Initialize MCP**.
+
+Enable the capability before launching the loopback Genie server:
+
+```bash
+WEBQUANTUMSAVORY_ENABLE_MCP=true ./bin/server
+```
+
+The MCP endpoint is then shown in the Tools tab and defaults to
+`http://127.0.0.1:8001/mcp`. Override that port with an unused local port:
+
+```bash
+WEBQUANTUMSAVORY_ENABLE_MCP=true \
+WEBQUANTUMSAVORY_MCP_PORT=8123 \
+./bin/server
+```
+
+Both variables are parsed strictly. `WEBQUANTUMSAVORY_ENABLE_MCP` accepts only
+the lowercase values `true` and `false`; the port must be an integer from 1 to
+65535 and must differ from Genie's port. Enabling MCP while Genie is configured
+for a non-loopback host fails closed before the server starts.
+
+The launcher instantiates the isolated `mcp/` Julia environment only when the
+feature is enabled. For development, instantiate it directly with:
+
+```bash
+julia --startup-file=no --project=mcp -e 'using Pkg; Pkg.instantiate()'
+```
+
+The browser remains authoritative for the live project, so a browser tab must
+stay bound for design edits and lifecycle actions. MCP edits update the visible
+project immediately and mark it unsaved; they never save automatically. One
+bound browser tab and one MCP session are supported. Project transitions
+automatically unbind the current design. Use `simulation_reset` before changing
+simulation-affecting design state after preparation.
+
+The versioned tool contract is in `contracts/mcp/v1/tools.json`. New authoring
+tools must first gain a shared `DesignCommandService` handler and migrate the
+equivalent GUI action to that handler. Simulation lifecycle tools must continue
+to use the browser controller, while simulation reads and HTTP routes share
+the Julia `SimulationService`.
+
 ## API Overview
 
 ### Core Simulation Workflow
@@ -186,6 +233,19 @@ This project includes unit tests and integration tests.
 ```bash
 cd test
 julia --project runtests.jl test_unit
+```
+
+Focused MCP backend tests can be run with:
+
+```bash
+cd test
+julia --project runtests.jl test_mcp_unit
+```
+
+The isolated sidecar contract-loader tests use its own environment:
+
+```bash
+julia --startup-file=no --project=mcp mcp/test/runtests.jl
 ```
 
 Notes:

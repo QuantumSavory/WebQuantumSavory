@@ -37,6 +37,27 @@ function mountRunner(overrides = {}) {
 }
 
 describe('RunnerPanel foreground loading feedback', () => {
+  it('commits the run duration through an event instead of mutating the project prop', async () => {
+    const projectData = { simulationConfig: { time: 1 } }
+    const wrapper = mountRunner({ projectData })
+
+    const input = wrapper.get('.duration-input')
+    input.element.value = '2.5'
+    await input.trigger('change')
+
+    expect(projectData.simulationConfig.time).toBe(1)
+    expect(wrapper.emitted('updateSimulationTime')).toEqual([[2.5]])
+  })
+
+  it('locks the duration as soon as simulation-backed editing is disabled', () => {
+    const wrapper = mountRunner({
+      phase: 'parsed',
+      capabilities: capabilities({ editingDisabled: true }),
+    })
+
+    expect(wrapper.get('.duration-input').attributes('disabled')).toBeDefined()
+  })
+
   it('immediately replaces Play with an accessible disabled spinner while Run starts', async () => {
     const wrapper = mountRunner()
     const runButton = wrapper.get('.run-btn')
@@ -112,7 +133,7 @@ describe('RunnerPanel foreground loading feedback', () => {
 })
 
 describe('RunnerPanel representation controls', () => {
-  it('offers trait-compatible, colored defaults and persists selected values', async () => {
+  it('offers trait-compatible defaults and dispatches selected values', async () => {
     const projectData = {
       simulationConfig: {
         time: 1,
@@ -147,9 +168,13 @@ describe('RunnerPanel representation controls', () => {
     await qumodeSelect.setValue('GabsRepr')
 
     expect(projectData.simulationConfig).toMatchObject({
-      qubitRepresentation: 'CliffordRepr',
-      qumodeRepresentation: 'GabsRepr'
+      qubitRepresentation: 'QuantumOpticsRepr',
+      qumodeRepresentation: 'QuantumOpticsRepr'
     })
+    expect(wrapper.emitted('updateSimulationConfig')).toEqual([
+      [{ qubitRepresentation: 'CliffordRepr' }],
+      [{ qumodeRepresentation: 'GabsRepr' }],
+    ])
     expect(wrapper.get('[aria-label="About CliffordRepr"]').text()).toBe('')
     expect(wrapper.get('[aria-label="About GabsRepr"]').text()).toBe('')
     expect(qubitSelect.find('option[value="QuantumMCRepr"]').attributes('title')).toContain(

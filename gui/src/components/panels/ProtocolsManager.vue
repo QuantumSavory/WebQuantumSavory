@@ -9,6 +9,7 @@
         :isSelected="selectedProtocol?.id === protocol.id" 
         @select="handleSelect" 
         @delete="deleteProtocol"
+        @update="updateProtocol"
         :category="protocolGroupName"
         :contextInfo="contextInfo"
         :editingLocked="editingLocked"
@@ -33,15 +34,12 @@ import { computed, ref } from 'vue'
 import ProtocolEditor from './ProtocolEditor.vue'
 import Menu from 'primevue/menu';
 import { api } from '../../utils/ApiConnector'
-import { getCurrentInstance } from 'vue'
 import { generateUUid } from '../../utils/Utils'
 import {
-  createProtocolFromDefinition,
   protocolSimpleName
 } from '../../utils/protocolConstructors'
 import { Plus } from '@lucide/vue'
 import { SIMULATION_EDITING_LOCK_MESSAGE, useUiServices } from '../../composables/uiServices'
-const { proxy } = getCurrentInstance()
 const { showAlert } = useUiServices()
 
 const props = defineProps({
@@ -74,6 +72,10 @@ const props = defineProps({
     type: Boolean,
     required: false,
     default: false
+  },
+  ownerId: {
+    type: String,
+    default: ''
   }
 })
 
@@ -111,24 +113,17 @@ function deleteProtocol( protocol ){
     return
   }
 
-  const protocolIndex = props.protocols.findIndex(p => p.id === protocol.id);
-  if( protocolIndex !== -1 ){
-    props.protocols.splice(protocolIndex, 1)
-  }
-  forceRerender();
-}
-
-
-function forceRerender() {
-  proxy.$forceUpdate()
+  emit('designOperations', [{
+    kind: 'protocols.remove',
+    placement: props.protocolGroupName,
+    owner_id: props.ownerId,
+    protocol_id: protocol.id,
+  }])
 }
 
 const computedProtocols = computed(() => {
-    if( !props.protocols || !props.protocols ) return []
-  return props.protocols.map(protocol => ({
-    ...protocol,
-    data: protocol.data || {}
-  }))
+  if (!props.protocols) return []
+  return props.protocols
 })
 
 function toggleAddProtocolMenu(event) {
@@ -161,24 +156,39 @@ function handleAddProtocol( protocolTypeId) {
   }
   const protocolId = generateUUid('protocol')
 
-  const protocolTypeDefinitions = api.config.value.protocolTypes?.[props.protocolGroupName] || [];
-  const defaultType = protocolTypeDefinitions.find(type => type.type === protocolTypeId);
+  const protocolTypeDefinitions = api.config.value.protocolTypes?.[props.protocolGroupName] || []
+  const defaultType = protocolTypeDefinitions.find(type => type.type === protocolTypeId)
   if (!defaultType) {
     showAlert('Protocol unavailable', 'The selected protocol is not available in the runtime metadata.')
     return
   }
-  const protocolConstructor = createProtocolFromDefinition(defaultType)
-  const newProtocol = new props.protocolClass({
-    id: protocolId,
-    ...protocolConstructor
-  })
-   props.protocols.push(newProtocol);
-   forceRerender();
-   handleSelect(newProtocol);
+  emit(
+    'designOperations',
+    [{
+      kind: 'protocols.create',
+      id: protocolId,
+      placement: props.protocolGroupName,
+      owner_id: props.ownerId,
+      value: { type: defaultType.type },
+    }],
+    () => {
+      const created = props.protocols.find(protocol => protocol.id === protocolId)
+      if (created) handleSelect(created)
+    },
+  )
 }
 
+function updateProtocol(update) {
+  emit('designOperations', [{
+    kind: 'protocols.update',
+    placement: props.protocolGroupName,
+    owner_id: props.ownerId,
+    protocol_id: update.id,
+    value: { parameters: update.parameters },
+  }])
+}
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'designOperations'])
 
 defineExpose({
   handleSelect

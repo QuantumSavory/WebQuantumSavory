@@ -97,7 +97,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['delete', 'update:collapsed'])
+const emit = defineEmits(['delete', 'update:collapsed', 'designOperations'])
 
 const instanceId = useDomId('annotation-panel')
 const editorIdPrefix = `annotation-content-${instanceId}`
@@ -106,19 +106,32 @@ const borderColorId = `annotation-border-${instanceId}`
 const attachAreaId = `annotation-area-${instanceId}`
 const areaHelpId = `annotation-area-help-${instanceId}`
 
-function updateMarkdown(markdown) {
-  Object.assign(props.annotation, { markdown })
+function updateMarkdown(markdown, afterCommit, afterError) {
+  updateAnnotation({ markdown }, afterCommit, afterError)
 }
 
 function updateColor(field, event) {
-  Object.assign(props.annotation, { [field]: event.target.value })
+  updateAnnotation({ [field]: event.target.value })
 }
 
 function updateArea(event) {
   const updatedAnnotation = event.target.checked
     ? attachAnnotationArea(props.annotation)
     : detachAnnotationArea(props.annotation)
-  Object.assign(props.annotation, updatedAnnotation)
+  updateAnnotation(updatedAnnotation)
+}
+
+function updateAnnotation(value, afterCommit, afterError) {
+  emit(
+    'designOperations',
+    [{
+      kind: 'annotations.update',
+      annotation_id: props.annotation.id,
+      value,
+    }],
+    afterCommit,
+    afterError,
+  )
 }
 </script>
 

@@ -1,5 +1,4 @@
 import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const markerInstances = vi.hoisted(() => [])
@@ -75,6 +74,19 @@ function makeMap() {
 beforeEach(() => markerInstances.splice(0))
 
 describe('edge curve editing', () => {
+  async function applyLatestCommand(wrapper, edge) {
+    const operations = wrapper.emitted('designOperations').at(-1)[0]
+    Object.assign(edge.data, operations[0].value.data)
+    const currentEdge = wrapper.props('edge')
+    await wrapper.setProps({
+      edge: {
+        ...currentEdge,
+        data: { ...currentEdge.data, ...operations[0].value.data },
+      },
+    })
+    return operations
+  }
+
   it('inserts smooth points on the projected segment and cycles them to deletion', async () => {
     const edge = makeEdge()
     const map = makeMap()
@@ -92,14 +104,16 @@ describe('edge curve editing', () => {
     })
 
     map.handlers.get('click:edge-click-layer-edge')({ lngLat: { lng: -71, lat: 43 } })
-    await nextTick()
+    await applyLatestCommand(wrapper, edge)
     expect(edge.data.curvePoints).toHaveLength(1)
     expect(edge.data.curvePoints[0]).toMatchObject({ type: 'smooth' })
     expect(edge.data.curvePoints[0].id).toMatch(/^curve_/)
 
     await wrapper.get('.curve-handle-stub').trigger('click')
+    await applyLatestCommand(wrapper, edge)
     expect(edge.data.curvePoints[0].type).toBe('sharp')
     await wrapper.get('.curve-handle-stub').trigger('click')
+    await applyLatestCommand(wrapper, edge)
     expect(edge.data.curvePoints).toEqual([])
 
     wrapper.unmount()

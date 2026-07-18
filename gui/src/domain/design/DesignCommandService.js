@@ -1,0 +1,1580 @@
+import Edge from '../../models/Edge.js'
+import FloatingProtocol from '../../models/FloatingProtocol.js'
+import Node from '../../models/Node.js'
+import Variable, {
+  STATES_ZOO_VALUE_KIND,
+  isStatesZooTraceVariable,
+  isStatesZooVariable,
+  isVariableReference,
+  isVariableReferenced,
+} from '../../models/Variable.js'
+import { generateUUid, setEdgeCorrectNodeOrder } from '../../utils/Utils.js'
+import {
+  decodeDesignDocument,
+  encodeDesignDocument,
+} from '../../utils/projectCodec.js'
+import {
+  VARIABLE_PARAMETER_TYPES,
+  isCodeType,
+  isSymbolicType,
+  isWildcardType,
+  parameterTypeIsNumber,
+  parameterTypeSupportsVariableType,
+  parseJuliaType,
+  resetValueForType,
+} from '../../utils/parameterTypes.js'
+import {
+  createProtocolFromDefinition,
+  deepClone,
+} from '../../utils/protocolConstructors.js'
+import {
+  QUBIT_REPRESENTATION_OPTIONS,
+  QUMODE_REPRESENTATION_OPTIONS,
+} from '../../utils/representations.js'
+
+const SIMULATION_LOCK_MESSAGE = 'Reset the simulation before changing the design.'
+const RUNTIME_SLOT_FIELDS = new Set([
+  'isLocked',
+  'assignment',
+  'lastOperationTime',
+  'representationType',
+  'ui_expanded',
+  'renderedResult',
+])
+
+export class DesignCommandError extends Error {
+  constructor(code, message, { retryable = false, details = {} } = {}) {
+    super(message)
+    this.name = 'DesignCommandError'
+    this.code = code
+    this.retryable = retryable
+    this.details = details
+  }
+}
+
+function record(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function requireString(value, label) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new DesignCommandError('VALIDATION_FAILED', `${label} is required.`)
+  }
+  return value.trim()
+}
+
+function requirePosition(value, label = 'position') {
+  if (
+    !Array.isArray(value)
+    || value.length !== 2
+    || !value.every(Number.isFinite)
+    || value[0] < -180
+    || value[0] > 180
+    || value[1] < -90
+    || value[1] > 90
+  ) {
+    throw new DesignCommandError(
+      'VALIDATION_FAILED',
+      `${label} must be [longitude, latitude] within map bounds.`,
+    )
+  }
+  return [...value]
+}
+
+function requireFinite(value, label, { positive = false } = {}) {
+  if (
+    typeof value !== 'number'
+    || !Number.isFinite(value)
+    || (positive ? value <= 0 : value < 0)
+  ) {
+    throw new DesignCommandError(
+      'VALIDATION_FAILED',
+      `${label} must be a finite ${positive ? 'positive' : 'nonnegative'} number.`,
+    )
+  }
+  return value
+}
+
+function requireChoice(value, options, label) {
+  if (!options.some(option => option.value === value)) {
+    throw new DesignCommandError(
+      'VALIDATION_FAILED',
+      `${label} must be one of: ${options.map(option => option.value).join(', ')}.`,
+    )
+  }
+  return value
+}
+
+function byId(collection, id, label) {
+  const item = collection.find(candidate => candidate?.id === id)
+  if (!item) {
+    throw new DesignCommandError('RESULT_NOT_FOUND', `${label} not found: ${id}`)
+  }
+  return item
+}
+
+function replaceArray(target, source) {
+  target.splice(0, target.length, ...source)
+}
+
+function syncPlainObject(target, source, retainedFields = new Set()) {
+  Object.keys(target).forEach(key => {
+    if (!Object.hasOwn(source, key) && !retainedFields.has(key)) delete target[key]
+  })
+  Object.entries(source).forEach(([key, value]) => {
+    if (retainedFields.has(key)) return
+    if (Array.isArray(value)) {
+      if (Array.isArray(target[key])) replaceArray(target[key], deepClone(value))
+      else target[key] = deepClone(value)
+    } else if (record(value)) {
+      if (!record(target[key])) target[key] = {}
+      syncPlainObject(target[key], value)
+    } else {
+      target[key] = value
+    }
+  })
+  return target
+}
+
+function reconcileProtocols(target, source) {
+  const retained = new Map(target.map(item => [item.id, item]))
+  const next = source.map(sourceItem => {
+    const targetItem = retained.get(sourceItem.id)
+    if (!targetItem) return sourceItem
+    syncPlainObject(targetItem, sourceItem)
+    return targetItem
+  })
+  replaceArray(target, next)
+}
+
+function reconcileSlots(target, source) {
+  const retained = new Map(target.map(item => [item.id, item]))
+  const next = source.map(sourceItem => {
+    const targetItem = retained.get(sourceItem.id)
+    if (!targetItem) return sourceItem
+    syncPlainObject(targetItem, sourceItem, RUNTIME_SLOT_FIELDS)
+    return targetItem
+  })
+  replaceArray(target, next)
+}
+
+/**
+ * Commit a hydrated candidate while retaining every durable live instance that
+ * still exists. Edges are always reconnected to retained Node instances.
+ */
+export function reconcileDesignDocument(live, candidate) {
+  const retainedNodes = new Map((live.net?.nodes || []).map(node => [node.id, node]))
+  const nextNodes = candidate.net.nodes.map(sourceNode => {
+    const node = retainedNodes.get(sourceNode.id)
+    if (!node) return sourceNode
+    const sourceData = sourceNode.data || {}
+    node.name = sourceNode.name
+    replaceArray(node.position, sourceNode.position)
+    Object.keys(node).forEach(key => {
+      if (!['id', 'name', 'position', 'data'].includes(key) && !Object.hasOwn(sourceNode, key)) {
+        delete node[key]
+      }
+    })
+    Object.entries(sourceNode).forEach(([key, value]) => {
+      if (!['id', 'name', 'position', 'data'].includes(key)) node[key] = deepClone(value)
+    })
+    node.data ||= {}
+    syncPlainObject(
+      node.data,
+      Object.fromEntries(
+        Object.entries(sourceData).filter(([key]) => !['slots', 'protocols'].includes(key)),
+      ),
+      new Set(['slots', 'protocols']),
+    )
+    node.data.slots ||= []
+    node.data.protocols ||= []
+    reconcileSlots(node.data.slots, sourceData.slots || [])
+    reconcileProtocols(node.data.protocols, sourceData.protocols || [])
+    return node
+  })
+  replaceArray(live.net.nodes, nextNodes)
+  const nodeById = new Map(live.net.nodes.map(node => [node.id, node]))
+
+  const retainedEdges = new Map((live.net.edges || []).map(edge => [edge.id, edge]))
+  const nextEdges = candidate.net.edges.map(sourceEdge => {
+    const edge = retainedEdges.get(sourceEdge.id) || sourceEdge
+    Object.keys(edge).forEach(key => {
+      if (
+        !['id', 'source', 'target', 'isLogic', 'data'].includes(key)
+        && !Object.hasOwn(sourceEdge, key)
+      ) {
+        delete edge[key]
+      }
+    })
+    Object.entries(sourceEdge).forEach(([key, value]) => {
+      if (!['id', 'source', 'target', 'isLogic', 'data'].includes(key)) {
+        edge[key] = deepClone(value)
+      }
+    })
+    edge.source = nodeById.get(sourceEdge.source.id) || sourceEdge.source
+    edge.target = nodeById.get(sourceEdge.target.id) || sourceEdge.target
+    edge.isLogic = sourceEdge.isLogic === true
+    edge.data ||= {}
+    const sourceData = sourceEdge.data || {}
+    syncPlainObject(
+      edge.data,
+      Object.fromEntries(
+        Object.entries(sourceData).filter(([key]) => key !== 'protocols'),
+      ),
+      new Set(['protocols']),
+    )
+    edge.data.protocols ||= []
+    reconcileProtocols(edge.data.protocols, sourceData.protocols || [])
+    return edge
+  })
+  replaceArray(live.net.edges, nextEdges)
+  live.net.protocols ||= []
+  reconcileProtocols(live.net.protocols, candidate.net.protocols || [])
+
+  const retainedVariables = new Map((live.variables || []).map(variable => [variable.id, variable]))
+  const nextVariables = (candidate.variables || []).map(sourceVariable => {
+    const variable = retainedVariables.get(sourceVariable.id)
+    if (!variable) return sourceVariable
+    syncPlainObject(variable, sourceVariable)
+    return variable
+  })
+  live.variables ||= []
+  replaceArray(live.variables, nextVariables)
+
+  const retainedAnnotations = new Map((live.annotations || []).map(item => [item.id, item]))
+  const nextAnnotations = (candidate.annotations || []).map(sourceAnnotation => {
+    const annotation = retainedAnnotations.get(sourceAnnotation.id)
+    if (!annotation) return sourceAnnotation
+    syncPlainObject(annotation, sourceAnnotation)
+    return annotation
+  })
+  live.annotations ||= []
+  replaceArray(live.annotations, nextAnnotations)
+
+  live.simulationConfig ||= {}
+  syncPlainObject(live.simulationConfig, candidate.simulationConfig || {})
+  live.net.physicalConfig ||= {}
+  syncPlainObject(live.net.physicalConfig, candidate.net.physicalConfig || {})
+  Object.entries(candidate).forEach(([key, value]) => {
+    if (!['annotations', 'variables', 'simulationConfig', 'net'].includes(key)) {
+      live[key] = deepClone(value)
+    }
+  })
+  Object.entries(candidate.net).forEach(([key, value]) => {
+    if (!['nodes', 'edges', 'protocols', 'physicalConfig'].includes(key)) {
+      live.net[key] = deepClone(value)
+    }
+  })
+  return live
+}
+
+function resolveAlias(value, aliases) {
+  if (record(value) && typeof value.client_ref === 'string') {
+    const resolved = aliases.get(value.client_ref)
+    if (!resolved) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Unknown client_ref: ${value.client_ref}`,
+      )
+    }
+    return resolved
+  }
+  return value
+}
+
+function resolveOperationAliases(operation, aliases) {
+  const visit = (value, { root = false } = {}) => {
+    if (Array.isArray(value)) return value.map(item => visit(item))
+    if (!record(value)) return value
+    if (!root && Object.keys(value).length === 1 && typeof value.client_ref === 'string') {
+      return resolveAlias(value, aliases)
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [
+        key,
+        root && key === 'client_ref' ? nested : visit(nested),
+      ]),
+    )
+  }
+  return visit(operation, { root: true })
+}
+
+function protocolCollection(project, operation) {
+  const placement = operation.placement
+  if (placement === 'floating') return project.net.protocols
+  if (placement === 'node') {
+    return byId(project.net.nodes, operation.owner_id, 'Node').data.protocols
+  }
+  if (placement === 'edge') {
+    return byId(project.net.edges, operation.owner_id, 'Edge').data.protocols
+  }
+  throw new DesignCommandError('VALIDATION_FAILED', 'Protocol placement is required.')
+}
+
+function operationFromAction(tool, action) {
+  if (typeof action?.kind === 'string') return action
+  const name = action?.action
+  if (typeof name !== 'string') {
+    throw new DesignCommandError('VALIDATION_FAILED', 'Every action requires kind or action.')
+  }
+  const prefixes = {
+    design_update: 'design',
+    topology_edit: 'topology',
+    slots_edit: 'slots',
+    protocols_edit: 'protocols',
+    variables_edit: 'variables',
+    states_edit: 'states',
+    annotations_edit: 'annotations',
+    network_generate: 'network',
+  }
+  const { action: _action, ...operation } = action
+  return { ...operation, kind: `${prefixes[tool]}.${name}` }
+}
+
+export function operationsForTool(tool, argumentsObject) {
+  if (tool === 'design_transaction') {
+    return Array.isArray(argumentsObject.operations) ? argumentsObject.operations : []
+  }
+  return (argumentsObject.actions || []).map(action => operationFromAction(tool, action))
+}
+
+export class DesignCommandService {
+  constructor({
+    getProject,
+    idGenerator = generateUUid,
+    editingDisabled = () => false,
+    defaultBackgroundNoise = () => ({ type: 'default', parameters: [] }),
+    slotCatalog = () => ['Qubit', 'Qumode'],
+    backgroundCatalog = () => [],
+    protocolCatalog = () => ({ node: [], edge: [], floating: [] }),
+    statesCatalog = () => [],
+    knownFunctions = () => [],
+    validateCodeValue = async () => ({ valid: true }),
+    previewState = async () => ({ trace: 1 }),
+    generators = {},
+    markDirty = () => {},
+    clearDeletedSelection = () => {},
+    onCommitted = async () => {},
+  }) {
+    if (typeof getProject !== 'function') throw new Error('getProject is required')
+    this.getProject = getProject
+    this.idGenerator = idGenerator
+    this.editingDisabled = editingDisabled
+    this.defaultBackgroundNoise = defaultBackgroundNoise
+    this.slotCatalog = slotCatalog
+    this.backgroundCatalog = backgroundCatalog
+    this.protocolCatalog = protocolCatalog
+    this.statesCatalog = statesCatalog
+    this.knownFunctions = knownFunctions
+    this.validateCodeValue = validateCodeValue
+    this.previewState = previewState
+    this.generators = generators
+    this.markDirty = markDirty
+    this.clearDeletedSelection = clearDeletedSelection
+    this.onCommitted = onCommitted
+    this.queue = Promise.resolve()
+    this.handlers = new Map()
+    this.installHandlers()
+  }
+
+  register(kind, handler, { affectsSimulation = true } = {}) {
+    if (this.handlers.has(kind)) throw new Error(`Duplicate design command handler: ${kind}`)
+    this.handlers.set(kind, { handler, affectsSimulation })
+  }
+
+  installHandlers() {
+    this.register('design.update', this.updateDesign.bind(this), { affectsSimulation: false })
+    this.register('topology.create_node', this.createNode.bind(this))
+    this.register('topology.update_node', this.updateNode.bind(this))
+    this.register('topology.remove_node', this.removeNode.bind(this))
+    this.register('topology.reorder_node', this.reorderNode.bind(this))
+    this.register('topology.create_edge', this.createEdge.bind(this))
+    this.register('topology.update_edge', this.updateEdge.bind(this))
+    this.register('topology.remove_edge', this.removeEdge.bind(this))
+    this.register('slots.create', this.createSlot.bind(this))
+    this.register('slots.update', this.updateSlot.bind(this))
+    this.register('slots.remove', this.removeSlot.bind(this))
+    this.register('slots.reorder', this.reorderSlot.bind(this))
+    this.register('protocols.create', this.createProtocol.bind(this))
+    this.register('protocols.update', this.updateProtocol.bind(this))
+    this.register('protocols.remove', this.removeProtocol.bind(this))
+    this.register('variables.create', this.createVariable.bind(this))
+    this.register('variables.update', this.updateVariable.bind(this))
+    this.register('variables.remove', this.removeVariable.bind(this))
+    this.register('states.create', this.createState.bind(this))
+    this.register('states.update', this.updateState.bind(this))
+    this.register('states.remove', this.removeState.bind(this))
+    this.register('annotations.create', this.createAnnotation.bind(this), {
+      affectsSimulation: false,
+    })
+    this.register('annotations.update', this.updateAnnotation.bind(this), {
+      affectsSimulation: false,
+    })
+    this.register('annotations.remove', this.removeAnnotation.bind(this), {
+      affectsSimulation: false,
+    })
+    this.register('network.generate', this.generateNetwork.bind(this))
+  }
+
+  execute({ operations, origin = 'gui', operationId = null } = {}) {
+    return this.runExclusive(() => this.executeNow({ operations, origin, operationId }))
+  }
+
+  /**
+   * Serialize caller-owned durable work with design commands. The browser MCP
+   * bridge uses this to keep revision checks, controller actions, snapshots,
+   * and acknowledgements in the same queue as GUI commits.
+   */
+  runExclusive(work) {
+    const result = this.queue.then(work, work)
+    this.queue = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  /**
+   * Wait until every GUI command already submitted to the serialized queue has
+   * either committed or failed. The browser bridge uses this after flushing
+   * editor drafts so revision comparison happens behind durable GUI edits.
+   */
+  async flush() {
+    await this.queue
+  }
+
+  async executeTool(tool, argumentsObject, options = {}) {
+    return this.execute({
+      operations: operationsForTool(tool, argumentsObject),
+      operationId: argumentsObject.operation_id,
+      ...options,
+    })
+  }
+
+  async executeToolNow(tool, argumentsObject, options = {}) {
+    return this.executeNow({
+      operations: operationsForTool(tool, argumentsObject),
+      operationId: argumentsObject.operation_id,
+      ...options,
+    })
+  }
+
+  async executeNow({ operations, origin, operationId }) {
+    if (!Array.isArray(operations) || operations.length === 0) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'At least one operation is required.')
+    }
+    const normalized = operations.map(operation => {
+      const kind = requireString(operation?.kind, 'Operation kind')
+      const registration = this.handlers.get(kind)
+      if (!registration) {
+        throw new DesignCommandError('VALIDATION_FAILED', `Unsupported operation: ${kind}`)
+      }
+      return { operation, kind, registration }
+    })
+    const blocked = normalized.some(({ operation, kind, registration }) => (
+      registration.affectsSimulation
+      || (kind === 'design.update' && this.designUpdateAffectsSimulation(operation))
+    ))
+    if (blocked && this.editingDisabled()) {
+      throw new DesignCommandError('SIMULATION_LOCKED', SIMULATION_LOCK_MESSAGE)
+    }
+
+    const live = this.getProject()
+    const candidate = decodeDesignDocument(encodeDesignDocument(live), {
+      defaultBackgroundNoise: this.defaultBackgroundNoise,
+      minimumTime: 0,
+      minimumTimeStep: 0,
+    })
+    const context = {
+      origin,
+      aliases: new Map(),
+      createdIds: {},
+      affectedIds: new Set(),
+      deletedIds: new Set(),
+      warnings: [],
+    }
+    for (const { operation, registration } of normalized) {
+      await registration.handler(
+        candidate,
+        resolveOperationAliases(operation, context.aliases),
+        context,
+      )
+    }
+    const validatedCandidate = decodeDesignDocument(encodeDesignDocument(candidate), {
+      defaultBackgroundNoise: this.defaultBackgroundNoise,
+      minimumTime: 0,
+      minimumTimeStep: 0,
+    })
+    reconcileDesignDocument(live, validatedCandidate)
+    this.clearDeletedSelection(context.deletedIds)
+    this.markDirty()
+    const result = {
+      operation_id: operationId,
+      summary: `${origin === 'mcp' ? 'Agent' : 'GUI'} applied ${operations.length} design operation${operations.length === 1 ? '' : 's'}.`,
+      created_ids: context.createdIds,
+      affected_ids: [...context.affectedIds],
+      deleted_ids: [...context.deletedIds],
+      warnings: context.warnings,
+    }
+    await this.onCommitted(result, { origin })
+    return result
+  }
+
+  designUpdateAffectsSimulation(operation) {
+    const value = operation.value || operation
+    return Object.hasOwn(value, 'simulationConfig') || Object.hasOwn(value, 'physicalConfig')
+  }
+
+  assignId(prefix, operation, context) {
+    if (
+      context.origin === 'mcp'
+      && (Object.hasOwn(operation, 'id') || Object.hasOwn(operation.value || {}, 'id'))
+    ) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Created IDs are allocated by the browser; use client_ref to reference new objects.',
+      )
+    }
+    const id = operation.id || operation.value?.id || this.idGenerator(prefix)
+    requireString(id, `${prefix} ID`)
+    if (operation.client_ref) {
+      if (context.aliases.has(operation.client_ref)) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Duplicate client_ref: ${operation.client_ref}`,
+        )
+      }
+      context.aliases.set(operation.client_ref, id)
+      context.createdIds[operation.client_ref] = id
+    }
+    context.affectedIds.add(id)
+    return id
+  }
+
+  updateDesign(project, operation, context) {
+    const value = operation.value || operation
+    if (Object.hasOwn(value, 'name')) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Project renaming is unavailable while MCP is bound.',
+      )
+    }
+    if (Object.hasOwn(value, 'description')) {
+      if (typeof value.description !== 'string') {
+        throw new DesignCommandError('VALIDATION_FAILED', 'Description must be a string.')
+      }
+      project.description = value.description
+    }
+    if (value.simulationConfig) {
+      const config = value.simulationConfig
+      if (Object.hasOwn(config, 'time')) {
+        project.simulationConfig.time = requireFinite(config.time, 'Simulation time', {
+          positive: true,
+        })
+      }
+      if (Object.hasOwn(config, 'timeStep')) {
+        project.simulationConfig.timeStep = requireFinite(
+          config.timeStep,
+          'Simulation time step',
+          { positive: true },
+        )
+      }
+      if (Object.hasOwn(config, 'qubitRepresentation')) {
+        project.simulationConfig.qubitRepresentation = requireChoice(
+          config.qubitRepresentation,
+          QUBIT_REPRESENTATION_OPTIONS,
+          'Qubit representation',
+        )
+      }
+      if (Object.hasOwn(config, 'qumodeRepresentation')) {
+        project.simulationConfig.qumodeRepresentation = requireChoice(
+          config.qumodeRepresentation,
+          QUMODE_REPRESENTATION_OPTIONS,
+          'Qumode representation',
+        )
+      }
+    }
+    if (value.physicalConfig) {
+      project.net.physicalConfig.refractiveIndex = requireFinite(
+        value.physicalConfig.refractiveIndex,
+        'Refractive index',
+        { positive: true },
+      )
+    }
+    context.affectedIds.add('project')
+  }
+
+  createNode(project, operation, context) {
+    const value = operation.value || operation
+    const id = this.assignId('node', operation, context)
+    if (project.net.nodes.some(node => node.id === id)) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Node ID already exists: ${id}`)
+    }
+    const node = new Node({
+      id,
+      name: value.name || `Node ${project.net.nodes.length + 1}`,
+      position: requirePosition(value.position),
+      data: {
+        type: value.type || value.data?.type || 'City',
+        slots: [],
+        protocols: [],
+      },
+    })
+    project.net.nodes.push(node)
+  }
+
+  updateNode(project, operation, context) {
+    const id = resolveAlias(operation.id || operation.node_id, context.aliases)
+    const node = byId(project.net.nodes, id, 'Node')
+    const value = operation.value || operation
+    if (Object.hasOwn(value, 'name')) node.name = requireString(value.name, 'Node name')
+    if (Object.hasOwn(value, 'position')) node.position = requirePosition(value.position)
+    if (record(value.data)) {
+      if (Object.keys(value.data).some(key => key !== 'type')) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          'Node slots and protocols must use their specialist operations.',
+        )
+      }
+      node.data = { ...node.data, ...deepClone(value.data) }
+    }
+    context.affectedIds.add(node.id)
+  }
+
+  removeNode(project, operation, context) {
+    const id = resolveAlias(operation.id || operation.node_id, context.aliases)
+    const node = byId(project.net.nodes, id, 'Node')
+    const removedEdges = project.net.edges.filter(edge => edge.source === node || edge.target === node)
+    project.net.edges = project.net.edges.filter(edge => edge.source !== node && edge.target !== node)
+    project.net.nodes = project.net.nodes.filter(candidate => candidate !== node)
+    context.deletedIds.add(node.id)
+    removedEdges.forEach(edge => context.deletedIds.add(edge.id))
+  }
+
+  reorderNode(project, operation, context) {
+    const id = resolveAlias(operation.id || operation.node_id, context.aliases)
+    const index = project.net.nodes.findIndex(node => node.id === id)
+    if (index < 0) byId(project.net.nodes, id, 'Node')
+    const toIndex = Number(operation.to_index)
+    if (!Number.isInteger(toIndex) || toIndex < 0 || toIndex >= project.net.nodes.length) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'to_index is outside the node list.')
+    }
+    const [node] = project.net.nodes.splice(index, 1)
+    project.net.nodes.splice(toIndex, 0, node)
+    project.net.edges.forEach(edge => setEdgeCorrectNodeOrder(edge, project.net.nodes))
+    context.affectedIds.add(id)
+  }
+
+  createEdge(project, operation, context) {
+    const value = operation.value || operation
+    const id = this.assignId('edge', operation, context)
+    if (project.net.edges.some(edge => edge.id === id)) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Edge ID already exists: ${id}`)
+    }
+    const sourceId = resolveAlias(value.source, context.aliases)
+    const targetId = resolveAlias(value.target, context.aliases)
+    const source = byId(project.net.nodes, sourceId, 'Source node')
+    const target = byId(project.net.nodes, targetId, 'Target node')
+    if (source === target) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'An edge requires two distinct nodes.')
+    }
+    const isLogic = value.isLogic === true
+    if (!isLogic) {
+      const duplicate = project.net.edges.some(edge => (
+        edge.isLogic !== true
+        && new Set([edge.source.id, edge.target.id]).has(source.id)
+        && new Set([edge.source.id, edge.target.id]).has(target.id)
+      ))
+      if (duplicate) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          'Only one physical edge may connect a pair of nodes.',
+        )
+      }
+    }
+    const edge = new Edge({
+      id,
+      source,
+      target,
+      isLogic,
+      data: {
+        type: value.type || value.data?.type || 'connection',
+        protocols: [],
+        curvePoints: deepClone(value.data?.curvePoints || []),
+        physicalOverrides: deepClone(value.data?.physicalOverrides ?? null),
+      },
+    })
+    setEdgeCorrectNodeOrder(edge, project.net.nodes)
+    project.net.edges.push(edge)
+  }
+
+  updateEdge(project, operation, context) {
+    const id = resolveAlias(operation.id || operation.edge_id, context.aliases)
+    const edge = byId(project.net.edges, id, 'Edge')
+    const value = operation.value || operation
+    if (Object.hasOwn(value, 'source')) {
+      edge.source = byId(
+        project.net.nodes,
+        resolveAlias(value.source, context.aliases),
+        'Source node',
+      )
+    }
+    if (Object.hasOwn(value, 'target')) {
+      edge.target = byId(
+        project.net.nodes,
+        resolveAlias(value.target, context.aliases),
+        'Target node',
+      )
+    }
+    if (edge.source === edge.target) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'An edge requires two distinct nodes.')
+    }
+    if (Object.hasOwn(value, 'isLogic') && value.isLogic !== edge.isLogic) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Edge placement is immutable; remove and recreate the edge.',
+      )
+    }
+    if (record(value.data)) {
+      const allowedDataFields = new Set(['type', 'curvePoints', 'physicalOverrides'])
+      if (Object.keys(value.data).some(key => !allowedDataFields.has(key))) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          'Edge protocols must use protocol specialist operations.',
+        )
+      }
+      edge.data = { ...edge.data, ...deepClone(value.data) }
+    }
+    if (
+      edge.isLogic !== true
+      && project.net.edges.some(candidate => (
+        candidate !== edge
+        && candidate.isLogic !== true
+        && new Set([candidate.source.id, candidate.target.id]).has(edge.source.id)
+        && new Set([candidate.source.id, candidate.target.id]).has(edge.target.id)
+      ))
+    ) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Only one physical edge may connect a pair of nodes.',
+      )
+    }
+    setEdgeCorrectNodeOrder(edge, project.net.nodes)
+    context.affectedIds.add(id)
+  }
+
+  removeEdge(project, operation, context) {
+    const id = resolveAlias(operation.id || operation.edge_id, context.aliases)
+    byId(project.net.edges, id, 'Edge')
+    project.net.edges = project.net.edges.filter(edge => edge.id !== id)
+    context.deletedIds.add(id)
+  }
+
+  async createSlot(project, operation, context) {
+    const node = byId(project.net.nodes, operation.node_id, 'Node')
+    const id = this.assignId('slot', operation, context)
+    if (project.net.nodes.some(candidate => candidate.data.slots.some(slot => slot.id === id))) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Slot ID already exists: ${id}`)
+    }
+    const value = operation.value || operation
+    this.requireSlotType(value.type || 'Qubit')
+    const backgroundNoise = await this.requireBackgroundNoise(
+      value.backgroundNoise || this.defaultBackgroundNoise(),
+    )
+    node.data.slots.push({
+      id,
+      type: value.type || 'Qubit',
+      backgroundNoise,
+      isLocked: false,
+      assignment: false,
+    })
+  }
+
+  async updateSlot(project, operation, context) {
+    const node = byId(project.net.nodes, operation.node_id, 'Node')
+    const slot = byId(node.data.slots, operation.id || operation.slot_id, 'Slot')
+    const value = operation.value || operation
+    if (Object.hasOwn(value, 'type')) slot.type = this.requireSlotType(value.type)
+    if (Object.hasOwn(value, 'backgroundNoise')) {
+      slot.backgroundNoise = await this.requireBackgroundNoise(value.backgroundNoise)
+    }
+    context.affectedIds.add(slot.id)
+  }
+
+  removeSlot(project, operation, context) {
+    const node = byId(project.net.nodes, operation.node_id, 'Node')
+    const id = operation.id || operation.slot_id
+    byId(node.data.slots, id, 'Slot')
+    node.data.slots = node.data.slots.filter(slot => slot.id !== id)
+    context.deletedIds.add(id)
+  }
+
+  reorderSlot(project, operation, context) {
+    const node = byId(project.net.nodes, operation.node_id, 'Node')
+    const id = operation.id || operation.slot_id
+    const index = node.data.slots.findIndex(slot => slot.id === id)
+    if (index < 0) byId(node.data.slots, id, 'Slot')
+    const toIndex = Number(operation.to_index)
+    if (!Number.isInteger(toIndex) || toIndex < 0 || toIndex >= node.data.slots.length) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'to_index is outside the slot list.')
+    }
+    const [slot] = node.data.slots.splice(index, 1)
+    node.data.slots.splice(toIndex, 0, slot)
+    context.affectedIds.add(id)
+  }
+
+  requireSlotType(type) {
+    const normalized = requireString(type, 'Slot type')
+    const types = this.slotCatalog().map(entry => (
+      typeof entry === 'string' ? entry : entry?.type
+    ))
+    if (!types.includes(normalized)) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Unknown slot type: ${normalized}`)
+    }
+    return normalized
+  }
+
+  effectiveParameterType(declaredType, parameter = {}) {
+    const parsed = parseJuliaType(declaredType)
+    const choices = Array.isArray(parsed) ? parsed : [parsed]
+    if (Object.hasOwn(parameter, 'selectedType')) {
+      const selectedType = requireString(parameter.selectedType, 'Selected parameter type')
+      if (!choices.includes(selectedType)) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Selected parameter type must be one of: ${choices.join(', ')}.`,
+        )
+      }
+      return selectedType
+    }
+
+    const value = parameter.value
+    if (value == null || value === '') return choices.includes('default') ? 'default' : choices[0]
+    if (value === 'Wildcard') {
+      return choices.find(isWildcardType) || choices[0]
+    }
+    if (value === 'nothing') return choices.includes('Nothing') ? 'Nothing' : choices[0]
+    if (typeof value === 'boolean' && choices.includes('Bool')) return 'Bool'
+    if (typeof value === 'number') {
+      if (Number.isInteger(value)) {
+        const integerType = choices.find(type => ['Int', 'Int64'].includes(type))
+        if (integerType) return integerType
+      }
+      return choices.find(type => parameterTypeIsNumber(type)) || choices[0]
+    }
+    if (Array.isArray(value)) {
+      return choices.find(type => String(type).startsWith('Vector{')) || choices[0]
+    }
+    if (typeof value === 'string') {
+      const functions = this.knownFunctions()
+      if (choices.includes('Function') && (
+        value === 'default' || functions.includes(value)
+      )) {
+        return 'Function'
+      }
+      if (choices.includes('String')) return 'String'
+      if (choices.includes('Lambda')) return 'Lambda'
+      const symbolic = choices.find(isSymbolicType)
+      if (symbolic) return symbolic
+    }
+    return choices.find(type => type !== 'default') || choices[0]
+  }
+
+  async requireTypedValue(
+    type,
+    value,
+    label,
+    { placement = 'node', parameter = {} } = {},
+  ) {
+    if (type === 'default') {
+      if (value == null || value === '') return null
+      throw new DesignCommandError('VALIDATION_FAILED', `${label} must use its default value.`)
+    }
+    if (type === 'Any') return deepClone(value)
+    if (parameter.kind === 'named_tag_type' || type === 'Type{<:AbstractTag}') {
+      if (value == null || value === '') return null
+      if (parameter.nullable === true && value === 'nothing') return value
+      if (typeof value === 'string' && value.trim()) return value
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `${label} must be a named tag type${parameter.nullable ? ' or nothing' : ''}.`,
+      )
+    }
+    if (value == null) return null
+    if (type === 'String') {
+      if (typeof value !== 'string') {
+        throw new DesignCommandError('VALIDATION_FAILED', `${label} must be a string.`)
+      }
+      return value
+    }
+    if (isCodeType(type)) {
+      if (typeof value !== 'string' || !value.trim()) {
+        throw new DesignCommandError('VALIDATION_FAILED', `${label} must contain valid code.`)
+      }
+      let validation
+      try {
+        validation = await this.validateCodeValue(type, value, { placement })
+      } catch (error) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          error?.message || `${label} could not be validated.`,
+        )
+      }
+      if (validation?.valid !== true) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          validation?.message || `${label} contains invalid code.`,
+        )
+      }
+      return value
+    }
+    if (parameterTypeIsNumber(type)) {
+      if (value === '') return null
+      const number = Number(value)
+      const normalizedType = String(type).toLowerCase()
+      const minimum = Number(parameter.min)
+      const maximum = Number(parameter.max)
+      if (
+        !Number.isFinite(number)
+        || ((normalizedType === 'int' || normalizedType === 'int64')
+          && !Number.isInteger(number))
+        || (Number.isFinite(minimum) && number < minimum)
+        || (Number.isFinite(maximum) && number > maximum)
+      ) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `${label} is not a valid ${type} value.`,
+        )
+      }
+      return number
+    }
+    if (type === 'Bool') {
+      if (typeof value !== 'boolean') {
+        throw new DesignCommandError('VALIDATION_FAILED', `${label} must be a boolean.`)
+      }
+      return value
+    }
+    if (type === 'Function') {
+      if (typeof value !== 'string' || !value) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `${label} must be a known function.`,
+        )
+      }
+      const functions = this.knownFunctions()
+      if (
+        value !== 'default'
+        && (
+          !functions.includes(value)
+          || (placement !== 'node' && value.endsWith('(self)'))
+        )
+      ) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `${label} is not available in the runtime function catalog.`,
+        )
+      }
+      return value
+    }
+    if (type === 'Nothing') {
+      if (value !== 'nothing') {
+        throw new DesignCommandError('VALIDATION_FAILED', `${label} must be nothing.`)
+      }
+      return value
+    }
+    if (isWildcardType(type)) {
+      if (value !== 'Wildcard') {
+        throw new DesignCommandError('VALIDATION_FAILED', `${label} must be Wildcard.`)
+      }
+      return value
+    }
+    if (type === 'Vector{Int64}' || type === 'Vector{Float64}') {
+      if (
+        !Array.isArray(value)
+        || !value.every(item => (
+          typeof item === 'number'
+          && Number.isFinite(item)
+          && (type !== 'Vector{Int64}' || Number.isInteger(item))
+        ))
+      ) {
+        throw new DesignCommandError('VALIDATION_FAILED', `${label} is not a valid ${type}.`)
+      }
+      return [...value]
+    }
+    throw new DesignCommandError(
+      'VALIDATION_FAILED',
+      `${label} uses an unsupported parameter type: ${type}.`,
+    )
+  }
+
+  async requireBackgroundNoise(noise) {
+    if (!record(noise)) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Background noise must be a catalog-backed configuration.',
+      )
+    }
+    const type = requireString(noise.type, 'Background noise type')
+    const catalog = this.backgroundCatalog()
+    const definition = catalog.find(entry => entry?.type === type)
+    if (catalog.length > 0 && !definition) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Unknown background noise type: ${type}`,
+      )
+    }
+    if (!Array.isArray(noise.parameters)) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Background noise parameters must be an array.',
+      )
+    }
+    if (!definition) return deepClone(noise)
+
+    const definitions = Array.isArray(definition.parameters) ? definition.parameters : []
+    const supplied = new Map()
+    for (const parameter of noise.parameters) {
+      const field = requireString(parameter?.field, 'Background noise parameter field')
+      if (supplied.has(field)) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Duplicate background noise parameter: ${field}`,
+        )
+      }
+      supplied.set(field, parameter)
+    }
+    const expected = new Set(definitions.map(parameter => String(parameter.field)))
+    if (
+      expected.size !== supplied.size
+      || [...expected].some(field => !supplied.has(field))
+    ) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Background noise parameters must be exactly: ${[...expected].join(', ')}`,
+      )
+    }
+
+    const parameters = []
+    for (const parameterDefinition of definitions) {
+      const field = String(parameterDefinition.field)
+      const suppliedParameter = supplied.get(field)
+      if (
+        Object.hasOwn(suppliedParameter, 'type')
+        && JSON.stringify(suppliedParameter.type) !== JSON.stringify(parameterDefinition.type)
+      ) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Background noise parameter metadata does not match the catalog: ${field}`,
+        )
+      }
+      const effectiveType = this.effectiveParameterType(
+        parameterDefinition.type,
+        suppliedParameter,
+      )
+      const value = await this.requireTypedValue(
+        effectiveType,
+        suppliedParameter.value,
+        `Background noise parameter ${field}`,
+        { parameter: parameterDefinition },
+      )
+      parameters.push({
+        ...deepClone(parameterDefinition),
+        value,
+        ...(Object.hasOwn(suppliedParameter, 'selectedType')
+          ? { selectedType: suppliedParameter.selectedType }
+          : {}),
+      })
+    }
+    return {
+      ...deepClone(definition),
+      type,
+      parameters,
+    }
+  }
+
+  async createProtocol(project, operation, context) {
+    const collection = protocolCollection(project, operation)
+    const value = operation.value || operation
+    const id = this.assignId('protocol', operation, context)
+    const allProtocols = [
+      ...project.net.protocols,
+      ...project.net.nodes.flatMap(node => node.data.protocols),
+      ...project.net.edges.flatMap(edge => edge.data.protocols),
+    ]
+    if (allProtocols.some(protocol => protocol.id === id)) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Protocol ID already exists: ${id}`)
+    }
+    const definitions = this.protocolCatalog()?.[operation.placement] || []
+    const definition = definitions.find(candidate => candidate.type === value.type)
+    if (!definition) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Protocol is not available for ${operation.placement} placement: ${value.type}`,
+      )
+    }
+    if (
+      operation.placement === 'edge'
+      && byId(project.net.edges, operation.owner_id, 'Edge').isLogic
+      && definition.virtual !== true
+    ) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'The protocol is incompatible with virtual edges.',
+      )
+    }
+    const constructor = {
+      type: value.type,
+      parameters: await this.protocolParameters(
+        project,
+        definition,
+        value.parameters,
+        operation.placement,
+      ),
+    }
+    collection.push(new FloatingProtocol({ id, ...constructor }))
+  }
+
+  async updateProtocol(project, operation, context) {
+    const collection = protocolCollection(project, operation)
+    const protocol = byId(collection, operation.id || operation.protocol_id, 'Protocol')
+    const value = operation.value || operation
+    if (Object.hasOwn(value, 'placement')) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Protocol placement is immutable; remove and recreate the protocol.',
+      )
+    }
+    const previousType = protocol.type
+    const type = Object.hasOwn(value, 'type')
+      ? requireString(value.type, 'Protocol type')
+      : previousType
+    const definition = (this.protocolCatalog()?.[operation.placement] || [])
+      .find(candidate => candidate.type === type)
+    if (!definition) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Protocol is not available for ${operation.placement} placement: ${type}`,
+      )
+    }
+    if (
+      operation.placement === 'edge'
+      && byId(project.net.edges, operation.owner_id, 'Edge').isLogic
+      && definition.virtual !== true
+    ) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'The protocol is incompatible with virtual edges.',
+      )
+    }
+    const preservedParameterTypes = type === previousType
+      ? new Map(
+          (protocol.parameters || []).map(parameter => [
+            parameter.name,
+            deepClone(parameter.type),
+          ]),
+        )
+      : null
+    protocol.type = type
+    if (Object.hasOwn(value, 'parameters') || type !== previousType) {
+      protocol.parameters = await this.protocolParameters(
+        project,
+        definition,
+        value.parameters,
+        operation.placement,
+        preservedParameterTypes,
+      )
+    }
+    context.affectedIds.add(protocol.id)
+  }
+
+  async protocolParameters(
+    project,
+    definition,
+    supplied,
+    placement,
+    preservedTypes = null,
+  ) {
+    const defaults = createProtocolFromDefinition(definition).parameters
+    if (supplied === undefined) return defaults
+    if (!Array.isArray(supplied)) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Protocol parameters must be an array.',
+      )
+    }
+    const byName = new Map()
+    for (const parameter of supplied) {
+      const name = requireString(parameter?.name, 'Protocol parameter name')
+      if (byName.has(name)) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Duplicate protocol parameter: ${name}`,
+        )
+      }
+      byName.set(name, parameter)
+    }
+    const definitions = new Map(
+      definition.parameters.map(parameter => [parameter.field, parameter]),
+    )
+    for (const name of byName.keys()) {
+      if (!definitions.has(name)) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Unknown protocol parameter for ${definition.type}: ${name}`,
+        )
+      }
+    }
+    const normalizedParameters = []
+    for (const parameter of defaults) {
+      const canonicalParameter = preservedTypes?.has(parameter.name)
+        ? { ...parameter, type: deepClone(preservedTypes.get(parameter.name)) }
+        : parameter
+      const suppliedParameter = byName.get(parameter.name)
+      if (!suppliedParameter) {
+        normalizedParameters.push(canonicalParameter)
+        continue
+      }
+      const parameterDefinition = definitions.get(parameter.name)
+      let normalizedValue
+      if (isVariableReference(suppliedParameter.value)) {
+        const variable = byId(project.variables, suppliedParameter.value.id, 'Variable')
+        const declaredType = parameterDefinition.type
+        if (!parameterTypeSupportsVariableType(declaredType, variable.type)) {
+          throw new DesignCommandError(
+            'VALIDATION_FAILED',
+            `Variable ${variable.name} is incompatible with parameter ${parameter.name}.`,
+          )
+        }
+        normalizedValue = deepClone(suppliedParameter.value)
+      } else {
+        const effectiveType = parameterDefinition.kind === 'named_tag_type'
+          ? 'named_tag_type'
+          : this.effectiveParameterType(
+              parameterDefinition.type,
+              suppliedParameter,
+            )
+        normalizedValue = await this.requireTypedValue(
+          effectiveType,
+          suppliedParameter.value,
+          `Protocol parameter ${parameter.name}`,
+          { placement, parameter: parameterDefinition },
+        )
+      }
+      normalizedParameters.push({
+        ...canonicalParameter,
+        value: normalizedValue,
+        ...(Object.hasOwn(suppliedParameter, 'selectedType')
+          ? { selectedType: suppliedParameter.selectedType }
+          : {}),
+        ...(typeof suppliedParameter.latex === 'string'
+          ? { latex: suppliedParameter.latex }
+          : {}),
+      })
+    }
+    return normalizedParameters
+  }
+
+  removeProtocol(project, operation, context) {
+    const collection = protocolCollection(project, operation)
+    const id = operation.id || operation.protocol_id
+    byId(collection, id, 'Protocol')
+    collection.splice(collection.findIndex(protocol => protocol.id === id), 1)
+    context.deletedIds.add(id)
+  }
+
+  ensureUniqueVariableName(project, name, id = null) {
+    const normalized = requireString(name, 'Variable name')
+    if (project.variables.some(variable => variable.id !== id && variable.name?.trim() === normalized)) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'Variable names must be unique.')
+    }
+    return normalized
+  }
+
+  async createVariable(project, operation, context) {
+    const value = operation.value || operation
+    const id = this.assignId('variable', operation, context)
+    if (project.variables.some(variable => variable.id === id)) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Variable ID already exists: ${id}`)
+    }
+    const type = value.type || 'Float64'
+    if (!VARIABLE_PARAMETER_TYPES.includes(type)) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Unknown variable type: ${type}`)
+    }
+    const variableValue = await this.requireTypedValue(
+      type,
+      Object.hasOwn(value, 'value') ? value.value : null,
+      `Variable ${value.name || id}`,
+    )
+    const variable = new Variable({
+      id,
+      name: this.ensureUniqueVariableName(project, value.name),
+      type,
+      value: variableValue,
+    })
+    project.variables.push(variable)
+  }
+
+  async updateVariable(project, operation, context) {
+    const variable = byId(project.variables, operation.id || operation.variable_id, 'Variable')
+    if (isStatesZooTraceVariable(variable)) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'Owned trace variables are read-only.')
+    }
+    if (isStatesZooVariable(variable)) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'States Zoo variables must use state specialist operations.',
+      )
+    }
+    const value = operation.value || operation
+    if (Object.hasOwn(value, 'name')) {
+      variable.name = this.ensureUniqueVariableName(project, value.name, variable.id)
+    }
+    if (Object.hasOwn(value, 'type') && value.type !== variable.type) {
+      if (!VARIABLE_PARAMETER_TYPES.includes(value.type)) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Unknown variable type: ${value.type}`,
+        )
+      }
+      variable.type = requireString(value.type, 'Variable type')
+      resetValueForType(variable, variable.type)
+    }
+    if (Object.hasOwn(value, 'value')) {
+      variable.value = await this.requireTypedValue(
+        variable.type,
+        value.value,
+        `Variable ${variable.name}`,
+      )
+    }
+    context.affectedIds.add(variable.id)
+  }
+
+  removeVariable(project, operation, context) {
+    const id = operation.id || operation.variable_id
+    byId(project.variables, id, 'Variable')
+    if (isVariableReferenced(project, id)) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Unlink this variable from protocol parameters before deleting it.',
+      )
+    }
+    project.variables = project.variables.filter(variable => variable.id !== id)
+    context.deletedIds.add(id)
+  }
+
+  stateDefinition(typeId) {
+    const definition = this.statesCatalog().find(candidate => candidate.id === typeId)
+    if (!definition) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Unknown States Zoo type: ${typeId}`)
+    }
+    return definition
+  }
+
+  stateParameters(definition, supplied) {
+    const parameterDefinitions = Array.isArray(definition.parameters)
+      ? definition.parameters
+      : []
+    if (parameterDefinitions.length === 0) return deepClone(supplied || {})
+    const values = supplied || Object.fromEntries(
+      parameterDefinitions.map(parameter => [parameter.name, Number(parameter.good)]),
+    )
+    if (!record(values)) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'States Zoo parameters must be an object.',
+      )
+    }
+    const expected = new Set(parameterDefinitions.map(parameter => String(parameter.name)))
+    const actual = new Set(Object.keys(values))
+    if (
+      expected.size !== actual.size
+      || [...expected].some(name => !actual.has(name))
+    ) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `States Zoo parameters must be exactly: ${[...expected].join(', ')}`,
+      )
+    }
+    return Object.fromEntries(parameterDefinitions.map(parameter => {
+      const name = String(parameter.name)
+      const value = Number(values[name])
+      const minimum = Number(parameter.min)
+      const maximum = Number(parameter.max)
+      if (
+        !Number.isFinite(value)
+        || (Number.isFinite(minimum) && value < minimum)
+        || (Number.isFinite(maximum) && value > maximum)
+      ) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `${name} must be a finite number in [${minimum}, ${maximum}].`,
+        )
+      }
+      return [name, value]
+    }))
+  }
+
+  async synchronizeTrace(project, variable, definition, context) {
+    const companionId = `${variable.id}_tr`
+    const existing = project.variables.find(candidate => candidate.id === companionId)
+    if (!definition.weighted) {
+      if (existing && isVariableReferenced(project, existing.id)) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          'Unlink the generated trace variable before choosing an unweighted state.',
+        )
+      }
+      if (existing) {
+        project.variables.splice(project.variables.indexOf(existing), 1)
+        context.deletedIds.add(existing.id)
+      }
+      return
+    }
+    if (existing && existing.statesZooTraceSourceId !== variable.id) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Cannot generate trace variable because ID ${companionId} is already in use.`,
+      )
+    }
+    const preview = await this.previewState(
+      variable.value.state_type,
+      deepClone(variable.value.parameters),
+    )
+    const trace = Math.abs(Number(preview?.trace))
+    if (!Number.isFinite(trace)) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'The state preview returned an invalid trace.')
+    }
+    const companionName = `${variable.name}_tr`
+    const collision = project.variables.some(candidate => (
+      candidate.id !== companionId && candidate.name === companionName
+    ))
+    if (collision) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Cannot generate trace variable because name ${companionName} is already in use.`,
+      )
+    }
+    if (existing) {
+      existing.name = companionName
+      existing.type = 'Float64'
+      existing.value = trace
+    } else {
+      project.variables.push(new Variable({
+        id: companionId,
+        name: companionName,
+        type: 'Float64',
+        value: trace,
+        statesZooTraceSourceId: variable.id,
+      }))
+      context.affectedIds.add(companionId)
+    }
+  }
+
+  async createState(project, operation, context) {
+    const value = operation.value || operation
+    const definition = this.stateDefinition(value.state_type)
+    const id = this.assignId('variable', operation, context)
+    if (project.variables.some(variable => variable.id === id)) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Variable ID already exists: ${id}`)
+    }
+    const variable = new Variable({
+      id,
+      name: this.ensureUniqueVariableName(project, value.name),
+      type: 'Symbolic',
+      value: {
+        kind: STATES_ZOO_VALUE_KIND,
+        state_type: definition.id,
+        parameters: this.stateParameters(definition, value.parameters),
+      },
+    })
+    project.variables.push(variable)
+    await this.synchronizeTrace(project, variable, definition, context)
+  }
+
+  async updateState(project, operation, context) {
+    const variable = byId(project.variables, operation.id || operation.variable_id, 'State variable')
+    if (variable.value?.kind !== STATES_ZOO_VALUE_KIND) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'The selected variable is not a States Zoo variable.')
+    }
+    const value = operation.value || operation
+    if (Object.hasOwn(value, 'name')) {
+      variable.name = this.ensureUniqueVariableName(project, value.name, variable.id)
+    }
+    const definition = this.stateDefinition(value.state_type || variable.value.state_type)
+    if (Object.hasOwn(value, 'state_type')) variable.value.state_type = definition.id
+    if (Object.hasOwn(value, 'parameters') || Object.hasOwn(value, 'state_type')) {
+      variable.value.parameters = this.stateParameters(definition, value.parameters)
+    }
+    await this.synchronizeTrace(project, variable, definition, context)
+    context.affectedIds.add(variable.id)
+  }
+
+  removeState(project, operation, context) {
+    const id = operation.id || operation.variable_id
+    const variable = byId(project.variables, id, 'State variable')
+    const companion = project.variables.find(candidate => candidate.id === `${id}_tr`)
+    if (isVariableReferenced(project, id) || (companion && isVariableReferenced(project, companion.id))) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        'Unlink the state and its trace variable before deleting it.',
+      )
+    }
+    project.variables = project.variables.filter(candidate => (
+      candidate.id !== id && candidate.id !== `${id}_tr`
+    ))
+    context.deletedIds.add(variable.id)
+    if (companion) context.deletedIds.add(companion.id)
+  }
+
+  createAnnotation(project, operation, context) {
+    const value = operation.value || operation
+    const id = this.assignId('annotation', operation, context)
+    if (project.annotations.some(annotation => annotation.id === id)) {
+      throw new DesignCommandError('VALIDATION_FAILED', `Annotation ID already exists: ${id}`)
+    }
+    project.annotations.push({
+      id,
+      markdown: typeof value.markdown === 'string' ? value.markdown : '',
+      bounds: deepClone(value.bounds),
+      backgroundColor: value.backgroundColor || '#ffffff',
+      borderColor: value.borderColor || '#4345ac',
+      ...(value.area ? { area: deepClone(value.area) } : {}),
+    })
+  }
+
+  updateAnnotation(project, operation, context) {
+    const annotation = byId(
+      project.annotations,
+      operation.id || operation.annotation_id,
+      'Annotation',
+    )
+    const value = operation.value || operation
+    const {
+      kind: _kind,
+      id: _id,
+      annotation_id: _annotationId,
+      client_ref: _clientRef,
+      ...changes
+    } = value
+    syncPlainObject(annotation, { ...annotation, ...deepClone(changes) })
+    context.affectedIds.add(annotation.id)
+  }
+
+  removeAnnotation(project, operation, context) {
+    const id = operation.id || operation.annotation_id
+    byId(project.annotations, id, 'Annotation')
+    project.annotations = project.annotations.filter(annotation => annotation.id !== id)
+    context.deletedIds.add(id)
+  }
+
+  generateNetwork(project, operation, context) {
+    const value = operation.value || operation
+    const generator = this.generators[value.generator || value.type]
+    if (typeof generator !== 'function') {
+      throw new DesignCommandError('VALIDATION_FAILED', `Unknown network generator: ${value.generator || value.type}`)
+    }
+    const result = generator(project.net, deepClone(value.options || value))
+    for (const node of result.generatedNodes || []) context.affectedIds.add(node.id)
+    for (const edge of result.generatedEdges || []) context.affectedIds.add(edge.id)
+    for (const node of result.removedNodes || []) context.deletedIds.add(node.id)
+    if (result.removedNode) context.deletedIds.add(result.removedNode.id)
+    if (result.removedEdge) context.deletedIds.add(result.removedEdge.id)
+  }
+}

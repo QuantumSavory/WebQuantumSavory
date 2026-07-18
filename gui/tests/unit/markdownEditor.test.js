@@ -3,6 +3,10 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 import MarkdownEditor from '../../src/components/ui/MarkdownEditor.vue'
+import {
+  EDITOR_DRAFT_REGISTRY_KEY,
+  createEditorDraftRegistry,
+} from '../../src/composables/editorDraftRegistry'
 
 function createPasteEvent(items) {
   const event = new Event('paste', { bubbles: true, cancelable: true })
@@ -110,5 +114,24 @@ describe('MarkdownEditor', () => {
       expect(textarea.element.value)
         .toBe('Before ![Pasted image](data:image/png;base64,AAEC) after')
     })
+  })
+
+  it('flushes an open draft through the registered durable commit callback', async () => {
+    const registry = createEditorDraftRegistry()
+    const wrapper = mount(MarkdownEditor, {
+      props: { modelValue: 'Before' },
+      global: {
+        provide: { [EDITOR_DRAFT_REGISTRY_KEY]: registry },
+      },
+    })
+    await wrapper.get('[aria-label="Edit Markdown content"]').trigger('click')
+    await wrapper.get('textarea').setValue('After')
+
+    const flushing = registry.flushAll()
+    const [, afterCommit] = wrapper.emitted('update:modelValue').at(-1)
+    afterCommit()
+
+    await expect(flushing).resolves.toEqual({ valid: true })
+    expect(wrapper.find('textarea').exists()).toBe(false)
   })
 })

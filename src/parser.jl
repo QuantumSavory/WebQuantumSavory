@@ -1337,29 +1337,19 @@ function simulation_blocked_exception(simulation_name)
   return APIError("Simulation $simulation_name is expired; destroy it to recreate", 400)
 end
 
-function action_is_valid(simulation_name, destroy::Bool = true)
-  if haskey(WebQuantumSavory.STATE, simulation_name)
-    state = WebQuantumSavory.STATE[simulation_name]
-
-    state.is_running && throw(simulation_is_running_exception(simulation_name))
-
-    # If the state has been blocked (either timeout or auto-purged), prevent any modifying actions except destroy
-    if (state.execution_time_exceeded || state.auto_purged) && !destroy
-      throw(simulation_blocked_exception(simulation_name))
-    end
-
-    destroy || return true
-
-    @warn "Simulation $simulation_name already exists, destroying it" simulation_name=simulation_name
-    @log_event WebQuantumSavory.STATE[simulation_name] Logging.Warn "Simulation $simulation_name already exists, destroying it" simulation_name=simulation_name
-
-    WebQuantumSavory.destroy_simulation(simulation_name)
-  end
-
-  return true
+function action_is_valid(
+  simulation_name,
+  destroy::Bool=true;
+  service=SIMULATION_SERVICE,
+)
+  return simulation_action_is_valid!(
+    service,
+    String(simulation_name);
+    destroy,
+  )
 end
 
-function parse_network_graph(data)
+function build_simulation_state(data)
   g = build_graph(data)
 
   # Create registers array based on node slots data
@@ -1377,7 +1367,6 @@ function parse_network_graph(data)
   )
 
   simulation_name = data["data"]["name"]
-  action_is_valid(simulation_name)
 
   state = WebQuantumSavory.State(
     name = simulation_name,
@@ -1389,7 +1378,8 @@ function parse_network_graph(data)
   )
 
   state.simulation_last_active_time = Dates.now()
-  WebQuantumSavory.STATE[simulation_name] = state
-
   return state
 end
+
+parse_network_graph(data) =
+  simulation_create!(SIMULATION_SERVICE, data; validation=data)

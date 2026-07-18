@@ -107,6 +107,7 @@
               :disabled="parameterDisabled(param)"
               :category="category"
               :aria-describedby="controlledDescriptionId(param)"
+              @commit="emit('commit')"
             />
           </div>
 
@@ -194,9 +195,10 @@ const props = defineProps({
     default: 'No configurable parameters.'
   }
 })
+const emit = defineEmits(['commit'])
 
 const blacklistParamNames = new Set(['sim', 'net', 'node', 'nodeA', 'nodeB'])
-const directParameterValues = new WeakMap()
+const directParameterValues = new Map()
 const variablePickerParameter = shallowRef(null)
 const formId = useDomId('protocol-constructor')
 
@@ -276,6 +278,7 @@ function updateNamedTagTypeValue(param, value) {
   param.value = value
   delete param.error
   delete param.latex
+  emit('commit')
 }
 
 function onSelectedTypeChanged(param) {
@@ -289,6 +292,7 @@ function onSelectedTypeChanged(param) {
   } else if (param.value === 'Wildcard' || param.value === 'nothing') {
     param.value = null
   }
+  emit('commit')
 }
 
 function parameterTypeChoices(param) {
@@ -335,18 +339,22 @@ function isVariablePickerOpen(param) {
 function assignVariable(param, variableId) {
   if (parameterDisabled(param)) return
   if (!compatibleVariables(param).some(variable => variable.id === variableId)) return
-  if (!isVariableAssigned(param)) directParameterValues.set(param, param.value)
+  if (!isVariableAssigned(param)) directParameterValues.set(param.name, param.value)
   param.value = new VariableReference(variableId)
   variablePickerParameter.value = null
   delete param.error
   delete param.latex
+  emit('commit')
 }
 
 function clearVariableAssignment(param) {
   if (parameterDisabled(param)) return
-  param.value = directParameterValues.has(param) ? directParameterValues.get(param) : null
-  directParameterValues.delete(param)
+  param.value = directParameterValues.has(param.name)
+    ? directParameterValues.get(param.name)
+    : null
+  directParameterValues.delete(param.name)
   if (isVariablePickerOpen(param)) variablePickerParameter.value = null
+  emit('commit')
 }
 
 function toggleVariableAssignment(param) {

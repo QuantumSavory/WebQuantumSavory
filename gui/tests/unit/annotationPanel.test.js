@@ -17,7 +17,13 @@ function annotation(overrides = {}) {
 }
 
 describe('AnnotationPanel', () => {
-  it('shows the Markdown editor first and mutates content and colors immediately', async () => {
+  function applyLatestCommand(wrapper, selected) {
+    const operations = wrapper.emitted('designOperations').at(-1)[0]
+    Object.assign(selected, operations[0].value)
+    return operations
+  }
+
+  it('shows the Markdown editor first and dispatches content and color commands', async () => {
     const selected = annotation()
     const wrapper = mount(AnnotationPanel, {
       props: { annotation: selected },
@@ -36,12 +42,15 @@ describe('AnnotationPanel', () => {
     })
 
     editor.vm.$emit('update:modelValue', 'Updated **note**')
+    applyLatestCommand(wrapper, selected)
     expect(selected.markdown).toBe('Updated **note**')
 
     const background = wrapper.get('input[type="color"][value="#ffffff"]')
     const border = wrapper.get('input[type="color"][value="#334155"]')
     await background.setValue('#abcdef')
+    applyLatestCommand(wrapper, selected)
     await border.setValue('#123456')
+    applyLatestCommand(wrapper, selected)
     expect(selected.backgroundColor).toBe('#abcdef')
     expect(selected.borderColor).toBe('#123456')
   })
@@ -58,10 +67,13 @@ describe('AnnotationPanel', () => {
       .toContain('connected along an annotation edge')
 
     await checkbox.setValue(true)
+    applyLatestCommand(wrapper, selected)
+    await wrapper.vm.$nextTick()
     expect(selected.area).toEqual({ freeCorner: [6, 3] })
     expect(checkbox.element.checked).toBe(true)
 
     await checkbox.setValue(false)
+    applyLatestCommand(wrapper, selected)
     expect(selected.area).toBeNull()
   })
 

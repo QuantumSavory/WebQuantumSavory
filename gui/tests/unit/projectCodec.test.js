@@ -10,6 +10,7 @@ import {
   PROJECT_SCHEMA_VERSION,
   createEmptyProject,
   decodeStoredProject,
+  encodeDesignDocument,
   encodeStoredProject,
   normalizeProjectName,
   summarizeProject,
@@ -17,6 +18,51 @@ import {
   toScriptExportPayloadFromSimulationPayload,
   toSimulationPayload,
 } from '../../src/utils/projectCodec'
+
+describe('collaborative design codec', () => {
+  it('projects stored projects without UI, platform, or runtime slot state', () => {
+    const project = createEmptyProject('Canonical')
+    project.platformInfo = { versions: { app: '1.0.0' } }
+    project.uiGlobal = { selection: 'node_a' }
+    const node = new Node({
+      id: 'node_a',
+      name: 'A',
+      position: [1, 2],
+      data: {
+        type: 'City',
+        protocols: [],
+        slots: [{
+          id: 'slot_a',
+          type: 'Qubit',
+          backgroundNoise: DEFAULT_NOISE,
+          isLocked: true,
+          assignment: 'runtime',
+          lastOperationTime: 5,
+          representationType: 'png',
+          renderedResult: '<binary>',
+        }],
+      },
+    })
+    node.expanded = true
+    project.net.nodes.push(node)
+
+    const document = encodeDesignDocument(project)
+
+    expect(document).not.toHaveProperty('platformInfo')
+    expect(document).not.toHaveProperty('uiGlobal')
+    expect(document.net.nodes[0]).not.toHaveProperty('expanded')
+    expect(document.net.nodes[0].data.slots[0]).toEqual({
+      id: 'slot_a',
+      type: 'Qubit',
+      backgroundNoise: DEFAULT_NOISE,
+    })
+    expect(document).toMatchObject({
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      name: 'Canonical',
+      net: { physicalConfig: { refractiveIndex: expect.any(Number) } },
+    })
+  })
+})
 
 const DEFAULT_NOISE = {
   type: 'QuantumSavory.NoBackground',

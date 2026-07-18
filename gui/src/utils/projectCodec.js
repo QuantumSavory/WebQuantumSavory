@@ -517,6 +517,40 @@ export function encodeStoredProject(project, context = {}) {
   }
 }
 
+/**
+ * Encode the transport-neutral collaborative design document.
+ *
+ * This is deliberately a projection of the established stored-project codec:
+ * storage migrations and model normalization therefore remain implemented in
+ * exactly one place.
+ */
+export function encodeDesignDocument(project) {
+  const document = encodeStoredProject(project)
+  delete document.platformInfo
+  delete document.uiGlobal
+
+  for (const node of document.net?.nodes || []) {
+    delete node.expanded
+    for (const slot of node.data?.slots || []) {
+      delete slot.isLocked
+      delete slot.assignment
+      delete slot.lastOperationTime
+      delete slot.representationType
+      delete slot.ui_expanded
+      delete slot.renderedResult
+    }
+  }
+  return document
+}
+
+/**
+ * Hydrate a collaborative design document through the same model codec used by
+ * local storage and imports.
+ */
+export function decodeDesignDocument(document, context = {}) {
+  return decodeStoredProject(document, context).project
+}
+
 function hasValue(parameter) {
   return parameter?.value != null && parameter.value !== ''
 }

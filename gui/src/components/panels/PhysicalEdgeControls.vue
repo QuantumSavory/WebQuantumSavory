@@ -114,19 +114,29 @@ const props = defineProps({
   physicalConfig: { type: Object, required: true },
   editingLocked: { type: Boolean, default: false },
 })
+const emit = defineEmits(['designOperations'])
 
 const resolved = computed(() => resolveEdgePhysicalProperties(
   props.edge,
   props.physicalConfig,
 ))
 
-function ensureOverrides() {
-  props.edge.data.physicalOverrides ??= {
+function currentOverrides() {
+  return props.edge.data.physicalOverrides
+    ? { ...props.edge.data.physicalOverrides }
+    : {
     distanceMeters: null,
     refractiveIndex: null,
     delaySeconds: null,
   }
-  return props.edge.data.physicalOverrides
+}
+
+function commitOverrides(physicalOverrides) {
+  emit('designOperations', [{
+    kind: 'topology.update_edge',
+    edge_id: props.edge.id,
+    value: { data: { physicalOverrides } },
+  }])
 }
 
 function hasOverride(field) {
@@ -148,15 +158,15 @@ function setOverride(field, event, fallback, positive = false) {
     event.target.value = fallback
     return
   }
-  ensureOverrides()[field] = value
+  const overrides = currentOverrides()
+  overrides[field] = value
+  commitOverrides(overrides)
 }
 
 function resetOverride(field) {
-  const overrides = ensureOverrides()
+  const overrides = currentOverrides()
   overrides[field] = null
-  if (Object.values(overrides).every(value => value == null)) {
-    props.edge.data.physicalOverrides = null
-  }
+  commitOverrides(Object.values(overrides).every(value => value == null) ? null : overrides)
 }
 </script>
 

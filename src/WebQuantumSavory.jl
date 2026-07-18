@@ -33,6 +33,7 @@ Base.showerror(io::IO, e::APIError) = print(io, "APIError: $(e.message) (status:
 # include("constructors.jl")
 include("errors.jl")
 include("evaluation_policy.jl")
+include("mcp_config.jl")
 include("platform_info.jl")
 include("types.jl")
 include("Sandbox.jl")
@@ -106,7 +107,22 @@ function main()
   )
   # Fail before Genie starts if the diagnostic-protocol flag is malformed.
   mock_broken_protocol_enabled()
-  Genie.genie(; context = @__MODULE__)
+  # Load the selected Genie environment before validating MCP. Calling
+  # `Genie.genie` directly would hide route-loading failures and would validate
+  # against Genie's defaults rather than the effective production host.
+  server = Genie.Loader.loadenv(context=@__MODULE__)
+  endpoint = effective_genie_server_endpoint()
+  Genie.config.server_host = endpoint.host
+  Genie.config.server_port = endpoint.port
+  configure_mcp!(
+    backend_host=endpoint.host,
+    backend_port=endpoint.port,
+  )
+  Genie.Secrets.load(context=@__MODULE__)
+  Genie.Loader.load(context=@__MODULE__)
+  Genie.config.watch && @async Genie.Watch.watch(pwd())
+  Genie.run(server=server)
+  return server
 end
 
 
@@ -610,28 +626,7 @@ function pause_simulation(state::State)
 end
 
 function destroy_simulation(simulation_name)
-  # Check if simulation exists and isn't running, but allow destroying blocked states
-  if haskey(STATE, simulation_name)
-    state = STATE[simulation_name]
-    if state.is_running || (state.run_task !== nothing && !istaskdone(state.run_task))
-      throw(simulation_is_running_exception(simulation_name))
-    end
-  end
-  
-  # Don't call action_is_valid here as it blocks expired simulations
-  if !haskey(STATE, simulation_name)
-    return true  # Already deleted or never existed
-  end
-  
-  state = STATE[simulation_name]
-
-  # Perform cleanup before deletion
-  cleanup_success = cleanup_state!(state)
-
-  # Remove from global state
-  delete!(STATE, simulation_name)
-
-  return cleanup_success
+  return simulation_destroy!(SIMULATION_SERVICE, String(simulation_name))
 end
 
 function block_simulation(state::State; reason::Symbol = :timeout, max_minutes::Int = 10, auto_purged::Bool = false)
@@ -686,8 +681,16 @@ function known_functions()
 end
 
 
-function prepare_simulation(state::State, simulation_name::String)
-  action_is_valid(simulation_name, false) # just check if running, don't destroy
+function prepare_simulation(
+  state::State,
+  simulation_name::String;
+  service=SIMULATION_SERVICE,
+)
+  action_is_valid(
+    simulation_name,
+    false;
+    service,
+  ) # just check if running, don't destroy
 
   # Get the time tracker from the network
   sim = get_network_time_tracker(state.network)
@@ -703,8 +706,6 @@ function prepare_simulation(state::State, simulation_name::String)
   state.protocols_launched = launch_counts
   state.protocol_mapping = protocol_mapping
   state.simulation_last_active_time = Dates.now()
-
-  WebQuantumSavory.STATE[simulation_name] = state
 
   return state
 end
@@ -790,8 +791,13 @@ function run_simulation(
   time_units::Float64,
   simulation_name::String;
   simulation_logger::Logging.AbstractLogger=Logger.make_logger(state),
+  service=SIMULATION_SERVICE,
 )
-  action_is_valid(simulation_name, false)  # This already checks if blocked
+  action_is_valid(
+    simulation_name,
+    false;
+    service,
+  )  # This already checks if blocked
 
   if state.simulation === nothing
     throw(validation_error("Simulation not prepared"))
@@ -848,8 +854,7 @@ function run_simulation(
   return state
 end
 
-function get_logs(simulation_name::String, purge::Bool = true) 
-  state = STATE[simulation_name]
+function get_logs(state::State, purge::Bool = true)
   logs = copy(state.log_events)
   
   if purge
@@ -863,7 +868,19 @@ function get_logs(simulation_name::String, purge::Bool = true)
   return logs
 end
 
+get_logs(simulation_name::String, purge::Bool=true) =
+  simulation_logs(
+    SIMULATION_SERVICE,
+    simulation_name;
+    purge,
+    limit=nothing,
+  )
+
 include("mocks.jl")
+include("simulation_service.jl")
+include("collaboration_hub.jl")
+include("sidecar_supervisor.jl")
+include("mcp_adapters.jl")
 include("services.jl")
 include("startup_warmup.jl")
 

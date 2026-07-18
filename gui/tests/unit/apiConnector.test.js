@@ -35,6 +35,37 @@ describe('ApiConnector project namespaces', () => {
     expect(url.searchParams.get('name')).toBe('user_A&B #/?')
   })
 
+  it('exposes the exact UUID-scoped simulation name used by every API route', () => {
+    const connector = new ApiConnector('http://api.test')
+
+    expect(connector.getScopedSimulationName('  Shared Project  ')).toBe(
+      'user_Shared Project',
+    )
+  })
+
+  it('keeps established slot defaults when an older metadata response omits them', async () => {
+    globalThis.fetch = vi.fn(async url => {
+      const pathname = new URL(url).pathname
+      const bodies = {
+        '/known_functions': { known_functions: [] },
+        '/states_zoo_types': { states_zoo_types: [] },
+        '/background_types': { background_types: [] },
+        '/slot_types': { success: true },
+        '/protocol_types': { protocol_types: [] },
+      }
+      return {
+        ok: true,
+        json: async () => bodies[pathname],
+      }
+    })
+    const connector = new ApiConnector('http://api.test')
+
+    await connector.init()
+
+    expect(connector.config.value.slotTypes).toEqual(['Qubit', 'Qumode'])
+    expect(connector.error.value).toBeNull()
+  })
+
   it('keeps project and item identities inside encoded path segments', async () => {
     const connector = new ApiConnector('http://api.test')
     await connector.getProtocolResults('A/B?', { id: 'protocol/#1' })

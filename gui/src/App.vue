@@ -61,6 +61,10 @@ import { useProjectSession } from './composables/useProjectSession.js'
 import { useImportExport } from './composables/useImportExport.js'
 import { useAppState } from './composables/useAppState.js'
 import { useUnsavedChanges } from './composables/useUnsavedChanges.js'
+import {
+  EDITOR_DRAFT_REGISTRY_KEY,
+  createEditorDraftRegistry
+} from './composables/editorDraftRegistry.js'
 import { useShellGeometry } from './composables/useShellGeometry.js'
 import { applicationLoadingMessage } from './composables/applicationLoading.js'
 
@@ -79,6 +83,11 @@ import { registerLegacyBridge, syncLegacyProjectData } from './utils/legacyBridg
 import { generateRepeaterChain } from './utils/repeaterChain.js'
 import { generateStarNetwork } from './utils/starNetwork.js'
 import { generateGraphNetwork, GRAPH_TOPOLOGIES } from './utils/graphNetwork.js'
+import { isSymbolicType } from './utils/parameterTypes.js'
+import { DesignCommandService } from './domain/design/DesignCommandService.js'
+import { McpControlClient } from './features/mcp/McpControlClient.js'
+import { McpEditorBridge } from './features/mcp/McpEditorBridge.js'
+import { createSimulationControllerAdapter } from './features/mcp/simulationControllerAdapter.js'
 import { frontendBuildInfo } from './utils/frontendBuildInfo.js'
 import {
   areConsecutiveLogsEqual,
@@ -102,9 +111,20 @@ const TIME_STEP = 0.1;
 
 // Initialize composables
 const projectData = ref(createEmptyProject())
+const editorDraftRegistry = createEditorDraftRegistry()
+const markProjectDirtyRef = ref(() => {})
+provide(EDITOR_DRAFT_REGISTRY_KEY, editorDraftRegistry)
 const curveEditingEnabled = ref(false)
 const showPhysicalBadges = ref(true)
 const annotationCreationEnabled = ref(false)
+const designInteractionCount = ref(0)
+
+function updateDesignInteractionBusy(busy) {
+  designInteractionCount.value = Math.max(
+    0,
+    designInteractionCount.value + (busy ? 1 : -1),
+  )
+}
 
 // Required variables and functions for composables
 // Log management functions
@@ -365,6 +385,8 @@ const {
 })
 
 const isNetworkEditingDisabled = computed(() => simulationCapabilities.value.editingDisabled)
+let designCommands = null
+let mcpBridge = null
 
 const {
   isRightSidebarVisible,
@@ -397,7 +419,157 @@ const {
   deleteSelected,
   handleEdgeCreated,
   moveNode
-} = useNodeEdgeOperations(projectData, isNetworkEditingDisabled, addLog, { hideSlotState, showAlert })
+} = useNodeEdgeOperations(projectData, isNetworkEditingDisabled, addLog, {
+  hideSlotState,
+  showAlert,
+  executeDesignOperations: operations => designCommands.execute({
+    operations,
+    origin: 'gui'
+  })
+})
+
+designCommands = new DesignCommandService({
+  getProject: () => projectData.value,
+  editingDisabled: () => isNetworkEditingDisabled.value,
+  defaultBackgroundNoise: () => api.getDefaultBgNoise(),
+  slotCatalog: () => (
+    api.config.value.slotTypes?.length
+      ? api.config.value.slotTypes
+      : ['Qubit', 'Qumode']
+  ),
+  backgroundCatalog: () => api.config.value.bgNoiseOptions || [],
+  protocolCatalog: () => api.config.value.protocolTypes || {},
+  statesCatalog: () => api.config.value.statesZooTypes || [],
+  knownFunctions: () => api.getKnownFunctions(),
+  validateCodeValue: async (type, value, { placement } = {}) => {
+    if (!api.isUnsafeCodeEvaluationEnabled()) {
+      return {
+        valid: false,
+        message: 'Server-side Julia evaluation is disabled.',
+      }
+    }
+    const response = isSymbolicType(type)
+      ? await api.validateSymbolicFunction(value)
+      : await api.validateFunction(value, placement)
+    return {
+      valid: response?.success === true,
+      message: response?.error || 'The code value is invalid.',
+    }
+  },
+  previewState: (stateType, parameters) => api.fetchStatesZooPreview(stateType, parameters),
+  markDirty: () => markProjectDirtyRef.value(),
+  generators: {
+    repeater_chain: generateRepeaterChain,
+    star: generateStarNetwork,
+    grid: (net, options) => generateGraphNetwork(net, {
+      ...options,
+      topology: GRAPH_TOPOLOGIES.GRID
+    }),
+    all_to_all: (net, options) => generateGraphNetwork(net, {
+      ...options,
+      topology: GRAPH_TOPOLOGIES.ALL_TO_ALL
+    })
+  },
+  clearDeletedSelection: deletedIds => {
+    if (deletedIds.has(selectedItem.value?.id)) handleSelect(null, null)
+  },
+  onCommitted: async (result, { origin } = {}) => {
+    if (origin === 'gui' && mcpBridge?.binding) {
+      try {
+        await mcpBridge.publishGuiCommit(result.summary)
+      } catch (error) {
+        console.warn('Failed to publish GUI design revision:', error)
+      }
+    }
+  }
+})
+
+const mcpState = ref({})
+const mcpAvailable = computed(() => (
+  platformInfo.value?.capabilities?.mcp?.available === true
+))
+// Browser control routes are deliberately same-origin. During development
+// Vite proxies /_mcp to the loopback backend; production serves the UI and
+// these routes from the same Genie origin.
+const mcpClient = new McpControlClient()
+mcpBridge = new McpEditorBridge({
+  client: mcpClient,
+  getProject: () => projectData.value,
+  getProjectName: () => currentProjectName.value || projectData.value.name,
+  getSimulationName: () => api.getScopedSimulationName(
+    currentProjectName.value || projectData.value.name
+  ),
+  designCommands,
+  validateDesign: project => {
+    const validation = validatePayload(toSimulationPayload(project))
+    return {
+      valid: validation.success,
+      issues: validation.success
+        ? []
+        : [{ code: 'VALIDATION_FAILED', message: validation.error }]
+    }
+  },
+  simulationController: createSimulationControllerAdapter({
+    prepareSimulation,
+    runSimulationWithSteps,
+    pauseSimulation,
+    resumeSimulation,
+    stopSimulation
+  }),
+  flushEditors: async () => {
+    if (designInteractionCount.value > 0) return { busy: true }
+    const registeredDrafts = await editorDraftRegistry.flushAll()
+    if (registeredDrafts.busy || registeredDrafts.valid === false) {
+      return registeredDrafts
+    }
+    const activeElement = document.activeElement
+    if (
+      activeElement
+      && ['INPUT', 'SELECT', 'TEXTAREA'].includes(activeElement.tagName)
+      && typeof activeElement.blur === 'function'
+    ) {
+      activeElement.blur()
+      await nextTick()
+    }
+    const invalidDraft = document.querySelector('[aria-invalid="true"]')
+    return invalidDraft
+      ? {
+          valid: false,
+          details: {
+            element_id: invalidDraft.id || null,
+            label: invalidDraft.getAttribute('aria-label') || null
+          }
+        }
+      : { valid: true }
+  },
+  onState: state => {
+    mcpState.value = state
+  }
+})
+let mcpSnapshotTimer = null
+function scheduleMcpSnapshotSafetyNet() {
+  clearTimeout(mcpSnapshotTimer)
+  mcpSnapshotTimer = setTimeout(() => {
+    if (designInteractionCount.value > 0) {
+      scheduleMcpSnapshotSafetyNet()
+      return
+    }
+    designCommands.runExclusive(() => (
+      mcpBridge.publishGuiCommit('Unclassified GUI design change')
+    )).catch(error => {
+      console.warn('Failed to synchronize GUI design revision:', error)
+    })
+  }, 250)
+}
+
+watch(
+  projectData,
+  () => {
+    if (!mcpBridge.binding) return
+    scheduleMcpSnapshotSafetyNet()
+  },
+  { deep: true, flush: 'post' }
+)
 
 // Initialize app state composable
 const {
@@ -457,6 +629,11 @@ const {
   closeAllResultWindows,
   hideSlotState,
   syncLegacyProjectData,
+  beforeProjectReplacement: () => (
+    mcpBridge?.binding
+      ? mcpBridge.unbind({ bestEffort: true })
+      : undefined
+  ),
   confirmVersionMismatch: message => confirmAction({
     title: 'Project version mismatch',
     message,
@@ -473,17 +650,85 @@ const {
 
 watch(projectTransitionGeneration, () => {
   annotationCreationEnabled.value = false
+  designInteractionCount.value = 0
 })
 
 function beginAnnotationCreation() {
   annotationCreationEnabled.value = true
 }
 
-function handleAnnotationCreated(annotation) {
-  projectData.value.annotations.push(annotation)
-  handleSelect(annotation, 'annotation')
-  annotationCreationEnabled.value = false
-  addLog('info', `Created annotation: ${annotation.id}`, 'Map')
+async function executeGuiDesignOperations(operations, afterCommit, afterError) {
+  try {
+    const result = await designCommands.execute({ operations, origin: 'gui' })
+    afterCommit?.(result)
+    return result
+  } catch (error) {
+    if (afterError?.(error) === true) return null
+    showAlert('Unable to update design', error.message)
+    throw error
+  }
+}
+
+async function handleAnnotationCreated(annotation) {
+  try {
+    await executeGuiDesignOperations([{
+      kind: 'annotations.create',
+      id: annotation.id,
+      value: annotation
+    }])
+    handleSelect(
+      projectData.value.annotations.find(candidate => candidate.id === annotation.id),
+      'annotation'
+    )
+    addLog('info', `Created annotation: ${annotation.id}`, 'Map')
+  } finally {
+    annotationCreationEnabled.value = false
+  }
+}
+
+async function handleNodePositionChanged({ node, previousPosition }) {
+  const position = [...node.position]
+  try {
+    await executeGuiDesignOperations([{
+      kind: 'topology.update_node',
+      node_id: node.id,
+      value: { position }
+    }])
+  } catch {
+    if (Array.isArray(previousPosition)) node.updatePosition(previousPosition)
+  }
+}
+
+function updateProjectDescription(description, afterCommit, afterError) {
+  return executeGuiDesignOperations(
+    [{
+      kind: 'design.update',
+      value: { description }
+    }],
+    afterCommit,
+    afterError,
+  )
+}
+
+function updateRefractiveIndex(refractiveIndex) {
+  return executeGuiDesignOperations([{
+    kind: 'design.update',
+    value: { physicalConfig: { refractiveIndex } }
+  }])
+}
+
+function updateSimulationTime(time) {
+  return executeGuiDesignOperations([{
+    kind: 'design.update',
+    value: { simulationConfig: { time } }
+  }])
+}
+
+function updateSimulationConfig(simulationConfig) {
+  return executeGuiDesignOperations([{
+    kind: 'design.update',
+    value: { simulationConfig }
+  }])
 }
 
 const applicationShellPendingMessage = computed(() => applicationLoadingMessage({
@@ -510,10 +755,16 @@ function serializePanicProject() {
 // Unsaved snapshots compare the canonical storage representation.
 const {
   hasUnsavedChanges,
-  markAsSaved
+  markAsSaved,
+  markAsUnsaved
 } = useUnsavedChanges(serializeProjectData)
+const mcpPanelState = computed(() => ({
+  ...mcpState.value,
+  dirty: hasUnsavedChanges()
+}))
 
 markAsSavedRef.value = markAsSaved
+markProjectDirtyRef.value = markAsUnsaved
 
 // Unsaved changes dialog state
 const showUnsavedChangesDialog = ref(false)
@@ -690,7 +941,7 @@ function closeRepeaterChainGenerator() {
   showRepeaterChainDialog.value = false
 }
 
-function handleGenerateRepeaterChain(options) {
+async function handleGenerateRepeaterChain(options) {
   if (isNetworkEditingDisabled.value) {
     closeRepeaterChainGenerator()
     showAlert(
@@ -703,19 +954,15 @@ function handleGenerateRepeaterChain(options) {
   try {
     const startNodeName = projectData.value.net.nodes.find(node => node.id === options.startNodeId)?.name
     const endNodeName = projectData.value.net.nodes.find(node => node.id === options.endNodeId)?.name
-    const result = generateRepeaterChain(projectData.value.net, options)
-
-    if (
-      selectedItem.value?.id === result.removedNode.id
-      || selectedItem.value?.id === result.removedEdge.id
-    ) {
-      handleSelect(null, null)
-    }
+    await executeGuiDesignOperations([{
+      kind: 'network.generate',
+      value: { generator: 'repeater_chain', options }
+    }])
 
     closeRepeaterChainGenerator()
     addLog(
       'success',
-      `Generated a chain of ${result.generatedNodes.length} repeaters between ${startNodeName} and ${endNodeName}${result.virtualEdge ? ' with an end-to-end virtual edge' : ''}`,
+      `Generated a repeater chain between ${startNodeName} and ${endNodeName}`,
       'Layout Tools'
     )
   } catch (error) {
@@ -739,7 +986,7 @@ function closeStarNetworkGenerator() {
   showStarNetworkDialog.value = false
 }
 
-function handleGenerateStarNetwork(options) {
+async function handleGenerateStarNetwork(options) {
   if (isNetworkEditingDisabled.value) {
     closeStarNetworkGenerator()
     showAlert(
@@ -751,19 +998,15 @@ function handleGenerateStarNetwork(options) {
 
   try {
     const centerName = projectData.value.net.nodes.find(node => node.id === options.centerNodeId)?.name
-    const result = generateStarNetwork(projectData.value.net, options)
-
-    if (
-      selectedItem.value?.id === result.removedNode.id
-      || selectedItem.value?.id === result.removedEdge.id
-    ) {
-      handleSelect(null, null)
-    }
+    await executeGuiDesignOperations([{
+      kind: 'network.generate',
+      value: { generator: 'star', options }
+    }])
 
     closeStarNetworkGenerator()
     addLog(
       'success',
-      `Generated a star with ${result.generatedNodes.length} peripheral nodes around ${centerName}`,
+      `Generated a star network around ${centerName}`,
       'Layout Tools'
     )
   } catch (error) {
@@ -787,7 +1030,7 @@ function closeGraphNetworkGenerator() {
   showGraphNetworkDialog.value = false
 }
 
-function handleGenerateGraphNetwork(options) {
+async function handleGenerateGraphNetwork(options) {
   if (isNetworkEditingDisabled.value) {
     closeGraphNetworkGenerator()
     showAlert(
@@ -798,18 +1041,17 @@ function handleGenerateGraphNetwork(options) {
   }
 
   try {
-    const result = generateGraphNetwork(projectData.value.net, options)
-    const removedIds = new Set([
-      ...result.removedNodes.map(node => node.id),
-      result.removedEdge.id
-    ])
-    if (removedIds.has(selectedItem.value?.id)) {
-      handleSelect(null, null)
-    }
+    await executeGuiDesignOperations([{
+      kind: 'network.generate',
+      value: {
+        generator: options.topology === GRAPH_TOPOLOGIES.GRID ? 'grid' : 'all_to_all',
+        options
+      }
+    }])
 
-    const topologyDescription = result.topology === GRAPH_TOPOLOGIES.GRID
-      ? `${result.summary.xCount} by ${result.summary.yCount} grid`
-      : `${result.generatedNodes.length}-node all-to-all network`
+    const topologyDescription = options.topology === GRAPH_TOPOLOGIES.GRID
+      ? `${options.xCount} by ${options.yCount} grid`
+      : 'all-to-all network'
     closeGraphNetworkGenerator()
     addLog('success', `Generated a ${topologyDescription}`, 'Layout Tools')
   } catch (error) {
@@ -874,11 +1116,11 @@ function toggleJsonViewerVisibility(){
   localStorage.setItem('showJsonViewer', showJsonViewer.value)
 }
 
-function handleProjectNameConfirm(projectName) {
+async function handleProjectNameConfirm(projectName) {
   if (projectNameDialogMode.value === 'new') {
-    createNewProject(projectName)
+    await createNewProject(projectName)
   } else if (projectNameDialogMode.value === 'saveas') {
-    if (!createSaveAsProject(projectName)) return
+    if (!(await createSaveAsProject(projectName))) return
     // If there's a pending action (from unsaved changes dialog), execute it
     if (pendingAction.value) {
       const action = pendingAction.value
@@ -1049,6 +1291,7 @@ onMounted( async () => {
   
   // Add beforeunload handler to warn about unsaved changes
   window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('pagehide', handlePageExit)
 })
 
 // Handle browser beforeunload event to warn about unsaved changes
@@ -1062,10 +1305,17 @@ function handleBeforeUnload(event) {
   }
 }
 
+function handlePageExit() {
+  mcpBridge.sendUnbindBeacon()
+}
+
 // Clean up beforeunload handler on unmount
 onUnmounted(() => {
   resolveConfirmation(false)
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('pagehide', handlePageExit)
+  clearTimeout(mcpSnapshotTimer)
+  mcpBridge.dispose()
   disposeProjectSession()
   disposeSimulationController()
   disposeLegacyBridge()
@@ -1141,6 +1391,9 @@ onUnmounted(() => {
           @edge-created="handleEdgeCreated"
           @annotation-created="handleAnnotationCreated"
           @map-state-change="handleMapStateChangeComposable"
+          @design-operations="executeGuiDesignOperations"
+          @interaction-busy="updateDesignInteractionBusy"
+          @node-position-changed="handleNodePositionChanged"
           @map-ready="handleMapReady"
           @map-initialization-error="handleMapInitializationError"
           @delete="deleteSelected"
@@ -1186,6 +1439,8 @@ onUnmounted(() => {
                 @stop="stopSimulation"
                 @prepareNetworkGraph="prepareNetworkGraph" 
                 @prepareSimulation="prepareSimulation"
+                @updateSimulationTime="updateSimulationTime"
+                @updateSimulationConfig="updateSimulationConfig"
             />
             </div>
           <div class="custom-panels-container">
@@ -1206,6 +1461,7 @@ onUnmounted(() => {
                 :variables="projectData.variables"
                 v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
+                @design-operations="executeGuiDesignOperations"
                 @name-edit-complete="justCreatedNode = false"
               />
               <!-- EdgePanel for selected edge -->
@@ -1219,6 +1475,7 @@ onUnmounted(() => {
                 :variables="projectData.variables"
                 v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
+                @design-operations="executeGuiDesignOperations"
               />
               <AnnotationPanel
                 id="annotationPanel"
@@ -1227,6 +1484,7 @@ onUnmounted(() => {
                 :annotation="selectedItem"
                 v-model:collapsed="panelCollapsedStates.selectedElementPanel"
                 @delete="deleteSelected"
+                @design-operations="executeGuiDesignOperations"
               />
               <VoidPanel 
                 v-else
@@ -1278,6 +1536,7 @@ onUnmounted(() => {
                 :editingLocked="isNetworkEditingDisabled"
                 :variables="projectData.variables"
                 v-model:collapsed="panelCollapsedStates.floatingProtocolsPanel"
+                @design-operations="executeGuiDesignOperations"
               />
               <div v-else></div>
             </div>
@@ -1307,18 +1566,23 @@ onUnmounted(() => {
         :export-script-payload="exportScriptPayload"
         :variables-disabled="isNetworkEditingDisabled"
         :tags-explorer-enabled="simulationCapabilities.canExploreTags"
+        :mcp-available="mcpAvailable"
+        :mcp-state="mcpPanelState"
+        :mcp-client="mcpClient"
+        :mcp-bridge="mcpBridge"
         :project-name="currentProjectName || projectData.name"
         :available-bounds="bottomPanelAvailableBounds"
         v-model:collapsed="panelCollapsedStates.bottomPanel"
         @clear-logs="clearLogs"
-        @update-description="projectData.description = $event"
+        @update-description="updateProjectDescription"
         @open-repeater-chain-generator="openRepeaterChainGenerator"
         @open-star-network-generator="openStarNetworkGenerator"
         @open-graph-network-generator="openGraphNetworkGenerator"
         @add-annotation="beginAnnotationCreation"
-        @update:refractive-index="projectData.net.physicalConfig.refractiveIndex = $event"
+        @update:refractive-index="updateRefractiveIndex"
         @update:curve-editing-enabled="curveEditingEnabled = $event"
         @update:show-physical-badges="showPhysicalBadges = $event"
+        @design-operations="executeGuiDesignOperations"
       />
     </div>
 
