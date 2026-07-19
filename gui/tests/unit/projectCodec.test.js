@@ -199,12 +199,17 @@ describe('createEmptyProject', () => {
         nodes: [],
         edges: [],
         protocols: [],
-        physicalConfig: { refractiveIndex: 1.468 },
+        physicalConfig: {
+          refractiveIndex: 1.468,
+          nodeTemplate: { slots: [] },
+        },
       },
     })
     expect(second.name).toBe('Second')
     expect(first.net).not.toBe(second.net)
     expect(first.simulationConfig).not.toBe(second.simulationConfig)
+    first.net.physicalConfig.nodeTemplate.slots.push({ id: 'template_slot' })
+    expect(second.net.physicalConfig.nodeTemplate.slots).toEqual([])
   })
 
   it('uses one trimmed project-name representation', () => {
@@ -258,7 +263,10 @@ describe('decodeStoredProject', () => {
     expect(edge.data.protocols[0]).toBeInstanceOf(FloatingProtocol)
     expect(edge.data.curvePoints).toEqual([])
     expect(edge.data.physicalOverrides).toBeNull()
-    expect(decoded.project.net.physicalConfig).toEqual({ refractiveIndex: 1.468 })
+    expect(decoded.project.net.physicalConfig).toEqual({
+      refractiveIndex: 1.468,
+      nodeTemplate: { slots: [] },
+    })
     expect(decoded.project.net.protocols[0]).toBeInstanceOf(FloatingProtocol)
 
     expect(decoded.project.variables[0]).toBeInstanceOf(Variable)
@@ -303,7 +311,10 @@ describe('decodeStoredProject', () => {
         nodes: [],
         edges: [],
         protocols: [],
-        physicalConfig: { refractiveIndex: 1.468 },
+        physicalConfig: {
+          refractiveIndex: 1.468,
+          nodeTemplate: { slots: [] },
+        },
       },
     })
     expect(decoded.map).toEqual({ position: [1, 2], zoom: 3 })
@@ -326,6 +337,39 @@ describe('decodeStoredProject', () => {
       type: 'CustomNoise',
       parameters: [],
     })
+  })
+
+  it('normalizes a slot-only node template without names, protocols, or runtime state', () => {
+    const raw = legacyProject()
+    raw.net.physicalConfig = {
+      refractiveIndex: 1.5,
+      nodeTemplate: {
+        name: 'Not persisted',
+        protocols: [{ id: 'not_persisted' }],
+        slots: [{
+          id: 'template_slot',
+          type: 'Qumode',
+          backgroundNoise: 'ThermalNoise',
+          isLocked: true,
+          ui_expanded: true,
+        }],
+      },
+    }
+
+    const { project } = decodeStoredProject(raw)
+
+    expect(project.net.physicalConfig.nodeTemplate).toEqual({
+      slots: [{
+        id: 'template_slot',
+        type: 'Qumode',
+        backgroundNoise: {
+          type: 'ThermalNoise',
+          parameters: [],
+        },
+      }],
+    })
+    expect(project.net.physicalConfig.nodeTemplate).not.toHaveProperty('name')
+    expect(project.net.physicalConfig.nodeTemplate).not.toHaveProperty('protocols')
   })
 
   it('clears stale runtime slot state during hydration without mutating storage input', () => {
@@ -395,7 +439,10 @@ describe('decodeStoredProject', () => {
       refractiveIndex: null,
       delaySeconds: null,
     })
-    expect(project.net.physicalConfig).toEqual({ refractiveIndex: 1.5 })
+    expect(project.net.physicalConfig).toEqual({
+      refractiveIndex: 1.5,
+      nodeTemplate: { slots: [] },
+    })
 
     const duplicate = legacyProject()
     duplicate.net.edges.push({
@@ -461,7 +508,10 @@ describe('encodeStoredProject', () => {
       target: 'node_a',
       futureEdgeField: 'preserve me',
     })
-    expect(encoded.net.physicalConfig).toEqual({ refractiveIndex: 1.468 })
+    expect(encoded.net.physicalConfig).toEqual({
+      refractiveIndex: 1.468,
+      nodeTemplate: { slots: [] },
+    })
     expect(encoded.variables[0].value.kind).toBe('states_zoo')
     expect(encoded.net.nodes[0]).not.toBeInstanceOf(Node)
     expect(encoded.net.edges[0]).not.toBeInstanceOf(Edge)

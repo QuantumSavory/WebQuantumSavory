@@ -103,6 +103,82 @@ describe('DesignCommandService', () => {
     })
   })
 
+  it('edits a slot-only node template and gives new nodes independent slot copies', async () => {
+    const project = createEmptyProject('Template defaults')
+    const service = serviceFor(project)
+
+    await service.execute({
+      operations: [
+        {
+          kind: 'slots.create',
+          template: true,
+          value: {
+            type: 'Qubit',
+            backgroundNoise: { type: 'NoNoise', parameters: [] },
+          },
+        },
+        {
+          kind: 'slots.create',
+          template: true,
+          value: {
+            type: 'Qumode',
+            backgroundNoise: { type: 'ThermalNoise', parameters: [] },
+          },
+        },
+      ],
+    })
+    const [qubitTemplate, qumodeTemplate] = project.net.physicalConfig.nodeTemplate.slots
+
+    await service.execute({
+      operations: [
+        {
+          kind: 'slots.reorder',
+          template: true,
+          slot_id: qumodeTemplate.id,
+          to_index: 0,
+        },
+        {
+          kind: 'slots.update',
+          template: true,
+          slot_id: qubitTemplate.id,
+          value: {
+            backgroundNoise: { type: 'UpdatedNoise', parameters: [] },
+          },
+        },
+        {
+          kind: 'topology.create_node',
+          id: 'node_a',
+          value: { name: 'A', position: [1, 2] },
+        },
+        {
+          kind: 'topology.create_node',
+          id: 'node_b',
+          value: { name: 'B', position: [3, 4] },
+        },
+      ],
+    })
+
+    const template = project.net.physicalConfig.nodeTemplate
+    expect(template).not.toHaveProperty('name')
+    expect(template).not.toHaveProperty('protocols')
+    expect(template.slots.map(slot => slot.type)).toEqual(['Qumode', 'Qubit'])
+    expect(template.slots[1].backgroundNoise.type).toBe('UpdatedNoise')
+
+    const [nodeA, nodeB] = project.net.nodes
+    expect(nodeA.data.protocols).toEqual([])
+    expect(nodeA.data.slots.map(slot => slot.type)).toEqual(['Qumode', 'Qubit'])
+    expect(nodeB.data.slots.map(slot => slot.type)).toEqual(['Qumode', 'Qubit'])
+    expect(nodeA.data.slots.map(slot => slot.id)).not.toEqual(
+      template.slots.map(slot => slot.id),
+    )
+    expect(nodeA.data.slots.map(slot => slot.id)).not.toEqual(
+      nodeB.data.slots.map(slot => slot.id),
+    )
+    expect(nodeA.data.slots[0].backgroundNoise).not.toBe(
+      nodeB.data.slots[0].backgroundNoise,
+    )
+  })
+
   it('rolls back every candidate change when one operation fails', async () => {
     const project = createEmptyProject('Rollback')
     const before = encodeDesignDocument(project)

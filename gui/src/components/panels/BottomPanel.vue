@@ -156,6 +156,7 @@
               @open-repeater-chain-generator="emit('open-repeater-chain-generator')"
               @open-star-network-generator="emit('open-star-network-generator')"
               @open-graph-network-generator="emit('open-graph-network-generator')"
+              @design-operations="emit('design-operations', $event)"
             />
           </section>
 

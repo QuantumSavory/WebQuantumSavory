@@ -34,8 +34,14 @@ const LayoutToolsPanelStub = defineComponent({
   props: {
     annotationCreationEnabled: Boolean
   },
-  emits: ['add-annotation'],
-  template: '<button data-testid="layout-tools-stub" @click="$emit(\'add-annotation\')" />'
+  emits: ['add-annotation', 'design-operations'],
+  template: `
+    <button
+      data-testid="layout-tools-stub"
+      @click="$emit('add-annotation')"
+      @dblclick="$emit('design-operations', [{ kind: 'slots.create', template: true }])"
+    />
+  `
 })
 
 function mountPanel(availableBounds, extraProps = {}) {
@@ -176,6 +182,11 @@ describe('BottomPanel bounds contract', () => {
 
     await layoutTools.trigger('click')
     expect(wrapper.emitted('add-annotation')).toEqual([[]])
+
+    await layoutTools.trigger('dblclick')
+    expect(wrapper.emitted('design-operations')).toEqual([
+      [[{ kind: 'slots.create', template: true }]],
+    ])
   })
 
   it('inserts the MCP tab only when the capability is available', async () => {

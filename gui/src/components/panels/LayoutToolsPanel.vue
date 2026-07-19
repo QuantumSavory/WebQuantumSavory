@@ -4,18 +4,25 @@
       <h3 id="layout-tools-help-title" class="card-title">
         {{ activeHelper ? activeHelper.label : 'Help' }}
       </h3>
-      <p v-if="activeHelper" class="helper-description" aria-live="polite">
-        {{ activeHelper.description }}
-      </p>
-      <ul v-else class="layout-instructions" aria-live="polite">
-        <li><kbd>Alt</kbd>-click the map to add a node.</li>
-        <li>Drag a node connector onto another node to create a physical edge.</li>
-        <li>Hold <kbd>Shift</kbd> while connecting to create a virtual edge.</li>
-        <li>Drag a node or visible curve handle to position it.</li>
-        <li>In curve mode, click a selected edge to add a smooth handle.</li>
-        <li>Click a handle for smooth → sharp → delete.</li>
-        <li>Choose Add Annotation, then click the map to place a note.</li>
-      </ul>
+      <div class="help-content">
+        <ul
+          class="layout-instructions"
+          :class="{ placeholder: activeHelper }"
+          :aria-hidden="Boolean(activeHelper)"
+          aria-live="polite"
+        >
+          <li><kbd>Alt</kbd>-click the map to add a node.</li>
+          <li>Drag a node connector onto another node to create a physical edge.</li>
+          <li>Hold <kbd>Shift</kbd> while connecting to create a virtual edge.</li>
+          <li>Drag a node or visible curve handle to position it.</li>
+          <li>In curve mode, click a selected edge to add a smooth handle.</li>
+          <li>Click a handle for smooth → sharp → delete.</li>
+          <li>Choose Add Annotation, then click the map to place a note.</li>
+        </ul>
+        <p v-if="activeHelper" class="helper-description" aria-live="polite">
+          {{ activeHelper.description }}
+        </p>
+      </div>
     </section>
 
     <section class="layout-tools-card defaults-card" aria-labelledby="physical-defaults-title">
@@ -34,6 +41,21 @@
         @change="updateRefractiveIndex"
       >
       <p class="field-help">Used for automatic propagation-delay calculations.</p>
+      <div class="template-node">
+        <h4 class="field-label">Template node</h4>
+        <p class="field-help">
+          Added nodes receive independent copies of these slots and background settings.
+        </p>
+        <SlotsEditor
+          :slots="physicalConfig.nodeTemplate?.slots || []"
+          :disabled="disabled"
+          :show-results="false"
+          @add-slot="createTemplateSlot"
+          @remove-slot="removeTemplateSlot"
+          @reorder-slot="reorderTemplateSlot"
+          @update-slot="updateTemplateSlot"
+        />
+      </div>
     </section>
 
     <section class="layout-tools-card drawing-card" aria-labelledby="drawing-tools-title">
@@ -115,6 +137,7 @@
 <script setup>
 import { ref } from 'vue'
 import { MessageSquarePlus, Network, Star, Waypoints } from '@lucide/vue'
+import SlotsEditor from './SlotsEditor.vue'
 
 const props = defineProps({
   disabled: { type: Boolean, default: false },
@@ -135,6 +158,7 @@ const emit = defineEmits([
   'update:curve-editing-enabled',
   'update:show-physical-badges',
   'add-annotation',
+  'design-operations',
 ])
 
 const curveModeHelp = {
@@ -194,12 +218,48 @@ function updateRefractiveIndex(event) {
   }
   emit('update:refractive-index', value)
 }
+
+function createTemplateSlot(value) {
+  emit('design-operations', [{
+    kind: 'slots.create',
+    template: true,
+    value,
+  }])
+}
+
+function updateTemplateSlot({ slot, value }) {
+  emit('design-operations', [{
+    kind: 'slots.update',
+    template: true,
+    slot_id: slot.id,
+    value,
+  }])
+}
+
+function removeTemplateSlot(slot) {
+  emit('design-operations', [{
+    kind: 'slots.remove',
+    template: true,
+    slot_id: slot.id,
+  }])
+}
+
+function reorderTemplateSlot({ slot, toIndex }) {
+  emit('design-operations', [{
+    kind: 'slots.reorder',
+    template: true,
+    slot_id: slot.id,
+    to_index: toIndex,
+  }])
+}
 </script>
 
 <style scoped>
 .layout-tools {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 10px;
   min-height: 150px;
   color: var(--app-color-text);
@@ -215,8 +275,19 @@ function updateRefractiveIndex(event) {
 
 .help-card {
   grid-column: 1 / -1;
-  min-height: 112px;
   background: var(--app-color-surface-subtle);
+}
+
+.help-content {
+  display: grid;
+}
+
+.help-content > * {
+  grid-area: 1 / 1;
+}
+
+.layout-instructions.placeholder {
+  visibility: hidden;
 }
 
 .card-title {
@@ -265,6 +336,16 @@ kbd {
   margin-bottom: 4px;
   font-size: 0.8rem;
   font-weight: 600;
+}
+
+.template-node {
+  margin-top: var(--app-space-4);
+  padding-top: var(--app-space-3);
+  border-top: 1px solid var(--app-color-border);
+}
+
+.template-node .field-help {
+  margin-bottom: var(--app-space-2);
 }
 
 .number-input {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.1
+
+- Added project-persisted template-node slots and background-noise settings to Physical Defaults, with fresh independent slot copies applied through every standard node-creation path.
+- Reused one slot editor for selected and template nodes, and kept the Layout Tools Help card sized to its content as the Tools panel grows.
+
 ## 1.9.0
 
 - Added advanced Qubit and Qumode representation defaults with backend-capability guidance, persistent project settings, and matching GUI-simulation and Julia-script-export behavior.

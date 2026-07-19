@@ -10,11 +10,12 @@
             <SlidersHorizontal :size="15" aria-hidden="true" />
         </button>
         <button
+            v-if="showResults"
             type="button"
             class="slot-action noborder"
             aria-label="Show results"
             v-tooltip.top="'Show results'"
-            @click.stop="showResults"
+            @click.stop="openResults"
         >
             <ChartNoAxesCombined :size="15" aria-hidden="true" />
         </button>
@@ -23,6 +24,7 @@
             class="slot-action noborder"
             aria-label="Delete slot"
             v-tooltip.top="'Delete slot'"
+            :disabled="editingLocked"
             @click.stop="deleteSlot"
         >
             <Trash2 :size="15" aria-hidden="true" />
@@ -42,17 +44,27 @@ const props = defineProps({
     node: {
         type: Object,
         required: false
+    },
+    showResults: {
+        type: Boolean,
+        default: true
+    },
+    editingLocked: {
+        type: Boolean,
+        default: false
     }
 })
 
 const emit = defineEmits(['deleteSlot', 'toggleDetails'])
-const { showResultsView } = useUiServices()
+const showResultsView = props.showResults
+  ? useUiServices().showResultsView
+  : () => {}
 
 function toggleDetails(){
   emit('toggleDetails', props.registerSlot)
 }
 
-function showResults(){
+function openResults(){
   const slotIndex = props.node?.data?.slots?.findIndex(s => s.id === props.registerSlot.id) ?? -1
   const context = {
     nodeName: props.node?.name || 'Unknown Node',
@@ -62,7 +74,7 @@ function showResults(){
 }
 
 function deleteSlot(){
-  emit('deleteSlot', props.registerSlot)
+  if (!props.editingLocked) emit('deleteSlot', props.registerSlot)
 }
 </script>
 

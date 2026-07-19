@@ -601,11 +601,28 @@ export class DesignCommandService {
     context.affectedIds.add('project')
   }
 
-  createNode(project, operation, context) {
+  async createNode(project, operation, context) {
     const value = operation.value || operation
     const id = this.assignId('node', operation, context)
     if (project.net.nodes.some(node => node.id === id)) {
       throw new DesignCommandError('VALIDATION_FAILED', `Node ID already exists: ${id}`)
+    }
+    const slots = []
+    for (const templateSlot of this.templateSlots(project)) {
+      const slotId = this.assignId('slot', {}, context)
+      if (
+        this.allSlots(project).some(slot => slot.id === slotId)
+        || slots.some(slot => slot.id === slotId)
+      ) {
+        throw new DesignCommandError('VALIDATION_FAILED', `Slot ID already exists: ${slotId}`)
+      }
+      slots.push({
+        id: slotId,
+        type: this.requireSlotType(templateSlot.type),
+        backgroundNoise: await this.requireBackgroundNoise(templateSlot.backgroundNoise),
+        isLocked: false,
+        assignment: false,
+      })
     }
     const node = new Node({
       id,
@@ -613,7 +630,7 @@ export class DesignCommandService {
       position: requirePosition(value.position),
       data: {
         type: value.type || value.data?.type || 'City',
-        slots: [],
+        slots,
         protocols: [],
       },
     })
@@ -769,10 +786,33 @@ export class DesignCommandService {
     context.deletedIds.add(id)
   }
 
-  async createSlot(project, operation, context) {
-    const node = byId(project.net.nodes, operation.node_id, 'Node')
-    const id = this.assignId('slot', operation, context)
-    if (project.net.nodes.some(candidate => candidate.data.slots.some(slot => slot.id === id))) {
+  nodeSlots(project, operation) {
+    return byId(project.net.nodes, operation.node_id, 'Node').data.slots
+  }
+
+  templateSlots(project) {
+    project.net.physicalConfig ||= {}
+    project.net.physicalConfig.nodeTemplate ||= { slots: [] }
+    project.net.physicalConfig.nodeTemplate.slots ||= []
+    return project.net.physicalConfig.nodeTemplate.slots
+  }
+
+  allSlots(project) {
+    return [
+      ...project.net.nodes.flatMap(node => node.data.slots),
+      ...this.templateSlots(project),
+    ]
+  }
+
+  slotCollection(project, operation) {
+    return operation.template === true
+      ? this.templateSlots(project)
+      : this.nodeSlots(project, operation)
+  }
+
+  async createSlotIn(collection, prefix, project, operation, context) {
+    const id = this.assignId(prefix, operation, context)
+    if (this.allSlots(project).some(slot => slot.id === id)) {
       throw new DesignCommandError('VALIDATION_FAILED', `Slot ID already exists: ${id}`)
     }
     const value = operation.value || operation
@@ -780,7 +820,7 @@ export class DesignCommandService {
     const backgroundNoise = await this.requireBackgroundNoise(
       value.backgroundNoise || this.defaultBackgroundNoise(),
     )
-    node.data.slots.push({
+    collection.push({
       id,
       type: value.type || 'Qubit',
       backgroundNoise,
@@ -789,9 +829,8 @@ export class DesignCommandService {
     })
   }
 
-  async updateSlot(project, operation, context) {
-    const node = byId(project.net.nodes, operation.node_id, 'Node')
-    const slot = byId(node.data.slots, operation.id || operation.slot_id, 'Slot')
+  async updateSlotIn(collection, operation, context) {
+    const slot = byId(collection, operation.id || operation.slot_id, 'Slot')
     const value = operation.value || operation
     if (Object.hasOwn(value, 'type')) slot.type = this.requireSlotType(value.type)
     if (Object.hasOwn(value, 'backgroundNoise')) {
@@ -800,26 +839,47 @@ export class DesignCommandService {
     context.affectedIds.add(slot.id)
   }
 
-  removeSlot(project, operation, context) {
-    const node = byId(project.net.nodes, operation.node_id, 'Node')
+  removeSlotFrom(collection, operation, context) {
     const id = operation.id || operation.slot_id
-    byId(node.data.slots, id, 'Slot')
-    node.data.slots = node.data.slots.filter(slot => slot.id !== id)
+    const index = collection.findIndex(slot => slot.id === id)
+    if (index < 0) byId(collection, id, 'Slot')
+    collection.splice(index, 1)
     context.deletedIds.add(id)
   }
 
-  reorderSlot(project, operation, context) {
-    const node = byId(project.net.nodes, operation.node_id, 'Node')
+  reorderSlotIn(collection, operation, context) {
     const id = operation.id || operation.slot_id
-    const index = node.data.slots.findIndex(slot => slot.id === id)
-    if (index < 0) byId(node.data.slots, id, 'Slot')
+    const index = collection.findIndex(slot => slot.id === id)
+    if (index < 0) byId(collection, id, 'Slot')
     const toIndex = Number(operation.to_index)
-    if (!Number.isInteger(toIndex) || toIndex < 0 || toIndex >= node.data.slots.length) {
+    if (!Number.isInteger(toIndex) || toIndex < 0 || toIndex >= collection.length) {
       throw new DesignCommandError('VALIDATION_FAILED', 'to_index is outside the slot list.')
     }
-    const [slot] = node.data.slots.splice(index, 1)
-    node.data.slots.splice(toIndex, 0, slot)
+    const [slot] = collection.splice(index, 1)
+    collection.splice(toIndex, 0, slot)
     context.affectedIds.add(id)
+  }
+
+  createSlot(project, operation, context) {
+    return this.createSlotIn(
+      this.slotCollection(project, operation),
+      operation.template === true ? 'template_slot' : 'slot',
+      project,
+      operation,
+      context,
+    )
+  }
+
+  updateSlot(project, operation, context) {
+    return this.updateSlotIn(this.slotCollection(project, operation), operation, context)
+  }
+
+  removeSlot(project, operation, context) {
+    this.removeSlotFrom(this.slotCollection(project, operation), operation, context)
+  }
+
+  reorderSlot(project, operation, context) {
+    this.reorderSlotIn(this.slotCollection(project, operation), operation, context)
   }
 
   requireSlotType(type) {
