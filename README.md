@@ -306,16 +306,19 @@ For Buildkite, configure the pipeline's upload step as
 uses an isolated, pipeline-specific depot. The official mise plugin installs
 the pinned mise release and the Node.js 24 toolchain declared in `mise.toml`.
 The browser step installs the locked Chromium binary and its Linux packages
-through Playwright. The MCP, integration, and browser jobs share a concurrency
-group so overlapping builds cannot contend for their fixed local ports.
+through Playwright. The MCP, integration, and browser jobs use distinct backend
+ports and concurrency groups. They can run together, while overlapping builds
+of the same job remain serialized so their fixed backend, sidecar, or Vite
+ports cannot contend.
 
 Each Linux agent must still provide Git, Bash, curl, wget, tar, and Python 3.
 Browser agents must use a Playwright-supported Debian/Ubuntu base and let the
 job install apt packages as root or through passwordless `sudo`. Agents must be
 able to download Julia, mise, Node.js, npm packages, and Chromium, and ports
-8000, 8001, 5173, and 18001 must be available. No queue name, secret, or
-container image is assumed by `.buildkite/pipeline.yml`. Configure Buildkite's
-GitHub integration to create builds for pull requests and pushes to `main`.
+8000 through 8003, 5173, and 18001 must be available. No queue name, secret,
+or container image is assumed by `.buildkite/pipeline.yml`. Configure
+Buildkite's GitHub integration to create builds for pull requests and pushes
+to `main`.
 
 ## Automatic Cleanup of Inactive Simulations
 

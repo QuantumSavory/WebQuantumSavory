@@ -4,6 +4,22 @@ set -eu
 app_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 workdir=$1
 shift
+server_port=${WEBQUANTUMSAVORY_CI_SERVER_PORT:-8000}
+
+case "$server_port" in
+  ''|*[!0-9]*)
+    echo "WEBQUANTUMSAVORY_CI_SERVER_PORT must be an integer between 1 and 65535." >&2
+    exit 2
+    ;;
+esac
+if [ "$server_port" -lt 1 ] || [ "$server_port" -gt 65535 ]; then
+  echo "WEBQUANTUMSAVORY_CI_SERVER_PORT must be an integer between 1 and 65535." >&2
+  exit 2
+fi
+WEBQUANTUMSAVORY_CI_SERVER_PORT=$server_port
+export WEBQUANTUMSAVORY_CI_SERVER_PORT
+WEBQUANTUMSAVORY_TEST_BASE_URL="http://127.0.0.1:$server_port"
+export WEBQUANTUMSAVORY_TEST_BASE_URL
 
 log_dir=$(mktemp -d "${TMPDIR:-/tmp}/webquantumsavory-ci.XXXXXX")
 server_log="$log_dir/server.log"
@@ -64,7 +80,10 @@ cd "$app_root"
 GENIE_ENV=test julia --color=yes --project="$app_root" \
   -e '
     using WebQuantumSavory
+    server_port = parse(Int, ENV["WEBQUANTUMSAVORY_CI_SERVER_PORT"])
+    push!(ARGS, "-p$server_port")
     WebQuantumSavory.main()
+    WebQuantumSavory.Genie.config.server_port = server_port
     servers = WebQuantumSavory.up(async=true)
     server = servers.webserver
     server === nothing && error("Test server failed to start")
@@ -79,11 +98,12 @@ server_owns_port() {
   kill -0 "$server_pid" 2>/dev/null || return 1
 
   if command -v ss >/dev/null 2>&1 \
-    && ss -H -ltnp '( sport = :8000 )' 2>/dev/null | grep -Fq "pid=$server_pid,"; then
+    && ss -H -ltnp "( sport = :$server_port )" 2>/dev/null \
+      | grep -Fq "pid=$server_pid,"; then
     return 0
   fi
   if command -v lsof >/dev/null 2>&1 \
-    && lsof -nP -a -p "$server_pid" -iTCP:8000 -sTCP:LISTEN -t 2>/dev/null \
+    && lsof -nP -a -p "$server_pid" -iTCP:"$server_port" -sTCP:LISTEN -t 2>/dev/null \
       | grep -Fxq "$server_pid"; then
     return 0
   fi
@@ -94,8 +114,9 @@ ready=false
 attempts=0
 while [ "$attempts" -lt 120 ]; do
   # A different worktree can answer /status while this process is still
-  # starting. Require our own process to own port 8000 before accepting it.
-  if curl --fail --silent --show-error http://127.0.0.1:8000/status >/dev/null 2>&1 \
+  # starting. Require our own process to own the configured port before accepting it.
+  if curl --fail --silent --show-error \
+    "http://127.0.0.1:$server_port/status" >/dev/null 2>&1 \
     && server_owns_port; then
     ready=true
     break

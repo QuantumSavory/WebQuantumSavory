@@ -144,7 +144,10 @@ The checked-in CI entry points install their own project dependencies and can al
 cleanup for the MCP, integration, and browser entry points. GitHub Actions and
 Buildkite use Julia 1.12 and Node.js 24. Buildkite provisions Julia, Node.js,
 and the Playwright Chromium dependencies during each relevant job; its smaller
-host baseline is documented in `README.md`.
+host baseline is documented in `README.md`. Its three server-backed jobs use
+distinct backend ports so they can run in parallel, while separate per-job
+concurrency groups keep overlapping builds from contending for a job's fixed
+backend, sidecar, or Vite ports.
 
 ## Change discipline
 
