@@ -4,6 +4,8 @@
 
 - Watermarked every generated protocol, slot-state, and States Zoo PNG in the browser with
   `QuantumSavory.org`.
+- Parallelized Buildkite's server-backed checks on isolated ports while retaining
+  per-job serialization across overlapping builds.
 
 ## 1.9.1
 

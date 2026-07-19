@@ -8,7 +8,11 @@
   using .WebQuantumSavory
 
   # Test server configuration
-  TEST_BASE_URL = "http://localhost:8000"
+  TEST_BASE_URL = get(
+    ENV,
+    "WEBQUANTUMSAVORY_TEST_BASE_URL",
+    "http://localhost:8000",
+  )
   TEST_SIMULATION_NAME = "test_integration_sim"
 
   # Check if server is available

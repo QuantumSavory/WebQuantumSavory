@@ -2,7 +2,11 @@ using HTTP
 using JSON3
 using Test
 
-const BACKEND_URL = "http://127.0.0.1:8000"
+const BACKEND_URL = get(
+    ENV,
+    "WEBQUANTUMSAVORY_TEST_BASE_URL",
+    "http://127.0.0.1:8000",
+)
 const SIDECAR_PORT = parse(
     Int,
     get(ENV, "WEBQUANTUMSAVORY_MCP_PORT", "8001"),

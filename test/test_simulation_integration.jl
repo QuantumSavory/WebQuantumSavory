@@ -6,7 +6,11 @@
   include("../src/WebQuantumSavory.jl")
   using .WebQuantumSavory
 
-  TEST_BASE_URL = "http://localhost:8000"
+  TEST_BASE_URL = get(
+    ENV,
+    "WEBQUANTUMSAVORY_TEST_BASE_URL",
+    "http://localhost:8000",
+  )
 
   function make_request(method, endpoint; body=nothing)
     url = "$TEST_BASE_URL$endpoint"

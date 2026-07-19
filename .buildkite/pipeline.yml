@@ -15,7 +15,9 @@ steps:
     key: mcp-unit
     command: ./ci/mcp-unit.sh
     concurrency: 1
-    concurrency_group: "webquantumsavory/server"
+    concurrency_group: "webquantumsavory/mcp-server"
+    env:
+      WEBQUANTUMSAVORY_CI_SERVER_PORT: "8003"
     plugins:
       - JuliaCI/julia#v1:
           version: "1.12"
@@ -34,7 +36,9 @@ steps:
     key: backend-integration
     command: ./ci/backend-integration.sh
     concurrency: 1
-    concurrency_group: "webquantumsavory/server"
+    concurrency_group: "webquantumsavory/backend-integration-server"
+    env:
+      WEBQUANTUMSAVORY_CI_SERVER_PORT: "8002"
     plugins:
       - JuliaCI/julia#v1:
           version: "1.12"
@@ -47,9 +51,7 @@ steps:
     key: browser
     command: ./ci/browser.sh
     concurrency: 1
-    concurrency_group: "webquantumsavory/server"
-    depends_on: backend-integration
-    allow_dependency_failure: true
+    concurrency_group: "webquantumsavory/browser-server"
     env:
       PLAYWRIGHT_INSTALL_SYSTEM_DEPS: "true"
     plugins:
