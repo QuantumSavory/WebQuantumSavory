@@ -91,3 +91,56 @@ test('edits physical curves and overrides while keeping virtual links nonphysica
   await expect(page.locator('.curve-point-handle')).toHaveCount(0)
   await expect(page.locator('.edge-badge-stack')).toHaveCount(1)
 })
+
+test('rejects an out-of-world node drag without breaking a curved edge', async ({ page }) => {
+  const pageErrors = []
+  page.on('pageerror', error => pageErrors.push(error.message))
+  const { canvas, secondNode } = await createTwoNodeProject(page)
+
+  await page.locator('.edge-list-item').first().click()
+  await page.locator('#bottom-panel-layout-tools-tab').click()
+  await page.locator('#curve-editing-enabled').check()
+  await canvas.click({ position: { x: 525, y: 350 } })
+  await expect(page.locator('.curve-point-handle')).toHaveCount(1)
+
+  const originalPosition = await page.evaluate(() => (
+    [...window.projectData.net.nodes[1].position]
+  ))
+  const zoomOut = page.getByTitle('Zoom out')
+  for (let index = 0; index < 12; index += 1) await zoomOut.click()
+
+  const markerBefore = await secondNode.boundingBox()
+  const canvasBox = await canvas.boundingBox()
+  expect(markerBefore).not.toBeNull()
+  expect(canvasBox).not.toBeNull()
+  const start = {
+    x: markerBefore.x + markerBefore.width / 2,
+    y: markerBefore.y + markerBefore.height / 2,
+  }
+  const leftRoom = start.x - canvasBox.x - 10
+  const rightRoom = canvasBox.x + canvasBox.width - start.x - 10
+  const direction = rightRoom >= leftRoom ? 1 : -1
+  const travel = Math.min(Math.max(leftRoom, rightRoom), 700)
+  expect(travel).toBeGreaterThan(520)
+
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  await page.mouse.move(start.x + direction * travel, start.y, { steps: 12 })
+  await page.mouse.up()
+
+  const warning = page.getByRole('dialog', { name: 'Unable to update design' })
+  await expect(warning).toContainText('impossible to draw or measure')
+  await expect.poll(() => page.evaluate(() => (
+    [...window.projectData.net.nodes[1].position]
+  ))).toEqual(originalPosition)
+  await expect(page.locator('.edge-badge-distance')).toHaveCount(1)
+  await expect(page.locator('.edge-badge-delay')).toHaveCount(1)
+  expect(pageErrors).toEqual([])
+
+  const markerAfter = await secondNode.boundingBox()
+  // At a whole-world zoom, MapLibre's world-copy choice and subpixel rounding
+  // can shift the restored marker by a few display pixels.
+  expect(Math.abs(markerAfter.x - markerBefore.x)).toBeLessThan(5)
+  expect(Math.abs(markerAfter.y - markerBefore.y)).toBeLessThan(5)
+  await warning.getByRole('button', { name: 'OK' }).click()
+})

@@ -44,6 +44,7 @@ const props = defineProps({
   curveEditingEnabled: { type: Boolean, default: false },
   showPhysicalBadges: { type: Boolean, default: true },
   physicalConfig: { type: Object, default: () => ({}) },
+  positionOverrides: { type: Map, default: () => new Map() },
 })
 
 const emit = defineEmits(['select', 'designOperations', 'interactionBusy'])
@@ -113,12 +114,19 @@ function temporaryLine() {
 
 const resolvedPhysical = computed(() => {
   if (props.isTemporary || props.edge.isLogic === true) return null
-  return resolveEdgePhysicalProperties(props.edge, props.physicalConfig)
+  return resolveEdgePhysicalProperties(
+    props.edge,
+    props.physicalConfig,
+    { positionOverrides: props.positionOverrides },
+  )
 })
 
 const renderedLine = computed(() => {
   if (props.isTemporary) return temporaryLine()
-  return resolvedPhysical.value?.line ?? sampleEdgeRoute(props.edge).line
+  return resolvedPhysical.value?.line ?? sampleEdgeRoute(
+    props.edge,
+    { positionOverrides: props.positionOverrides },
+  ).line
 })
 
 const badgeRows = computed(() => {
@@ -202,7 +210,7 @@ function handleMouseLeave() {
   updateStyle(props.isSelected, false)
 }
 
-function moveCurvePoint(point, position) {
+function moveCurvePoint(point, position, finish) {
   const curvePoints = props.edge.data.curvePoints.map(candidate => ({
     ...candidate,
     position: candidate.id === point.id ? [...position] : [...candidate.position],
@@ -211,7 +219,10 @@ function moveCurvePoint(point, position) {
     kind: 'topology.update_edge',
     edge_id: props.edge.id,
     value: { data: { curvePoints } },
-  }])
+  }], finish, () => {
+    finish?.()
+    return false
+  })
 }
 
 function cycleCurvePoint(point) {

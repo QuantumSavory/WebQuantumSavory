@@ -5,6 +5,7 @@
     class="curve-point-handle"
     :class="`curve-point-${point.type}`"
     :aria-label="`${point.type} curve point. Click to ${point.type === 'smooth' ? 'make sharp' : 'delete'}.`"
+    @pointerdown="captureDragStartPosition"
     @click.stop="handleClick"
   />
 </template>
@@ -12,6 +13,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
+import { positionInProjectWorld } from '../../utils/mapCoordinates'
 
 const props = defineProps({
   map: { type: Object, required: true },
@@ -22,6 +24,18 @@ const emit = defineEmits(['move', 'cycle', 'interactionBusy'])
 const element = ref(null)
 let marker = null
 let dragged = false
+let curveStartPosition = null
+let displayedDragStartPosition = null
+
+function markerPosition() {
+  const position = marker?.getLngLat()
+  return position ? [position.lng, position.lat] : null
+}
+
+function captureDragStartPosition() {
+  curveStartPosition = [...props.point.position]
+  displayedDragStartPosition = markerPosition()
+}
 
 function handleClick() {
   if (dragged) {
@@ -41,12 +55,26 @@ onMounted(() => {
     .addTo(props.map)
 
   marker.on('dragstart', () => {
+    if (!curveStartPosition || !displayedDragStartPosition) {
+      captureDragStartPosition()
+    }
     dragged = true
     emit('interactionBusy', true)
   })
   marker.on('dragend', () => {
-    const position = marker.getLngLat()
-    emit('move', props.point, [position.lng, position.lat])
+    const position = positionInProjectWorld(
+      markerPosition(),
+      displayedDragStartPosition,
+      curveStartPosition,
+    )
+    emit(
+      'move',
+      props.point,
+      position,
+      () => marker?.setLngLat(props.point.position),
+    )
+    curveStartPosition = null
+    displayedDragStartPosition = null
     emit('interactionBusy', false)
   })
 })

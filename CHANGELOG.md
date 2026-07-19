@@ -6,6 +6,9 @@
   `QuantumSavory.org`.
 - Parallelized Buildkite's server-backed checks on isolated ports while retaining
   per-job serialization across overlapping builds.
+- Kept curved-edge drawing and geodesic length calculation stable during world-wrapped
+  node drags by previewing moves outside project state, transactionally rejecting unsupported
+  geometry with an in-app warning, and restoring the node and curve handle.
 
 ## 1.9.1
 

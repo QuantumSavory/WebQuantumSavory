@@ -466,6 +466,16 @@ describe('decodeStoredProject', () => {
     invalid.net.edges[0].data.physicalOverrides = null
     invalid.net.edges[0].isLogic = 'true'
     expect(() => decodeStoredProject(invalid)).toThrow(/isLogic must be a boolean/)
+
+    const polarNode = legacyProject()
+    polarNode.net.nodes[0].position = [0, 89]
+    expect(() => decodeStoredProject(polarNode)).toThrow(/valid position/)
+
+    const polarCurve = legacyProject()
+    polarCurve.net.edges[0].data.curvePoints = [{
+      id: 'polar', position: [0, 89], type: 'smooth',
+    }]
+    expect(() => decodeStoredProject(polarCurve)).toThrow(/invalid position/)
   })
 })
 
