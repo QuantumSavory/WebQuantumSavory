@@ -8,8 +8,10 @@ import {
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
   PROJECT_SCHEMA_VERSION,
+  TRANSIENT_SLOT_FIELDS,
   createEmptyProject,
   decodeStoredProject,
+  encodeDesignDocument,
   encodeStoredProject,
   normalizeProjectName,
   summarizeProject,
@@ -17,6 +19,56 @@ import {
   toScriptExportPayloadFromSimulationPayload,
   toSimulationPayload,
 } from '../../src/utils/projectCodec'
+
+describe('collaborative design codec', () => {
+  it('projects stored projects without UI, platform, or runtime slot state', () => {
+    const project = createEmptyProject('Canonical')
+    project.platformInfo = { versions: { app: '1.0.0' } }
+    project.uiGlobal = { selection: 'node_a' }
+    const node = new Node({
+      id: 'node_a',
+      name: 'A',
+      position: [1, 2],
+      data: {
+        type: 'City',
+        protocols: [],
+        slots: [{
+          id: 'slot_a',
+          type: 'Qubit',
+          backgroundNoise: DEFAULT_NOISE,
+          isLocked: true,
+          assignment: 'runtime',
+          lastOperationTime: 5,
+          representationType: 'png',
+          ui_expanded: true,
+          renderedResult: '<binary>',
+        }],
+      },
+    })
+    node.expanded = true
+    project.net.nodes.push(node)
+
+    const document = encodeDesignDocument(project)
+
+    expect(document).not.toHaveProperty('platformInfo')
+    expect(document).not.toHaveProperty('uiGlobal')
+    expect(document.net.nodes[0]).not.toHaveProperty('expanded')
+    const canonicalSlot = document.net.nodes[0].data.slots[0]
+    expect(canonicalSlot).toEqual({
+      id: 'slot_a',
+      type: 'Qubit',
+      backgroundNoise: DEFAULT_NOISE,
+    })
+    for (const field of TRANSIENT_SLOT_FIELDS) {
+      expect(canonicalSlot).not.toHaveProperty(field)
+    }
+    expect(document).toMatchObject({
+      schemaVersion: PROJECT_SCHEMA_VERSION,
+      name: 'Canonical',
+      net: { physicalConfig: { refractiveIndex: expect.any(Number) } },
+    })
+  })
+})
 
 const DEFAULT_NOISE = {
   type: 'QuantumSavory.NoBackground',
@@ -484,6 +536,7 @@ describe('backend payload codecs', () => {
     slot.assignment = { node: 1 }
     slot.lastOperationTime = 5
     slot.representationType = 'density'
+    slot.renderedResult = '<runtime representation>'
     slot.backgroundNoise = {
       type: 'NoiseType',
       doc: 'Editor documentation',
@@ -535,8 +588,9 @@ describe('backend payload codecs', () => {
         parameters: [{ name: 'rate', value: 0.25 }],
       },
     })
-    expect(payload.net.nodes[0].data.slots[0]).not.toHaveProperty('ui_expanded')
-    expect(payload.net.nodes[0].data.slots[0]).not.toHaveProperty('isLocked')
+    for (const field of TRANSIENT_SLOT_FIELDS) {
+      expect(payload.net.nodes[0].data.slots[0]).not.toHaveProperty(field)
+    }
     expect(payload.net.nodes[0].data.slots[0].backgroundNoise).not.toHaveProperty('doc')
     expect(payload.net.nodes[0].data.protocols[0].parameters).toEqual([
       { name: 'kept', type: 'Float64', value: 0.5 },

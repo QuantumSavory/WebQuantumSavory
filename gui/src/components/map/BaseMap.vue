@@ -65,7 +65,10 @@ const emit = defineEmits([
   'map-state-change',
   'delete',
   'map-ready',
-  'map-initialization-error'
+  'map-initialization-error',
+  'design-operations',
+  'interaction-busy',
+  'node-position-changed',
 ])
 
 // MapLibre moves each marker element outside Vue's normal DOM tree. Keep the
@@ -438,11 +441,16 @@ function handleSelect(item, type) {
 }
 
 // Handle node position changes to update slot connections
-function handleNodePositionChanged(node) {
+function handleNodePositionPreview() {
   if (isStateVisible.value && activeSlotConnectionState.value) {
     // Update slot connection positions when a node moves
     updateSlotConnectionPositions()
   }
+}
+
+function handleNodePositionChanged(change) {
+  handleNodePositionPreview()
+  emit('node-position-changed', change)
 }
 
 // Handle delete request from child components
@@ -492,6 +500,12 @@ defineExpose({
         :is-selected="selectedItem === annotation"
         :next-annotation-id="annotations[annotationIndex + 1]?.id"
         @select="handleSelect"
+        @update="annotation => emit('design-operations', [{
+          kind: 'annotations.update',
+          annotation_id: annotation.id,
+          value: annotation,
+        }])"
+        @interaction-busy="busy => emit('interaction-busy', busy)"
       />
       <!-- Render edges above annotation geometry and below HTML markers. -->
       <EdgeLine
@@ -505,6 +519,8 @@ defineExpose({
         :show-physical-badges="showPhysicalBadges"
         :physical-config="physicalConfig"
         @select="handleSelect"
+        @design-operations="operations => emit('design-operations', operations)"
+        @interaction-busy="busy => emit('interaction-busy', busy)"
       />
       <!-- Render temporary connection line -->
       <EdgeLine
@@ -525,11 +541,14 @@ defineExpose({
         :node="node"
         :map="map"
         :is-selected="selectedItem === node"
+        :editing-locked="editingLocked"
         @select="handleSelect"
         @startConnection="handleStartConnection"
         @updateConnection="handleUpdateConnection"
         @endConnection="handleEndConnection"
+        @nodePositionPreview="handleNodePositionPreview"
         @nodePositionChanged="handleNodePositionChanged"
+        @interactionBusy="busy => emit('interaction-busy', busy)"
       />
       
       <!-- Render SlotConnectionState visualization -->

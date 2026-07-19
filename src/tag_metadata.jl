@@ -739,8 +739,7 @@ end
 """Resolve a state whose live RegisterNet has not been destroyed or blocked."""
 function require_live_tag_state(name::AbstractString)
   simulation_name = String(name)
-  haskey(STATE, simulation_name) || throw(not_found_error("Simulation", simulation_name))
-  state = STATE[simulation_name]
+  state = _simulation_state(SIMULATION_SERVICE, simulation_name)
   (state.execution_time_exceeded || state.auto_purged) &&
     throw(simulation_blocked_exception(simulation_name))
   state.network === nothing && throw(APIError(

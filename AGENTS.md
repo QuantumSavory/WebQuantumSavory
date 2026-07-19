@@ -4,7 +4,9 @@
 
 - This repository is the WebQuantumSavory application. The root is the Julia/Genie API package named `WebQuantumSavory`; `gui/` is a separate Vue/Vite package governed by `gui/AGENTS.md`.
 - Frontend unit tests live in `gui/tests/unit/` and use Vitest, jsdom, and Vue Test Utils. Browser workflows live separately in `gui/tests/e2e/` and use Playwright.
-- Use the root `Project.toml` for backend work and `test/Project.toml` for backend tests. Both manifests are local generated files and must not be committed.
+- Use the root `Project.toml` for backend work, `test/Project.toml` for backend
+  tests, and the isolated `mcp/Project.toml` only for the opt-in MCP sidecar.
+  All manifests are local generated files and must not be committed.
 - `../QuantumSavory.jl` is a separate reference checkout with its own `AGENTS.md`. Normal package resolution uses the GitHub `master` source declared in this repository's `Project.toml`, not that sibling directory. Do not edit the sibling unless a task explicitly spans both repositories.
 - `_docs_/` and `_tests_/` contain historical examples and fixtures. The maintained automated suite is under `test/`; confirm behavior in current source and tests before trusting legacy material.
 
@@ -14,6 +16,18 @@
 - `bootstrap.jl` loads `WebQuantumSavory`, aliases it as `UserApp`, and calls `WebQuantumSavory.main()` so Genie loads configuration, initializers, and routes.
 - `routes.jl` owns HTTP handlers, adjacent Swagger descriptions, the common safe route wrapper, the root UI route, and startup of the stale-simulation service.
 - `src/WebQuantumSavory.jl` defines `State`, the process-global `STATE` dictionary, serialization, protocol launching, simulation control, log access, and resource cleanup.
+- `src/simulation_service.jl` is the route-independent simulation boundary used
+  by both existing HTTP routes and MCP reads. `src/collaboration_hub.jl`,
+  `src/sidecar_supervisor.jl`, `src/mcp_config.jl`, and `src/mcp_adapters.jl`
+  own the feature-neutral browser lease/revision protocol and the gated local
+  sidecar process.
+- `mcp/` is a separate Julia application environment using
+  ModelContextProtocol.jl. It must not import WebQuantumSavory; it communicates
+  only through loopback internal routes. Tool metadata and wire schemas live in
+  `contracts/mcp/v1/tools.json`.
+- Keep ModelContextProtocol.jl exactly pinned with the source-annotated
+  single-session transport adapter. When upgrading it, re-diff the adapter
+  against upstream and run `./ci/mcp-unit.sh` plus the MCP browser scenario.
 - `src/parser.jl` discovers QuantumSavory metadata, validates request payloads, constructs graphs/registers/networks, converts parameters, and instantiates protocols.
 - `src/script_export.jl` translates validated project payloads into standalone, pedagogical QuantumSavory Julia scripts without creating server-side simulation state.
 - `src/tag_metadata.jl` owns runtime discovery of QuantumSavory tag converters and signatures, the allowlisted tag/query codec, live-register target resolution, entry serialization, and tag/message mutation helpers.
@@ -22,6 +36,19 @@
 - `config/env/` contains Genie settings for dev, test, and production. `public/index.html` and `public/assets/` are generated from `gui/` at launch.
 
 ## Simulation flow and invariants
+
+- MCP is disabled unless `WEBQUANTUMSAVORY_ENABLE_MCP=true`. When enabled, both
+  Genie and the sidecar must remain loopback-only, and the sidecar starts only
+  after an explicit browser action. Do not introduce a main-package dependency
+  on ModelContextProtocol.jl.
+- Browser `projectData` remains the only mutable authoring model. Add design
+  behavior to the neutral frontend `DesignCommandService`; never interpret or
+  mutate design documents in Julia. GUI and MCP authoring paths must invoke the
+  same registered handler before a tool is advertised.
+- MCP simulation lifecycle mutations must relay through the existing browser
+  simulation controller. Simulation reads and existing HTTP routes use
+  `SimulationService`; neither the service nor the authoring domain may import
+  MCP concerns.
 
 The normal lifecycle is:
 
@@ -105,6 +132,7 @@ The checked-in CI entry points install their own project dependencies and can al
 
 ```sh
 ./ci/backend-unit.sh
+./ci/mcp-unit.sh
 ./ci/frontend-build.sh
 ./ci/backend-integration.sh
 ./ci/browser.sh
@@ -112,7 +140,11 @@ The checked-in CI entry points install their own project dependencies and can al
 
 `ci/frontend-build.sh` installs the locked frontend dependencies, runs the Vitest unit suite, and then creates the production build. The backend-integration and browser entry points reuse it, so GitHub Actions and Buildkite enforce the same unit-test-and-build sequence.
 
-`ci/run-with-server.sh` provides bounded readiness polling, failure logs, and cleanup for the integration and browser entry points. GitHub Actions and Buildkite use Julia 1.12 and Node.js 24. Buildkite provisions Julia, Node.js, and the Playwright Chromium dependencies during each relevant job; its smaller host baseline is documented in `README.md`.
+`ci/run-with-server.sh` provides bounded readiness polling, failure logs, and
+cleanup for the MCP, integration, and browser entry points. GitHub Actions and
+Buildkite use Julia 1.12 and Node.js 24. Buildkite provisions Julia, Node.js,
+and the Playwright Chromium dependencies during each relevant job; its smaller
+host baseline is documented in `README.md`.
 
 ## Change discipline
 
@@ -123,7 +155,9 @@ The checked-in CI entry points install their own project dependencies and can al
 - Frontend codec, session, lifecycle, composable, utility, or shared UI changes require `npm run test:unit` in `gui/` in addition to the broader checks appropriate to the behavior.
 - Keep strict annotation validation at codec/import boundaries and interactive geometry in `gui/src/utils/annotationGeometry.js`; world-wrapped pointer coordinates must be canonicalized or fail soft rather than throwing from rendering and drag handlers. Choose an attached area's edge from the free corner's displacement normalized to the annotation dimensions, ensure every nondegenerate area shares a positive edge segment, and expand that overlap to the full edge when the selection extends beyond the annotation along the tangent axis. Keep map layer IDs/order in `gui/src/utils/mapLayers.js`, marker ownership in `useMaplibreMarker`, and marker stacking in the shared `--app-z-map-*` tokens. Reuse the existing rectangle-layer and resize-handle styling; map components must preserve selected annotation object identity and release layers, sources, markers, and listeners during project transitions and unmount.
 - Prefer the smallest relevant check first, then broaden based on risk. Run backend unit tests for `src/` changes, integration tests for routes/contracts, and the GUI checks in `gui/AGENTS.md` for frontend-facing changes.
-- GitHub Actions and Buildkite both run backend unit, frontend unit/version/build, backend integration, and full headless Chromium checks through the shared `ci/` scripts.
+- GitHub Actions and Buildkite both run backend unit, MCP unit/transport,
+  frontend unit/version/build, backend integration, and full headless Chromium
+  checks through the shared `ci/` scripts.
 - Do not commit root or test manifests, `node_modules`, logs, SQLite runtime files, Genie build/cache/session output, Playwright results, or generated Vite output under `public/`.
 - Edit `gui/index.html`, `gui/public/`, or `gui/src/` for frontend changes; never edit generated `public/index.html`, `public/vite.svg`, or `public/assets/`.
 - Keep unrelated cleanup out of behavioral changes, avoid broad formatting churn, and preserve user work already present in the tree.

@@ -29,7 +29,7 @@
         <label class="variable-field variable-name-field">
           <span>Name</span>
           <input
-            v-model.trim="variable.name"
+            :value="draftFor(variable).name"
             type="text"
             class="variable-name-input"
             :class="{ 'invalid-variable-name': !!variableNameError(variable) }"
@@ -37,6 +37,7 @@
             :aria-describedby="variableNameError(variable) ? `variable-name-error-${variable.id}` : undefined"
             :aria-label="`Variable name for ${variable.id}`"
             :disabled="disabled"
+            @input="onNameInput(variable, $event.target.value)"
           />
           <small
             v-if="variableNameError(variable)"
@@ -51,11 +52,11 @@
         <label class="variable-field variable-type-field">
           <span>Type</span>
           <select
-            v-model="variable.type"
+            :value="draftFor(variable).type"
             class="variable-type-select"
             :aria-label="`Type for ${variable.name || variable.id}`"
             :disabled="disabled"
-            @change="onTypeChanged(variable)"
+            @change="onTypeChanged(variable, $event.target.value)"
           >
             <option v-for="type in variableTypes" :key="type" :value="type">
               {{ getTypeOptionLabel(type) }}
@@ -67,12 +68,13 @@
           <span>Value</span>
           <div class="variable-value-input">
             <TypedValueInput
-              :parameter="variable"
-              :type="variable.type"
+              :parameter="draftFor(variable)"
+              :type="draftFor(variable).type"
               :disabled="disabled"
               category="node"
               placeholder="value"
               initially-open
+              @commit="commitVariable(variable, { value: draftFor(variable).value })"
             />
           </div>
         </div>
@@ -93,9 +95,9 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, reactive, toRaw, watch } from 'vue'
 import { Plus, Trash2 } from '@lucide/vue'
-import Variable, {
+import {
   isStatesZooTraceVariable,
   isStatesZooVariable,
   isVariableReferenced
@@ -121,6 +123,8 @@ const props = defineProps({
     default: false
   }
 })
+const emit = defineEmits(['designOperations'])
+const drafts = reactive({})
 
 const variableTypes = VARIABLE_PARAMETER_TYPES
 const ordinaryVariables = computed(() => props.variables.filter(variable => (
@@ -140,19 +144,109 @@ function nextVariableName() {
 
 function addVariable() {
   if (props.disabled) return
-  props.variables.push(new Variable({ name: nextVariableName() }))
+  emit('designOperations', [{
+    kind: 'variables.create',
+    value: {
+      name: nextVariableName(),
+      type: 'Float64',
+      value: null,
+    },
+  }])
 }
 
 function deleteVariable(variable) {
   if (props.disabled || isReferenced(variable.id)) return
-  const index = props.variables.findIndex(candidate => candidate.id === variable.id)
-  if (index !== -1) props.variables.splice(index, 1)
+  emit('designOperations', [{
+    kind: 'variables.remove',
+    variable_id: variable.id,
+  }])
 }
 
-function onTypeChanged(variable) {
+function onTypeChanged(variable, type) {
   if (props.disabled) return
-  resetValueForType(variable, variable.type)
+  const draft = draftFor(variable)
+  draft.type = type
+  resetValueForType(draft, type)
+  commitVariable(variable, { type })
 }
+
+function draftFor(variable) {
+  drafts[variable.id] ||= {
+    id: variable.id,
+    name: variable.name,
+    type: variable.type,
+    value: cloneValue(variable.value),
+  }
+  return drafts[variable.id]
+}
+
+function cloneValue(value) {
+  return value && typeof value === 'object'
+    ? structuredClone(toRaw(value))
+    : value
+}
+
+function valuesEqual(left, right) {
+  if (Object.is(left, right)) return true
+  if (
+    !left
+    || !right
+    || typeof left !== 'object'
+    || typeof right !== 'object'
+  ) return false
+  return JSON.stringify(toRaw(left)) === JSON.stringify(toRaw(right))
+}
+
+function onNameInput(variable, rawName) {
+  const draft = draftFor(variable)
+  draft.name = rawName.trim()
+  if (!variableNameError(variable)) {
+    commitVariable(variable, { name: draft.name })
+  }
+}
+
+function commitVariable(variable, value) {
+  if (props.disabled) return
+  emit('designOperations', [{
+    kind: 'variables.update',
+    variable_id: variable.id,
+    value: Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, cloneValue(entry)]),
+    ),
+  }])
+}
+
+watch(
+  () => props.variables.map(variable => ({
+    id: variable.id,
+    name: variable.name,
+    type: variable.type,
+    value: variable.value,
+  })),
+  variables => {
+    const retained = new Set(variables.map(variable => variable.id))
+    Object.keys(drafts).forEach(id => {
+      if (!retained.has(id)) delete drafts[id]
+    })
+    variables.forEach(variable => {
+      const currentDraft = drafts[variable.id]
+      const preserveCodePresentation = currentDraft
+        && currentDraft.type === variable.type
+        && valuesEqual(currentDraft.value, variable.value)
+      drafts[variable.id] = {
+        ...variable,
+        value: cloneValue(variable.value),
+        ...(preserveCodePresentation && Object.hasOwn(currentDraft, 'latex')
+          ? { latex: currentDraft.latex }
+          : {}),
+        ...(preserveCodePresentation && Object.hasOwn(currentDraft, 'error')
+          ? { error: currentDraft.error }
+          : {}),
+      }
+    })
+  },
+  { immediate: true, deep: true },
+)
 
 function isReferenced(variableId) {
   return isVariableReferenced(props.projectData, variableId)
@@ -165,9 +259,10 @@ function deleteTitle(variableId) {
 }
 
 function variableNameError(variable) {
-  if (!variable.name?.trim()) return 'Name is required'
+  const name = draftFor(variable).name
+  if (!name?.trim()) return 'Name is required'
   const duplicateCount = props.variables.filter(candidate => (
-    candidate.name?.trim() === variable.name.trim()
+    draftFor(candidate).name?.trim() === name.trim()
   )).length
   return duplicateCount > 1 ? 'Name must be unique' : ''
 }

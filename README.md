@@ -44,6 +44,62 @@ For the bundled UI, API requests default to the current browser origin in produc
 frontend aligned with the Genie server automatically. If you need to point the built UI at a different
 API host, set `VITE_API_BASE_URL` when running `npm run build`.
 
+## Local MCP collaboration
+
+WebQuantumSavory includes an optional local Model Context Protocol sidecar for
+collaborative design and simulation control. It is disabled by default, binds
+only to `127.0.0.1`, and starts only after the user opens the MCP Tools tab and
+clicks **Initialize MCP**.
+
+Enable the capability before launching the loopback Genie server:
+
+```bash
+WEBQUANTUMSAVORY_ENABLE_MCP=true ./bin/server
+```
+
+The MCP endpoint is then shown in the Tools tab and defaults to
+`http://127.0.0.1:8001/mcp`. Override that port with an unused local port:
+
+```bash
+WEBQUANTUMSAVORY_ENABLE_MCP=true \
+WEBQUANTUMSAVORY_MCP_PORT=8123 \
+./bin/server
+```
+
+Both variables are parsed strictly. `WEBQUANTUMSAVORY_ENABLE_MCP` accepts only
+the lowercase values `true` and `false`; the port must be an integer from 1 to
+65535 and must differ from Genie's port. Enabling MCP while Genie is configured
+for a non-loopback host fails closed before the server starts.
+
+The launcher instantiates the isolated `mcp/` Julia environment only when the
+feature is enabled. For development, instantiate it directly with:
+
+```bash
+julia --startup-file=no --project=mcp -e 'using Pkg; Pkg.instantiate()'
+```
+
+The sidecar is intentionally a separate process. ModelContextProtocol 0.6.0
+installs a process-global logger, so loading it in Genie would let MCP transport
+lifecycle and client log-level requests affect the main application's logging.
+Process isolation also keeps the optional dependency graph unloaded when the
+feature is disabled and gives Initialize/Stop a clean session boundary. This
+cost can be reconsidered when the library exposes scoped logger, single-session,
+and lifecycle hooks. Until then, its exact compatibility pin and the annotated
+transport adapter must be revalidated together when upgrading the dependency.
+
+The browser remains authoritative for the live project, so a browser tab must
+stay bound for design edits and lifecycle actions. MCP edits update the visible
+project immediately and mark it unsaved; they never save automatically. One
+bound browser tab and one MCP session are supported. Project transitions
+automatically unbind the current design. Use `simulation_reset` before changing
+simulation-affecting design state after preparation.
+
+The versioned tool contract is in `contracts/mcp/v1/tools.json`. New authoring
+tools must first gain a shared `DesignCommandService` handler and migrate the
+equivalent GUI action to that handler. Simulation lifecycle tools must continue
+to use the browser controller, while simulation reads and HTTP routes share
+the Julia `SimulationService`.
+
 ## API Overview
 
 ### Core Simulation Workflow
@@ -188,6 +244,19 @@ cd test
 julia --project runtests.jl test_unit
 ```
 
+Focused MCP backend tests can be run with:
+
+```bash
+cd test
+julia --project runtests.jl test_mcp_unit
+```
+
+The isolated sidecar contract-loader tests use its own environment:
+
+```bash
+julia --startup-file=no --project=mcp mcp/test/runtests.jl
+```
+
 Notes:
 - Unit tests include deterministic checks for the background cleanup via `cleanup_stale_simulations_once()`.
 - When creating states from payloads in tests, always call `WebQuantumSavory.validate_payload(payload)` before `WebQuantumSavory.parse_network_graph(...)`.
@@ -207,20 +276,21 @@ Notes:
 
 ### CI checks
 
-GitHub Actions and Buildkite run the same four repository scripts:
+GitHub Actions and Buildkite run the same five repository scripts:
 
 ```bash
 ./ci/backend-unit.sh
+./ci/mcp-unit.sh
 ./ci/frontend-build.sh
 ./ci/backend-integration.sh
 ./ci/browser.sh
 ```
 
 Each script installs the locked project dependencies it needs, so it can run
-from a clean checkout once its language runtimes are available. The integration
-and browser scripts start a test-mode backend, wait up to 120 seconds for
-`/status`, and always stop it. On failure they preserve the backend log and any
-Playwright traces under the ignored `ci-artifacts/` directory.
+from a clean checkout once its language runtimes are available. The MCP,
+integration, and browser scripts start a test-mode backend, wait up to 120
+seconds for `/status`, and always stop it. On failure they preserve the backend
+log and any Playwright traces under the ignored `ci-artifacts/` directory.
 
 The browser script downloads the Chromium version locked by Playwright. On a
 new Linux machine, install the locked npm dependencies and its system packages
@@ -236,16 +306,16 @@ For Buildkite, configure the pipeline's upload step as
 uses an isolated, pipeline-specific depot. The official mise plugin installs
 the pinned mise release and the Node.js 24 toolchain declared in `mise.toml`.
 The browser step installs the locked Chromium binary and its Linux packages
-through Playwright. The integration and browser jobs share a concurrency group
-so overlapping builds cannot contend for ports 8000 and 5173.
+through Playwright. The MCP, integration, and browser jobs share a concurrency
+group so overlapping builds cannot contend for their fixed local ports.
 
 Each Linux agent must still provide Git, Bash, curl, wget, tar, and Python 3.
 Browser agents must use a Playwright-supported Debian/Ubuntu base and let the
 job install apt packages as root or through passwordless `sudo`. Agents must be
 able to download Julia, mise, Node.js, npm packages, and Chromium, and ports
-8000 and 5173 must be available. No queue name, secret, or container image is
-assumed by `.buildkite/pipeline.yml`. Configure Buildkite's GitHub integration
-to create builds for pull requests and pushes to `main`.
+8000, 8001, 5173, and 18001 must be available. No queue name, secret, or
+container image is assumed by `.buildkite/pipeline.yml`. Configure Buildkite's
+GitHub integration to create builds for pull requests and pushes to `main`.
 
 ## Automatic Cleanup of Inactive Simulations
 

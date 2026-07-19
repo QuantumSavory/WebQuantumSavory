@@ -18,7 +18,7 @@ const props = defineProps({
   point: { type: Object, required: true },
 })
 
-const emit = defineEmits(['move', 'cycle'])
+const emit = defineEmits(['move', 'cycle', 'interactionBusy'])
 const element = ref(null)
 let marker = null
 let dragged = false
@@ -40,10 +40,14 @@ onMounted(() => {
     .setLngLat(props.point.position)
     .addTo(props.map)
 
-  marker.on('dragstart', () => { dragged = true })
+  marker.on('dragstart', () => {
+    dragged = true
+    emit('interactionBusy', true)
+  })
   marker.on('dragend', () => {
     const position = marker.getLngLat()
     emit('move', props.point, [position.lng, position.lat])
+    emit('interactionBusy', false)
   })
 })
 

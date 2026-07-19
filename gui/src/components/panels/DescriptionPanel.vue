@@ -9,7 +9,7 @@
       cancel-button-label="Cancel description editing"
       placeholder="Describe this simulation with Markdown and LaTeX math…"
       empty-text="No description yet."
-      @update:model-value="emit('update:modelValue', $event)"
+      @update:model-value="(...args) => emit('update:modelValue', ...args)"
     />
   </div>
 </template>

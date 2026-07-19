@@ -4,12 +4,15 @@ const AUTO_DESTROY_MINUTES = 300
 
 function cleanup_stale_simulations_once()
     # Get all simulation names to avoid mutating while iterating
-    simulation_names = collect(keys(WebQuantumSavory.STATE))
+    simulation_names = WebQuantumSavory.simulation_names()
     
     for simulation_name in simulation_names
         try
-            if haskey(WebQuantumSavory.STATE, simulation_name)
-                state = WebQuantumSavory.STATE[simulation_name]
+            try
+                state = WebQuantumSavory._simulation_state(
+                    WebQuantumSavory.SIMULATION_SERVICE,
+                    simulation_name,
+                )
                 
                 # Skip if running or no last active time set
                 if state.is_running || state.simulation_last_active_time === nothing
@@ -20,7 +23,7 @@ function cleanup_stale_simulations_once()
                 if Dates.now() - state.simulation_last_active_time > Dates.Minute(AUTO_DESTROY_MINUTES)
                     @info "Auto-destroying stale simulation: $simulation_name"
                     @log_event state Logging.Info "Destroying simulation $simulation_name after $AUTO_DESTROY_MINUTES minutes of inactivity"
-                    WebQuantumSavory.destroy_simulation(simulation_name)
+                    WebQuantumSavory.simulation_destroy!(simulation_name)
                     continue
                 end
                 
@@ -35,8 +38,15 @@ function cleanup_stale_simulations_once()
                     @log_event state Logging.Info "Stopping simulation $simulation_name after $AUTO_PURGE_MINUTES minutes of inactivity"
 
                     # Non-destructive block to preserve state for UI
-                    WebQuantumSavory.block_simulation(state; reason=:autopurge, max_minutes=AUTO_PURGE_MINUTES, auto_purged=true)
+                    WebQuantumSavory.simulation_block!(
+                        simulation_name;
+                        reason=:autopurge,
+                        max_minutes=AUTO_PURGE_MINUTES,
+                        auto_purged=true,
+                    )
                 end
+            catch error
+                error isa WebQuantumSavory.APIError || rethrow()
             end
         catch e
             @error "Error cleaning up simulation $simulation_name" error=e

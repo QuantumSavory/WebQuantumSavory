@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { LoaderCircle, Pause, Play, Settings2, Square } from '@lucide/vue'
 import { SimulationPhase } from '../../composables/simulationLifecycle.js'
 import OptionHelpTooltip from '../ui/OptionHelpTooltip.vue'
@@ -40,19 +40,38 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['run', 'pause', 'resume', 'stop', 'prepareNetworkGraph', 'prepareSimulation'])
+const emit = defineEmits([
+  'run',
+  'pause',
+  'resume',
+  'stop',
+  'prepareNetworkGraph',
+  'prepareSimulation',
+  'updateSimulationTime',
+  'updateSimulationConfig',
+])
 
 const showAdvancedControls = ref(false)
 const normalizedRepresentationConfig = computed(() => (
   normalizeRepresentationConfig(props.projectData.simulationConfig)
 ))
+const simulationTimeDraft = ref(props.projectData.simulationConfig.time)
+const qubitRepresentationDraft = ref(
+  normalizedRepresentationConfig.value.qubitRepresentation
+)
+const qumodeRepresentationDraft = ref(
+  normalizedRepresentationConfig.value.qumodeRepresentation
+)
 
 function representationModel(field) {
+  const draft = field === 'qubitRepresentation'
+    ? qubitRepresentationDraft
+    : qumodeRepresentationDraft
   return computed({
-    get: () => normalizedRepresentationConfig.value[field],
+    get: () => draft.value,
     set: value => {
-      props.projectData.simulationConfig ??= {}
-      props.projectData.simulationConfig[field] = value
+      draft.value = value
+      emit('updateSimulationConfig', { [field]: value })
     }
   })
 }
@@ -66,6 +85,25 @@ const selectedQubitRepresentation = computed(() => (
 const selectedQumodeRepresentation = computed(() => (
   QUMODE_REPRESENTATION_OPTIONS.find(option => option.value === qumodeRepresentation.value)
 ))
+
+watch(
+  () => props.projectData.simulationConfig.time,
+  value => {
+    simulationTimeDraft.value = value
+  },
+)
+watch(
+  () => normalizedRepresentationConfig.value.qubitRepresentation,
+  value => {
+    qubitRepresentationDraft.value = value
+  },
+)
+watch(
+  () => normalizedRepresentationConfig.value.qumodeRepresentation,
+  value => {
+    qumodeRepresentationDraft.value = value
+  },
+)
 
 const currentTime = computed(() => {
   const sim = backendSim.value
@@ -144,6 +182,16 @@ function toggleAdvancedControls() {
   showAdvancedControls.value = !showAdvancedControls.value
 }
 
+function commitSimulationTime(event) {
+  const value = Number(event.target.value)
+  if (!Number.isFinite(value) || value <= 0) {
+    simulationTimeDraft.value = props.projectData.simulationConfig.time
+    return
+  }
+  simulationTimeDraft.value = value
+  emit('updateSimulationTime', value)
+}
+
 </script>
 
 <template>
@@ -175,11 +223,12 @@ function toggleAdvancedControls() {
         <div class="numeric-stepper">
           <input
             type="number"
-            v-model.number="projectData.simulationConfig.time"
+            :value="simulationTimeDraft"
             step="0.001"
             min="0"
             class="duration-input"
-            :disabled="isSimulationRunning || isSimulationPaused || pollingActive || foregroundPending"
+            :disabled="representationsDisabled"
+            @change="commitSimulationTime"
           />
           <span class="unit">sec</span>
         </div>

@@ -5,6 +5,18 @@ import { useNodeEdgeOperations } from '../../src/composables/useNodeEdgeOperatio
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../../src/utils/projectCodec'
 import Edge from '../../src/models/Edge'
 import Node from '../../src/models/Node'
+import {
+  DUPLICATE_PHYSICAL_EDGE_REASON,
+  DesignCommandService,
+} from '../../src/domain/design/DesignCommandService'
+
+function sharedExecutor(projectData) {
+  const service = new DesignCommandService({
+    getProject: () => projectData.value,
+    defaultBackgroundNoise: () => ({ type: 'default', parameters: [] }),
+  })
+  return operations => service.execute({ operations, origin: 'gui' })
+}
 
 describe('node and edge operation map state', () => {
   it('initializes reactive map state from copied codec defaults', () => {
@@ -22,7 +34,7 @@ describe('node and edge operation map state', () => {
     expect(DEFAULT_MAP_CENTER[0]).toBe(-98.5795)
   })
 
-  it('rejects duplicate physical endpoint pairs but permits virtual pairs', () => {
+  it('rejects duplicate physical endpoint pairs but permits virtual pairs', async () => {
     const nodeA = new Node({ id: 'a', name: 'A', position: [-72, 42] })
     const nodeB = new Node({ id: 'b', name: 'B', position: [-71, 42] })
     const physical = new Edge({ id: 'physical', source: nodeA, target: nodeB })
@@ -30,9 +42,10 @@ describe('node and edge operation map state', () => {
     const alert = vi.fn()
     const operations = useNodeEdgeOperations(projectData, ref(false), vi.fn(), {
       showAlert: alert,
+      executeDesignOperations: sharedExecutor(projectData),
     })
 
-    operations.handleEdgeCreated(new Edge({
+    await operations.handleEdgeCreated(new Edge({
       id: 'duplicate',
       source: nodeB,
       target: nodeA,
@@ -43,7 +56,7 @@ describe('node and edge operation map state', () => {
       'Only one physical edge may connect a pair of nodes.',
     )
 
-    operations.handleEdgeCreated(new Edge({
+    await operations.handleEdgeCreated(new Edge({
       id: 'virtual',
       source: nodeB,
       target: nodeA,
@@ -52,9 +65,91 @@ describe('node and edge operation map state', () => {
     expect(projectData.value.net.edges).toHaveLength(2)
   })
 
-  it('deletes annotations while simulation editing is locked and preserves object identity until removal', () => {
-    const annotation = { id: 'annotation-1' }
-    const otherAnnotation = { id: 'annotation-2' }
+  it('recognizes duplicate edges by structured reason rather than message text', async () => {
+    const nodeA = new Node({ id: 'a', name: 'A', position: [-72, 42] })
+    const nodeB = new Node({ id: 'b', name: 'B', position: [-71, 42] })
+    const projectData = ref({ net: { nodes: [nodeA, nodeB], edges: [] } })
+    const alert = vi.fn()
+    const error = Object.assign(new Error('Localized duplicate-edge message'), {
+      code: 'VALIDATION_FAILED',
+      details: { reason: DUPLICATE_PHYSICAL_EDGE_REASON },
+    })
+    const operations = useNodeEdgeOperations(projectData, ref(false), vi.fn(), {
+      showAlert: alert,
+      executeDesignOperations: vi.fn(async () => {
+        throw error
+      }),
+    })
+
+    await operations.handleEdgeCreated(new Edge({
+      id: 'duplicate',
+      source: nodeA,
+      target: nodeB,
+    }))
+
+    expect(alert).toHaveBeenCalledWith(
+      'Duplicate physical edge',
+      'Localized duplicate-edge message',
+    )
+  })
+
+  it('reports failed fire-and-forget node creation without logging success', async () => {
+    const projectData = ref({ net: { nodes: [], edges: [] } })
+    const alert = vi.fn()
+    const addLog = vi.fn()
+    const operations = useNodeEdgeOperations(projectData, ref(false), addLog, {
+      showAlert: alert,
+      executeDesignOperations: vi.fn(async () => {
+        throw new Error('Creation failed')
+      }),
+    })
+
+    operations.handleMapClick({
+      lngLat: { lng: -72, lat: 42 },
+      originalEvent: { altKey: true },
+    })
+
+    await vi.waitFor(() => {
+      expect(alert).toHaveBeenCalledWith('Unable to create node', 'Creation failed')
+    })
+    expect(addLog).not.toHaveBeenCalled()
+  })
+
+  it('reports failed fire-and-forget node reordering without logging success', async () => {
+    const nodeA = new Node({ id: 'a', name: 'A', position: [-72, 42] })
+    const nodeB = new Node({ id: 'b', name: 'B', position: [-71, 42] })
+    const projectData = ref({ net: { nodes: [nodeA, nodeB], edges: [] } })
+    const alert = vi.fn()
+    const addLog = vi.fn()
+    const operations = useNodeEdgeOperations(projectData, ref(false), addLog, {
+      showAlert: alert,
+      executeDesignOperations: vi.fn(async () => {
+        throw new Error('Reorder failed')
+      }),
+    })
+
+    expect(operations.moveNode(0, 1)).toBe(true)
+
+    await vi.waitFor(() => {
+      expect(alert).toHaveBeenCalledWith('Unable to reorder node', 'Reorder failed')
+    })
+    expect(addLog).not.toHaveBeenCalled()
+  })
+
+  it('deletes annotations while simulation editing is locked and preserves object identity until removal', async () => {
+    const annotation = {
+      id: 'annotation-1',
+      markdown: 'First note',
+      bounds: { west: -2, south: -1, east: 2, north: 1 },
+      backgroundColor: '#ffffff',
+      borderColor: '#334155',
+      area: null,
+    }
+    const otherAnnotation = {
+      ...annotation,
+      id: 'annotation-2',
+      markdown: 'Second note',
+    }
     const projectData = ref({
       annotations: [annotation, otherAnnotation],
       net: { nodes: [], edges: [] },
@@ -63,11 +158,12 @@ describe('node and edge operation map state', () => {
     const alert = vi.fn()
     const operations = useNodeEdgeOperations(projectData, ref(true), addLog, {
       showAlert: alert,
+      executeDesignOperations: sharedExecutor(projectData),
     })
     const retainedIdentity = projectData.value.annotations[1]
     operations.handleSelect(annotation, 'annotation')
 
-    operations.deleteSelected(annotation, 'annotation')
+    await operations.deleteSelected(annotation, 'annotation')
 
     expect(projectData.value.annotations).toEqual([otherAnnotation])
     expect(projectData.value.annotations[0]).toBe(retainedIdentity)

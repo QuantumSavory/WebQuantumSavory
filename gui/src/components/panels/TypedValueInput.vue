@@ -9,7 +9,9 @@
     :placeholder="placeholder"
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
+    :aria-invalid="numericValueInvalid"
     :disabled="disabled"
+    @change="emit('commit')"
   />
   <Checkbox
     v-else-if="type === 'Bool'"
@@ -18,6 +20,7 @@
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :disabled="disabled"
+    @change="emit('commit')"
   >
     <template #icon="{ checked, class: iconClass }">
       <Check v-if="checked" :class="iconClass" :size="14" aria-hidden="true" />
@@ -29,6 +32,7 @@
     role="group"
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
+    :aria-invalid="codeDraftInvalid"
     :disabled="disabled"
   >
     <CodeEditorWithSymbols
@@ -42,7 +46,7 @@
       collapsible
       :collapsed="!codeEditorOpen"
       @update:modelValue="onCodeEditorValueChanged"
-      @validate="validateCode"
+      @validate="validateAndCommitCode"
       @edit="openCodeEditor"
     />
   </fieldset>
@@ -53,6 +57,7 @@
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :disabled="disabled"
+    @change="emit('commit')"
   >
     <option value="default">Default</option>
     <option v-for="func in selectableFunctions" :key="func" :value="func">{{ func }}</option>
@@ -68,6 +73,7 @@
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :disabled="disabled"
+    @change="emit('commit')"
   />
 </template>
 
@@ -81,7 +87,8 @@ import {
   isCodeType,
   isSymbolicType,
   isWildcardType,
-  parameterTypeIsNumber
+  parameterTypeIsNumber,
+  parseNumericParameterValue
 } from '../../utils/parameterTypes'
 
 const CodeEditorWithSymbols = defineAsyncComponent(() => import('./CodeEditorWithSymbols.vue'))
@@ -116,6 +123,7 @@ const props = defineProps({
     default: undefined
   }
 })
+const emit = defineEmits(['commit'])
 
 const unsafeCodeEvaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
 const valueInputLabel = computed(() => `${props.parameter.name || 'Parameter'} value`)
@@ -127,6 +135,15 @@ const selectableFunctions = computed(() => api.getKnownFunctions().filter(func =
   props.category === 'node' || !func.endsWith('(self)')
 )))
 const codeEditorOpen = ref(false)
+const codeDraftDirty = ref(false)
+const numericValueInvalid = computed(() => !parseNumericParameterValue(
+  props.type,
+  props.parameter.value,
+  props.parameter,
+).valid)
+const codeDraftInvalid = computed(() => (
+  Boolean(props.parameter.error) || codeDraftDirty.value
+))
 
 watch(
   () => props.type,
@@ -147,14 +164,23 @@ watch(
     codeEditorOpen.value = isCodeType(type)
       ? props.initiallyOpen && !(isSymbolicType(type) && props.parameter.latex)
       : false
+    codeDraftDirty.value = false
   },
   { immediate: true }
+)
+
+watch(
+  () => props.parameter,
+  () => {
+    codeDraftDirty.value = false
+  }
 )
 
 function onCodeEditorValueChanged(value) {
   if (props.disabled) return
   props.parameter.value = value
   delete props.parameter.error
+  codeDraftDirty.value = true
 }
 
 function openCodeEditor() {
@@ -165,6 +191,7 @@ async function validateCode() {
   if (props.disabled) return
   if (!unsafeCodeEvaluationEnabled.value) {
     props.parameter.error = markdownCodeBlock('Server-side Julia evaluation is disabled.')
+    codeDraftDirty.value = true
     return
   }
 
@@ -177,6 +204,7 @@ async function validateCode() {
     codeEditorOpen.value = true
     delete props.parameter.latex
     props.parameter.error = markdownCodeBlock(error?.message || 'Validation failed')
+    codeDraftDirty.value = true
     return
   }
 
@@ -186,12 +214,19 @@ async function validateCode() {
       props.parameter.latex = response.results.latex.replace(/^\$+|\$+$/g, '')
     }
     codeEditorOpen.value = false
+    codeDraftDirty.value = false
     return
   }
 
   codeEditorOpen.value = true
   delete props.parameter.latex
   props.parameter.error = markdownCodeBlock(response.error)
+  codeDraftDirty.value = true
+}
+
+async function validateAndCommitCode() {
+  await validateCode()
+  if (!props.parameter.error) emit('commit')
 }
 </script>
 

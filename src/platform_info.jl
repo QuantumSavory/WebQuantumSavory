@@ -83,6 +83,11 @@ function get_platform_info(;
     "quantumsavory" => quantumsavory_info,
     "capabilities" => Dict{String,Any}(
       "unsafe_code_evaluation" => unsafe_code_evaluation_enabled(),
+      "mcp" => Dict{String,Any}(
+        "available" => mcp_enabled(),
+        "local_only" => true,
+        "start_mode" => "manual",
+      ),
     ),
   )
 end

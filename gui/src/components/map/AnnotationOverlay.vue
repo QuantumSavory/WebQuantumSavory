@@ -24,6 +24,8 @@
       :label="`Resize annotation from ${handle.corner} corner`"
       @activate="selectAnnotation"
       @move="position => resizeFromCorner(handle.corner, position)"
+      @commit="commitAnnotation"
+      @interaction-busy="emit('interactionBusy', $event)"
     />
 
     <AnnotationResizeHandle
@@ -35,6 +37,8 @@
       label="Resize attached annotation area from its free corner"
       @activate="selectAnnotation"
       @move="moveAreaFreeCorner"
+      @commit="commitAnnotation"
+      @interaction-busy="emit('interactionBusy', $event)"
     />
   </div>
 </template>
@@ -57,7 +61,7 @@ const props = defineProps({
   isSelected: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'update', 'interactionBusy'])
 const element = ref(null)
 const renderedMarkdown = computed(() => renderMarkdown(props.annotation.markdown))
 const annotationHandles = computed(() => {
@@ -133,6 +137,10 @@ function moveAreaFreeCorner(position) {
   Object.assign(props.annotation, updated)
 }
 
+function commitAnnotation() {
+  emit('update', props.annotation)
+}
+
 const markerController = useMaplibreMarker({
   map: () => props.map,
   element,
@@ -148,11 +156,14 @@ const markerController = useMaplibreMarker({
     dragstart: () => {
       dragStartBounds = { ...props.annotation.bounds }
       selectAnnotation()
+      emit('interactionBusy', true)
     },
     drag: updateDrag,
     dragend: () => {
       updateDrag()
       dragStartBounds = null
+      commitAnnotation()
+      emit('interactionBusy', false)
     },
   },
   watchPosition: false,

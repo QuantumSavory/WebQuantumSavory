@@ -6,7 +6,8 @@ import { useProjectSession } from '../../src/composables/useProjectSession'
 function createHarness({
   projects = {},
   confirmVersionMismatch = vi.fn(() => true),
-  destroySimulation = vi.fn(async () => ({ success: true }))
+  destroySimulation = vi.fn(async () => ({ success: true })),
+  beforeProjectReplacement = vi.fn(async () => {})
 } = {}) {
   const records = new Map(Object.entries(projects))
   const projectData = ref(createEmptyProject('A'))
@@ -64,6 +65,7 @@ function createHarness({
     closeAllResultWindows: calls.closeWindows,
     hideSlotState: calls.hide,
     syncLegacyProjectData: calls.syncLegacy,
+    beforeProjectReplacement,
     confirmVersionMismatch,
     showError,
     store,
@@ -136,9 +138,9 @@ describe('project session', () => {
     expect(harness.projectData.value.annotations).toEqual([nextAnnotation])
   })
 
-  it('renames before Save As serialization and starts a clean session', () => {
+  it('renames before Save As serialization and starts a clean session', async () => {
     const harness = createHarness()
-    expect(harness.session.saveAs('B')).toBe(true)
+    expect(await harness.session.saveAs('B')).toBe(true)
     expect(harness.currentProjectName.value).toBe('B')
     expect(harness.projectData.value.name).toBe('B')
     expect(harness.records.get('B').name).toBe('B')
@@ -148,12 +150,29 @@ describe('project session', () => {
     expect(window.localStorage.getItem('recentProjectName')).toBe('B')
   })
 
-  it('rejects a duplicate Save As without changing either project', () => {
+  it('awaits collaboration teardown before replacing the active project', async () => {
+    let releaseTeardown
+    const beforeProjectReplacement = vi.fn(() => new Promise(resolve => {
+      releaseTeardown = resolve
+    }))
+    const harness = createHarness({ beforeProjectReplacement })
+
+    const saving = harness.session.saveAs('B')
+    await vi.waitFor(() => expect(beforeProjectReplacement).toHaveBeenCalledOnce())
+    expect(harness.currentProjectName.value).toBe('A')
+    expect(harness.records.has('B')).toBe(false)
+
+    releaseTeardown()
+    expect(await saving).toBe(true)
+    expect(harness.currentProjectName.value).toBe('B')
+  })
+
+  it('rejects a duplicate Save As without changing either project', async () => {
     const storedTarget = encodeStoredProject(createEmptyProject('B'), { name: 'B' })
     const harness = createHarness({ projects: { B: storedTarget } })
     const activeProject = harness.projectData.value
 
-    expect(harness.session.saveAs(' B ')).toBe(false)
+    expect(await harness.session.saveAs(' B ')).toBe(false)
     expect(harness.currentProjectName.value).toBe('A')
     expect(harness.projectData.value).toBe(activeProject)
     expect(harness.projectData.value.name).toBe('A')
@@ -166,12 +185,12 @@ describe('project session', () => {
     )
   })
 
-  it('overwrites a different existing project only when explicitly requested', () => {
+  it('overwrites a different existing project only when explicitly requested', async () => {
     const storedTarget = encodeStoredProject(createEmptyProject('B'), { name: 'B' })
     const harness = createHarness({ projects: { B: storedTarget } })
     harness.projectData.value.description = 'Replacement'
 
-    expect(harness.session.saveAs('B', { overwrite: true })).toBe(true)
+    expect(await harness.session.saveAs('B', { overwrite: true })).toBe(true)
     expect(harness.currentProjectName.value).toBe('B')
     expect(harness.records.get('B').description).toBe('Replacement')
   })
@@ -249,7 +268,7 @@ describe('project session', () => {
       expect(harness.session.transitionPhase.value).toBe('committing')
     })
 
-    expect(harness.session.saveAs('C')).toBe(true)
+    expect(await harness.session.saveAs('C')).toBe(true)
     expect(harness.session.transitionPhase.value).toBe('idle')
     resolveDestroy({ success: true })
     expect(await pendingOpen).toBe(false)

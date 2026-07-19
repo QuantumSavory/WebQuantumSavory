@@ -7,12 +7,14 @@ import { ref } from 'vue'
 export function useUnsavedChanges(serializeProjectData) {
   // Store the saved state as a JSON string snapshot
   const savedStateSnapshot = ref(null)
+  const explicitlyDirty = ref(false)
 
   /**
    * Check if there are unsaved changes by comparing current state to snapshot
    * @returns {boolean} true if current state differs from saved snapshot
    */
   function hasUnsavedChanges() {
+    if (explicitlyDirty.value) return true
     if (savedStateSnapshot.value === null) {
       // No snapshot exists, so there are no saved changes to lose
       return false
@@ -35,19 +37,21 @@ export function useUnsavedChanges(serializeProjectData) {
   function markAsSaved() {
     try {
       savedStateSnapshot.value = JSON.stringify(serializeProjectData())
+      explicitlyDirty.value = false
     } catch (error) {
       console.error('Error marking as saved:', error)
       // Set to null on error so we don't have invalid state
       savedStateSnapshot.value = null
+      explicitlyDirty.value = true
     }
   }
 
   /**
-   * Reset the saved snapshot (useful for new projects without saves)
-   * This effectively clears the unsaved changes tracking
+   * Explicitly mark the current project dirty, including projects that have
+   * never had a saved snapshot.
    */
   function markAsUnsaved() {
-    savedStateSnapshot.value = null
+    explicitlyDirty.value = savedStateSnapshot.value === null
   }
 
   /**
@@ -55,14 +59,15 @@ export function useUnsavedChanges(serializeProjectData) {
    */
   function clearSnapshot() {
     savedStateSnapshot.value = null
+    explicitlyDirty.value = false
   }
 
   return {
     savedStateSnapshot,
+    explicitlyDirty,
     hasUnsavedChanges,
     markAsSaved,
     markAsUnsaved,
     clearSnapshot
   }
 }
-

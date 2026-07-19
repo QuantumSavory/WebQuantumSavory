@@ -137,6 +137,12 @@
         @test quantumsavory["commit"] === nothing
       end
       @test unsafe_evaluation_enabled isa Bool
+      @test platform_info["capabilities"]["mcp"] == Dict(
+        "available" => false,
+        "local_only" => true,
+        "start_mode" => "manual",
+      )
+      @test make_request("GET", "/_mcp/status").status == 404
   end
 
   @testset "Background Types Endpoint" begin

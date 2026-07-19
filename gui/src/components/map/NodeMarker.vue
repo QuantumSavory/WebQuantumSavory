@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import Slot from '../../models/Slot'
 import SlotIcon from './SlotIcon.vue';
@@ -8,23 +8,33 @@ import { useUiServices } from '../../composables/uiServices'
 const props = defineProps({
   node: {       type: Object,   required: true },
   map: {        type: Object,   required: true },
-  isSelected: { type: Boolean,  default: false }
+  isSelected: { type: Boolean,  default: false },
+  editingLocked: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['select', 'startConnection', 'updateConnection', 'endConnection', 'nodePositionChanged'])
+const emit = defineEmits([
+  'select',
+  'startConnection',
+  'updateConnection',
+  'endConnection',
+  'nodePositionPreview',
+  'nodePositionChanged',
+  'interactionBusy',
+])
 const marker = ref(null)
 const markerEl = ref(null)
 const isHovered = ref(false)
 const isDraggingConnector = ref(false)
 const slots = ref([])
 const { showEntangledSlots } = useUiServices()
+let dragStartPosition = null
 
 
 onMounted(() => {
   // Create and initialize marker
   marker.value = new maplibregl.Marker({
     element: markerEl.value,
-    draggable: true
+    draggable: !props.editingLocked
   })
 
   // Set marker position and add to map
@@ -32,18 +42,36 @@ onMounted(() => {
     .addTo(props.map)
 
   // Handle drag events
+  marker.value.on('dragstart', () => {
+    if (props.editingLocked) return
+    dragStartPosition = [...props.node.position]
+    emit('interactionBusy', true)
+  })
+
   marker.value.on('drag', () => {
+    if (props.editingLocked) return
     const position = marker.value.getLngLat()
     props.node.updatePosition([position.lng, position.lat])
-    emit('nodePositionChanged', props.node)
+    emit('nodePositionPreview', props.node)
   })
 
   marker.value.on('dragend', () => {
+    if (props.editingLocked) return
     const position = marker.value.getLngLat()
     props.node.updatePosition([position.lng, position.lat])
-    emit('nodePositionChanged', props.node)
+    emit('nodePositionChanged', {
+      node: props.node,
+      previousPosition: dragStartPosition,
+    })
+    dragStartPosition = null
+    emit('interactionBusy', false)
   })
 })
+
+watch(
+  () => props.editingLocked,
+  locked => marker.value?.setDraggable(!locked),
+)
 
 onUnmounted(() => {
   if (marker.value) {

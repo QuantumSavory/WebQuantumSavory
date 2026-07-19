@@ -75,6 +75,26 @@
                     <option v-for="opt in bgNoiseOptions" :key="opt.type" :value="opt.type">{{ opt.type == 'default' ? 'No background noise' : opt.type }}</option>
                   </select>
                 </div>
+                <div class="slot-cell slot-order-cell">
+                  <button
+                    type="button"
+                    class="noborder"
+                    :disabled="editingLocked || props.node.data.slots[0] === slot"
+                    :aria-label="`Move slot ${slot.id} up`"
+                    @click="moveSlot(slot, -1)"
+                  >
+                    <ChevronUp :size="14" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    class="noborder"
+                    :disabled="editingLocked || props.node.data.slots.at(-1) === slot"
+                    :aria-label="`Move slot ${slot.id} down`"
+                    @click="moveSlot(slot, 1)"
+                  >
+                    <ChevronDown :size="14" aria-hidden="true" />
+                  </button>
+                </div>
                 <!-- <div class="slot-cell last-op-cell">
                   {{slot.lastOperationTime}}
                 </div> -->
@@ -105,7 +125,12 @@
                       {{ param.field }}
                     </div>
                     <div>
-                      <input type="number" v-model.number="param.value" :disabled="editingLocked" />
+                      <input
+                        type="number"
+                        :value="param.value"
+                        :disabled="editingLocked"
+                        @change="updateSlotNoiseParameter(slot, param, $event)"
+                      />
                     </div>
                   </div>
                 </div>
@@ -232,6 +257,8 @@
           }"
           :editingLocked="editingLocked"
           :variables="props.variables"
+          :owner-id="props.node.id"
+          @design-operations="(...args) => emit('design-operations', ...args)"
         />
       </section>
     </template>
@@ -241,7 +268,7 @@
 
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, toRaw } from 'vue'
 import { api } from '../../utils/ApiConnector'
 import BasePanel from './BasePanel.vue'
 import FloatingProtocol from '../../models/FloatingProtocol'
@@ -250,7 +277,15 @@ import SlotIcon from '../map/SlotIcon.vue'
 import SlotEditor from './SlotEditor.vue'
 import Menu from 'primevue/menu'
 import NodeIndex from './NodeIndex.vue'
-import { EllipsisVertical, ListChecks, ListPlus, Plus, Trash2 } from '@lucide/vue'
+import {
+  ChevronDown,
+  ChevronUp,
+  EllipsisVertical,
+  ListChecks,
+  ListPlus,
+  Plus,
+  Trash2,
+} from '@lucide/vue'
 import LucideMenuIcon from '../LucideMenuIcon.vue'
 import { SIMULATION_EDITING_LOCK_MESSAGE, useUiServices } from '../../composables/uiServices'
 
@@ -282,7 +317,12 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['slot-updated', 'delete', 'name-edit-complete', 'update:collapsed'])
+const emit = defineEmits([
+  'delete',
+  'design-operations',
+  'name-edit-complete',
+  'update:collapsed',
+])
 const { showAlert } = useUiServices()
 
 const bgNoiseOptions = api.config.value.bgNoiseOptions;
@@ -298,10 +338,10 @@ function typeIcon(type) {
 
 
 function updateSlotBgNoise(slot, event) {
-  let bgType = event.target.value;
-  try{
+  const bgType = event.target.value
+  try {
     const bgTypeDefinition = bgNoiseOptions.find(opt => opt.type === bgType);
-    slot.backgroundNoise = {
+    const backgroundNoise = {
       type: bgTypeDefinition.type,
       doc: bgTypeDefinition.doc,
       parameters: bgTypeDefinition.parameters.map(param => ({
@@ -311,10 +351,35 @@ function updateSlotBgNoise(slot, event) {
         value: null,
       }))
     }
-  }catch(error){
-    console.warn('Error updating slot background noise:', error);
+    emit('design-operations', [{
+      kind: 'slots.update',
+      node_id: props.node.id,
+      slot_id: slot.id,
+      value: { backgroundNoise }
+    }])
+  } catch (error) {
+    console.warn('Error updating slot background noise:', error)
   }
-  emit('slot-updated', slot)  
+}
+
+function updateSlotNoiseParameter(slot, parameter, event) {
+  const value = Number(event.target.value)
+  if (!Number.isFinite(value)) {
+    event.target.value = parameter.value ?? ''
+    return
+  }
+  const backgroundNoise = {
+    ...slot.backgroundNoise,
+    parameters: slot.backgroundNoise.parameters.map(candidate => (
+      candidate.field === parameter.field ? { ...candidate, value } : { ...candidate }
+    ))
+  }
+  emit('design-operations', [{
+    kind: 'slots.update',
+    node_id: props.node.id,
+    slot_id: slot.id,
+    value: { backgroundNoise }
+  }])
 }
 
 function toggleSlotExpanded(slot) {
@@ -329,9 +394,14 @@ function addSlot() {
     return
   }
 
-  if (props.node && typeof props.node.createNewSlot === 'function') {
-    props.node.createNewSlot()
-  }
+  emit('design-operations', [{
+    kind: 'slots.create',
+    node_id: props.node.id,
+    value: {
+      type: 'Qubit',
+      backgroundNoise: api.getDefaultBgNoise()
+    }
+  }])
 }
 
 function deleteSlot(slot) {
@@ -341,8 +411,27 @@ function deleteSlot(slot) {
     return
   }
 
-  props.node.data.slots = props.node.data.slots.filter(s => s.id !== slot.id)
-  emit('slot-updated', props.node)
+  emit('design-operations', [{
+    kind: 'slots.remove',
+    node_id: props.node.id,
+    slot_id: slot.id
+  }])
+}
+
+function moveSlot(slot, offset) {
+  if (props.editingLocked) {
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
+    return
+  }
+  const index = props.node.data.slots.findIndex(candidate => candidate.id === slot.id)
+  const toIndex = index + offset
+  if (index < 0 || toIndex < 0 || toIndex >= props.node.data.slots.length) return
+  emit('design-operations', [{
+    kind: 'slots.reorder',
+    node_id: props.node.id,
+    slot_id: slot.id,
+    to_index: toIndex,
+  }])
 }
 
 const optionsMenuElement = ref(null)
@@ -439,16 +528,18 @@ function executeAddNSlots() {
     return
   }
 
-  if (numberOfSlotsToAdd.value > 0 && props.node && typeof props.node.createNewSlot === 'function') {
-    for (let i = 0; i < numberOfSlotsToAdd.value; i++) {
-      const newSlot = props.node.createNewSlot()
-      // Apply template values to the new slot
-      newSlot.type = slotTemplate.value.type
-      newSlot.backgroundNoise = slotTemplate.value.backgroundNoise
-      newSlot.lastOperationTime = slotTemplate.value.lastOperationTime
-      newSlot.assignment = slotTemplate.value.assignment
-      newSlot.isLocked = slotTemplate.value.isLocked
-    }
+  if (numberOfSlotsToAdd.value > 0) {
+    emit(
+      'design-operations',
+      Array.from({ length: numberOfSlotsToAdd.value }, () => ({
+        kind: 'slots.create',
+        node_id: props.node.id,
+        value: {
+          type: slotTemplate.value.type,
+          backgroundNoise: structuredClone(toRaw(slotTemplate.value.backgroundNoise))
+        }
+      }))
+    )
   }
   showAddNSlotsForm.value = false
 }
@@ -551,13 +642,21 @@ function cancelBatchEdit() {
 
 function executeBatchEdit() {
   const slotsToUpdate = props.node.data.slots.filter(slot => selectedSlots.value.has(slot.id))
-  
-  slotsToUpdate.forEach(slot => {
-    changedProperties.value.forEach(property => {
-      slot[property] = batchEditTemplate.value[property]
-      emit('slot-updated', slot)
-    })
-  })
+  const value = Object.fromEntries(
+    [...changedProperties.value].map(property => [
+      property,
+      structuredClone(toRaw(batchEditTemplate.value[property]))
+    ])
+  )
+  emit(
+    'design-operations',
+    slotsToUpdate.map(slot => ({
+      kind: 'slots.update',
+      node_id: props.node.id,
+      slot_id: slot.id,
+      value
+    }))
+  )
   
   // Clean up and exit batch edit mode
   selectedSlots.value.clear()
@@ -598,7 +697,11 @@ function startEditName() {
 }
 function saveName() {
   if (nameInput.value.trim() && nameInput.value !== props.node.name) {
-    props.node.name = nameInput.value.trim()
+    emit('design-operations', [{
+      kind: 'topology.update_node',
+      node_id: props.node.id,
+      value: { name: nameInput.value.trim() }
+    }])
   }
   editingName.value = false
 }
@@ -612,13 +715,13 @@ function switchSlotType(slot) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
-  if (slot.type == 'Qubit') {
-    slot.type = 'Qumode'
-  } else if (slot.type == 'Qumode') {
-    slot.type = 'Qubit'
-  } else {
-    slot.type = 'Qubit'
-  }
+  const type = slot.type === 'Qubit' ? 'Qumode' : 'Qubit'
+  emit('design-operations', [{
+    kind: 'slots.update',
+    node_id: props.node.id,
+    slot_id: slot.id,
+    value: { type }
+  }])
 }
 
 // Watch for justCreated to trigger name editing

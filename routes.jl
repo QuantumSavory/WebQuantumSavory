@@ -58,14 +58,10 @@ end
                         enum: ["created", "prepared", "complete", "unknown"]
 """
 route("/simulations", method="GET") do
-  sims = [
-    Dict(
-      :name => state.name,
-      :status => WebQuantumSavory._determine_status(state)
-    ) for (_, state) in WebQuantumSavory.STATE
-  ]
-
-  json(Dict(:success => true, :simulations => sims))
+  json(Dict(
+    :success => true,
+    :simulations => WebQuantumSavory.simulation_list(),
+  ))
 end
 
 ########################################################
@@ -1068,9 +1064,8 @@ end
 """
 route("/parse_network_graph", method="POST") do
   payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
-  validation_result = validate_payload(payload)
   state = try
-    WebQuantumSavory.parse_network_graph(validation_result)
+    WebQuantumSavory.simulation_create!(payload)
   catch ex
     isa(ex, APIError) && rethrow(ex)
     throw(validation_error("Invalid graph - data can not be correctly parsed. Details: $ex"))
@@ -1214,30 +1209,27 @@ end
 route("/prepare_simulation", method="POST") do
   simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
-  state = WebQuantumSavory.STATE[simulation_name]
-
-  if state.network === nothing
-    throw(validation_error("Network not found in simulation $simulation_name"))
-  end
-
   # Prepare the simulation, logging unexpected errors to the simulation's log stream
-  try
-    state = WebQuantumSavory.prepare_simulation(state, simulation_name)
+  simulation_state = try
+    WebQuantumSavory.simulation_prepare!(simulation_name)
   catch e
     isa(e, APIError) && rethrow(e)
 
     # Log a human-readable message into the simulation logs for frontend display
-    @log_event state Logging.Error "Error preparing simulation $simulation_name: $(e)" error_type=string(typeof(e))
+    try
+      recovered_state = WebQuantumSavory._simulation_state(
+        WebQuantumSavory.SIMULATION_SERVICE,
+        simulation_name,
+      )
+      @log_event recovered_state Logging.Error "Error preparing simulation $simulation_name: $(e)" error_type=string(typeof(e))
+    catch
+    end
 
     # Rethrow so that safe_route_handler can still produce a proper HTTP error response
     throw(validation_error("Error preparing simulation $simulation_name: $(e)", Dict("error" => string(e))))
   end
 
-  json(WebQuantumSavory.serialize_state(state))
+  json(WebQuantumSavory.serialize_state(simulation_state))
 end
 
 ########################################################
@@ -1320,18 +1312,8 @@ route("/run_simulation", method="POST") do
   simulation_name = payload["name"]
   time_units = _parse_time_input(payload["time_units"])
 
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
-  state = WebQuantumSavory.STATE[simulation_name]
-
-  if state.simulation === nothing
-    throw(validation_error("Simulation not prepared"))
-  end
-
-  try
-    WebQuantumSavory.run_simulation(state, time_units, simulation_name)
+  simulation_state = try
+    WebQuantumSavory.simulation_run!(simulation_name, time_units)
   catch e
     if isa(e, APIError)
       rethrow(e)
@@ -1343,7 +1325,11 @@ route("/run_simulation", method="POST") do
   end
 
   json(
-    Dict(:success => true, :status => "started", :state => WebQuantumSavory.serialize_state(state));
+    Dict(
+      :success => true,
+      :status => "started",
+      :state => WebQuantumSavory.serialize_state(simulation_state),
+    );
     status=202,
   )
 end
@@ -1478,13 +1464,10 @@ end
 """
 route("/get_state", method="GET") do
   simulation_name = Genie.Requests.getpayload()[:name]
-
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
-  state = WebQuantumSavory.STATE[simulation_name]
-  json(Dict(:success => true, :state => WebQuantumSavory.serialize_state(state)))
+  json(Dict(
+    :success => true,
+    :state => WebQuantumSavory.simulation_status(simulation_name),
+  ))
 end
 
 ########################################################
@@ -1583,12 +1566,7 @@ route("/slots/:name/:slot_id", method="GET") do
   slot_id = string(params(:slot_id))
   simulation_name = string(params(:name))
 
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
-  state = WebQuantumSavory.STATE[simulation_name]
-  result = WebQuantumSavory.get_slot_state(slot_id, state)
+  result = WebQuantumSavory.simulation_slot_result(simulation_name, slot_id)
 
   json(Dict(:success => true, result...))
 end
@@ -1655,13 +1633,8 @@ end
 route("/pause_simulation", method="POST") do
   simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
   try
-    state = WebQuantumSavory.STATE[simulation_name]
-    WebQuantumSavory.pause_simulation(state)
+    state = WebQuantumSavory.simulation_pause!(simulation_name)
 
     json(Dict(
       :success => true,
@@ -1724,11 +1697,7 @@ end
 route("/destroy_simulation", method="POST") do
   simulation_name = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())["name"]
 
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
-  if WebQuantumSavory.destroy_simulation(simulation_name)
+  if WebQuantumSavory.simulation_destroy!(simulation_name)
     json(Dict(:success => true, :message => "Simulation destroyed and resources cleaned up"))
   else
     json(Dict(:success => true, :message => "Simulation destroyed (cleanup had warnings)", :warning => "Some resources may not have been fully cleaned up"))
@@ -1793,12 +1762,7 @@ route("/protocols/:name/:protocol_id", method="GET") do
   protocol_id = string(params(:protocol_id))
   simulation_name = string(params(:name))
 
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
-  state = WebQuantumSavory.STATE[simulation_name]
-  result = WebQuantumSavory.get_protocol_state(protocol_id, state)
+  result = WebQuantumSavory.simulation_protocol_result(simulation_name, protocol_id)
 
   json(Dict(:success => true, result...))
 end
@@ -2315,21 +2279,194 @@ end
 route("/logs/:name", method="GET") do
   simulation_name = string(params(:name))
 
-
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
   purge_raw = Genie.Requests.getpayload(:purge, "true")
   purge = purge_raw isa Bool ? purge_raw : (lowercase(string(purge_raw)) in ("true", "1", "yes", "on"))
 
-  logs = WebQuantumSavory.get_logs(simulation_name, purge)
+  logs = WebQuantumSavory.simulation_logs(simulation_name; purge, limit=nothing)
 
   json(Dict(
     :success => true,
     :logs => logs,
     :count => length(logs)
   ))
+end
+
+########################################################
+
+if WebQuantumSavory.mcp_enabled()
+  function _mcp_request_payload()
+    payload = Genie.Requests.jsonpayload()
+    payload === nothing && return Dict{String,Any}()
+    return Dict{String,Any}(string(key) => value for (key, value) in payload)
+  end
+
+  route("/_mcp/status", method="GET") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    json(Dict(
+      :success => true,
+      :server => WebQuantumSavory.sidecar_status(),
+      :collaboration => WebQuantumSavory.collaboration_status(),
+      :local_only => true,
+      :start_mode => "manual",
+    ))
+  end
+
+  route("/_mcp/start", method="POST") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    json(Dict(
+      :success => true,
+      :server => WebQuantumSavory.start_sidecar!(),
+    ))
+  end
+
+  route("/_mcp/stop", method="POST") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    payload = _mcp_request_payload()
+    hub = WebQuantumSavory.collaboration_hub()
+    lock(hub.lock) do
+      binding = hub.binding
+      if binding !== nothing &&
+        string(get(payload, "binding_id", "")) != binding.id
+        throw(WebQuantumSavory._mcp_error(
+          "EDITOR_BUSY",
+          "Only the tab which owns the live editor binding can stop MCP.",
+          status=409,
+        ))
+      end
+    end
+    json(Dict(
+      :success => true,
+      :server => WebQuantumSavory.stop_sidecar!(),
+    ))
+  end
+
+  route("/_mcp/editor/bind", method="POST") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    json(Dict(
+      :success => true,
+      :binding => WebQuantumSavory.bind_editor!(_mcp_request_payload()),
+    ))
+  end
+
+  route("/_mcp/editor/unbind", method="POST") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    json(WebQuantumSavory.unbind_editor!(_mcp_request_payload()))
+  end
+
+  route("/_mcp/editor/heartbeat", method="POST") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    json(WebQuantumSavory.heartbeat_editor!(_mcp_request_payload()))
+  end
+
+  route("/_mcp/editor/commands", method="GET") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    request = Dict{String,Any}(
+      "binding_id" => string(Genie.Requests.getpayload(:binding_id, "")),
+      "generation" => something(
+        tryparse(Int, string(Genie.Requests.getpayload(:generation, "-1"))),
+        -1,
+      ),
+    )
+    command = WebQuantumSavory.next_browser_command!(request; timeout_seconds=20)
+    json(Dict(:success => true, :command => command))
+  end
+
+  route("/_mcp/editor/commit", method="POST") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    payload = _mcp_request_payload()
+    origin = string(get(payload, "origin", "mcp"))
+    result = origin == "gui" ?
+      WebQuantumSavory.commit_gui_snapshot!(payload) :
+      WebQuantumSavory.commit_browser_command!(payload)
+    json(result)
+  end
+
+  route("/_mcp/activity", method="GET") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    cursor = something(
+      tryparse(Int, string(Genie.Requests.getpayload(:cursor, "0"))),
+      0,
+    )
+    limit = something(
+      tryparse(Int, string(Genie.Requests.getpayload(:limit, "100"))),
+      100,
+    )
+    category = Genie.Requests.getpayload(:category, nothing)
+    activity_status = Genie.Requests.getpayload(:status, nothing)
+    json(Dict(
+      :success => true,
+      WebQuantumSavory.mcp_activity(
+        ;
+        cursor,
+        limit,
+        category,
+        status=activity_status,
+      )...,
+    ))
+  end
+
+  route("/_mcp/activity/clear", method="POST") do
+    WebQuantumSavory.verify_mcp_browser_origin!()
+    WebQuantumSavory.clear_mcp_activity!()
+    json(Dict(:success => true))
+  end
+
+  route("/_mcp/internal/ready", method="POST") do
+    payload = _mcp_request_payload()
+    accepted = WebQuantumSavory.sidecar_ready!(
+      string(get(payload, "capability", "")),
+      Int(get(payload, "port", 0)),
+    )
+    accepted || throw(WebQuantumSavory._mcp_error(
+      "INTERNAL_ERROR",
+      "Unexpected sidecar ready callback.",
+      status=409,
+    ))
+    json(Dict(:success => true))
+  end
+
+  route("/_mcp/internal/tool", method="POST") do
+    payload = _mcp_request_payload()
+    WebQuantumSavory.verify_sidecar_capability!(
+      string(get(payload, "capability", "")),
+    )
+    WebQuantumSavory.note_sidecar_request!()
+    result = WebQuantumSavory.dispatch_mcp_tool!(
+      string(get(payload, "tool", "")),
+      get(payload, "arguments", Dict{String,Any}()),
+    )
+    json(Dict(:success => true, :result => result))
+  end
+
+  route("/_mcp/internal/resource", method="POST") do
+    payload = _mcp_request_payload()
+    WebQuantumSavory.verify_sidecar_capability!(
+      string(get(payload, "capability", "")),
+    )
+    WebQuantumSavory.note_sidecar_request!()
+    result = WebQuantumSavory.read_mcp_resource(string(get(payload, "uri", "")))
+    json(Dict(:success => true, :result => result))
+  end
+
+  route("/_mcp/internal/activity", method="POST") do
+    payload = _mcp_request_payload()
+    WebQuantumSavory.verify_sidecar_capability!(
+      string(get(payload, "capability", "")),
+    )
+    if string(get(payload, "category", "")) == "session" &&
+      string(get(payload, "phase", "")) == "initialized"
+      WebQuantumSavory.note_sidecar_session_initialized!()
+    end
+    WebQuantumSavory.record_mcp_activity!(
+      WebQuantumSavory.collaboration_hub(),
+      string(get(payload, "category", "mcp")),
+      string(get(payload, "phase", "event"));
+      summary=string(get(payload, "summary", "")),
+      status=string(get(payload, "status", "")),
+      details=get(payload, "details", Dict{String,Any}()),
+    )
+    json(Dict(:success => true))
+  end
 end
 
 ########################################################
@@ -2409,56 +2546,7 @@ route("/dev/manipulate_state", method="POST") do
   end
 
   simulation_name = payload["name"]
-
-  if !haskey(WebQuantumSavory.STATE, simulation_name)
-    throw(not_found_error("Simulation", simulation_name))
-  end
-
-  state = WebQuantumSavory.STATE[simulation_name]
-
-  # Allow manipulation of various fields
-  if haskey(payload, "is_running")
-    state.is_running = payload["is_running"]
-  end
-
-  if haskey(payload, "simulation_paused")
-    state.simulation_paused = payload["simulation_paused"]
-  end
-
-  if haskey(payload, "has_run")
-    state.has_run = payload["has_run"]
-  end
-
-  if haskey(payload, "simulation_progress")
-    state.simulation_progress = payload["simulation_progress"]
-  end
-
-  if haskey(payload, "simulation_started_at")
-    if payload["simulation_started_at"] === nothing
-      state.simulation_started_at = nothing
-    else
-      # Assume it's a timestamp string or DateTime
-      state.simulation_started_at = payload["simulation_started_at"]
-    end
-  end
-
-  if haskey(payload, "simulation_last_active_time")
-    state.simulation_last_active_time = payload["simulation_last_active_time"]
-  end
-
-  if haskey(payload, "block_reason")
-    block_reason = string(payload["block_reason"])
-    block_reason in ("timeout", "autopurge") || throw(validation_error(
-      "block_reason must be 'timeout' or 'autopurge'",
-    ))
-    reason = Symbol(block_reason)
-    WebQuantumSavory.block_simulation(
-      state;
-      reason,
-      max_minutes=reason == :timeout ? WebQuantumSavory.MAX_SIM_RUNTIME_MINUTES : 30,
-      auto_purged=reason == :autopurge,
-    )
-  end
+  WebQuantumSavory.simulation_update_for_test!(simulation_name, payload)
 
   json(Dict(:success => true, :message => "State updated", :name => simulation_name))
 end

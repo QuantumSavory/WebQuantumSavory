@@ -49,6 +49,7 @@ export function useProjectSession({
   closeAllResultWindows,
   hideSlotState = () => {},
   syncLegacyProjectData = () => {},
+  beforeProjectReplacement = () => {},
   confirmVersionMismatch = message => window.confirm(message),
   confirmDelete = message => window.confirm(message),
   showError = message => window.alert(message),
@@ -61,6 +62,11 @@ export function useProjectSession({
   function cancelTransition(nextPhase = 'idle') {
     transitionGeneration.value += 1
     transitionPhase.value = nextPhase
+  }
+
+  function projectReplacementBarrier() {
+    const pending = beforeProjectReplacement()
+    return pending && typeof pending.then === 'function' ? pending : null
   }
 
   function canonicalName(value) {
@@ -188,6 +194,9 @@ export function useProjectSession({
       if (!candidate || generation !== transitionGeneration.value) return false
 
       transitionPhase.value = 'committing'
+      const replacementBarrier = projectReplacementBarrier()
+      if (replacementBarrier) await replacementBarrier
+      if (generation !== transitionGeneration.value) return false
       try {
         const cleanupResult = await api.destroySimulation(name)
         if (cleanupResult?.success === true) {
@@ -223,6 +232,9 @@ export function useProjectSession({
       if (generation !== transitionGeneration.value) return false
 
       transitionPhase.value = 'committing'
+      const replacementBarrier = projectReplacementBarrier()
+      if (replacementBarrier) await replacementBarrier
+      if (generation !== transitionGeneration.value) return false
       try {
         await api.destroySimulation(name)
       } catch (error) {
@@ -249,6 +261,9 @@ export function useProjectSession({
     const generation = ++transitionGeneration.value
     transitionPhase.value = 'committing'
     try {
+      const replacementBarrier = projectReplacementBarrier()
+      if (replacementBarrier) await replacementBarrier
+      if (generation !== transitionGeneration.value) return false
       const project = createEmptyProject(name)
       const encoded = encodeStoredProject(project, {
         name,
@@ -291,7 +306,7 @@ export function useProjectSession({
     return true
   }
 
-  function saveAs(name, { overwrite = false } = {}) {
+  async function saveAs(name, { overwrite = false } = {}) {
     try {
       name = canonicalName(name)
       const targetIsDifferentProject = name !== currentProjectName.value
@@ -300,6 +315,8 @@ export function useProjectSession({
         throw new Error(`A project named "${name}" already exists`)
       }
       cancelTransition()
+      const replacementBarrier = projectReplacementBarrier()
+      if (replacementBarrier) await replacementBarrier
       const encoded = encodeStoredProject(projectData.value, {
         name,
         map: { position: [...mapCenter.value], zoom: mapZoom.value },
@@ -335,6 +352,8 @@ export function useProjectSession({
     store.deleteProject(name)
     if (currentProjectName.value === name) {
       cancelTransition()
+      const replacementBarrier = projectReplacementBarrier()
+      if (replacementBarrier) await replacementBarrier
       stopSessionActivity()
       projectData.value = createEmptyProject()
       currentProjectName.value = ''
@@ -360,6 +379,9 @@ export function useProjectSession({
       if (!candidate || generation !== transitionGeneration.value) return false
 
       transitionPhase.value = 'committing'
+      const replacementBarrier = projectReplacementBarrier()
+      if (replacementBarrier) await replacementBarrier
+      if (generation !== transitionGeneration.value) return false
       try {
         await api.destroySimulation(name)
       } catch (error) {

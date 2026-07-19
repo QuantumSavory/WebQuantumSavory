@@ -142,7 +142,7 @@ function _run_startup_warmup!(;
     warmup_state = nothing
 
     try
-      haskey(STATE, STARTUP_WARMUP_STATE_NAME) && error(
+      simulation_exists(SIMULATION_SERVICE, STARTUP_WARMUP_STATE_NAME) && error(
         "Startup warmup state name is already in use: $STARTUP_WARMUP_STATE_NAME",
       )
       warmup_state = parse_network_graph(validate_payload(payload))
@@ -174,7 +174,8 @@ function _run_startup_warmup!(;
         states_zoo_type,
       )
     finally
-      stored_state = get(STATE, STARTUP_WARMUP_STATE_NAME, nothing)
+      stored_state = simulation_exists(SIMULATION_SERVICE, STARTUP_WARMUP_STATE_NAME) ?
+        _simulation_state(SIMULATION_SERVICE, STARTUP_WARMUP_STATE_NAME) : nothing
       if warmup_state !== nothing && stored_state === warmup_state
         run_task = warmup_state.run_task
         run_task === nothing || istaskdone(run_task) || wait(run_task)

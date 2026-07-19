@@ -31,6 +31,23 @@ jobs:
           save-always: "false"
       - run: ./ci/backend-unit.sh
 
+  mcp-unit:
+    name: MCP unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1.12"
+      - uses: julia-actions/cache@v3
+        with:
+          delete-old-caches: "false"
+          save-always: "false"
+      - run: ./ci/mcp-unit.sh
+
   frontend-build:
     name: Frontend version and build
     runs-on: ubuntu-latest

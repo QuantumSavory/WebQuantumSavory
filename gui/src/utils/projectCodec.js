@@ -22,12 +22,21 @@ export const DEFAULT_MAP_ZOOM = 4
 export const DEFAULT_PHYSICAL_CONFIG = Object.freeze({
   refractiveIndex: DEFAULT_REFRACTIVE_INDEX,
 })
+export const TRANSIENT_SLOT_FIELDS = Object.freeze([
+  'isLocked',
+  'assignment',
+  'lastOperationTime',
+  'representationType',
+  'ui_expanded',
+  'renderedResult',
+])
 
 const STORAGE_ONLY_PROJECT_FIELDS = new Set([
   'schemaVersion',
   'platformInfo',
   'uiGlobal',
 ])
+const TRANSIENT_SLOT_FIELD_SET = new Set(TRANSIENT_SLOT_FIELDS)
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -517,6 +526,35 @@ export function encodeStoredProject(project, context = {}) {
   }
 }
 
+/**
+ * Encode the transport-neutral collaborative design document.
+ *
+ * This is deliberately a projection of the established stored-project codec:
+ * storage migrations and model normalization therefore remain implemented in
+ * exactly one place.
+ */
+export function encodeDesignDocument(project) {
+  const document = encodeStoredProject(project)
+  delete document.platformInfo
+  delete document.uiGlobal
+
+  for (const node of document.net?.nodes || []) {
+    delete node.expanded
+    for (const slot of node.data?.slots || []) {
+      for (const field of TRANSIENT_SLOT_FIELDS) delete slot[field]
+    }
+  }
+  return document
+}
+
+/**
+ * Hydrate a collaborative design document through the same model codec used by
+ * local storage and imports.
+ */
+export function decodeDesignDocument(document, context = {}) {
+  return decodeStoredProject(document, context).project
+}
+
 function hasValue(parameter) {
   return parameter?.value != null && parameter.value !== ''
 }
@@ -602,13 +640,8 @@ export function toSimulationPayload(project) {
               data: {
                 ...sourceData,
                 slots: (sourceData.slots || []).map(slot => {
-                  const cleaned = cloneValue(slot)
+                  const cleaned = omitFields(slot, TRANSIENT_SLOT_FIELD_SET)
                   cleaned.backgroundNoise = cleanBackgroundNoise(cleaned.backgroundNoise)
-                  delete cleaned.ui_expanded
-                  delete cleaned.isLocked
-                  delete cleaned.assignment
-                  delete cleaned.lastOperationTime
-                  delete cleaned.representationType
                   return cleaned
                 }),
                 protocols: (sourceData.protocols || [])

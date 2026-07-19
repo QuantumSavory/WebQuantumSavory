@@ -39,6 +39,7 @@
           :edge="edge"
           :physical-config="projectData.net.physicalConfig"
           :editing-locked="editingLocked"
+          @design-operations="(...args) => emit('designOperations', ...args)"
         />
       </section>
 
@@ -57,6 +58,8 @@
           :editingLocked="editingLocked"
           :variables="props.variables"
           :isVirtualEdge="props.edge.isLogic"
+          :owner-id="props.edge.id"
+          @design-operations="(...args) => emit('designOperations', ...args)"
         />
       </section>
     </template>
@@ -84,7 +87,13 @@ const props = defineProps({
   collapsed:        { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['slot-updated', 'delete', 'name-edit-complete', 'update:collapsed'])
+const emit = defineEmits([
+  'slot-updated',
+  'delete',
+  'name-edit-complete',
+  'update:collapsed',
+  'designOperations',
+])
 
 const optionsMenuElement = ref(null)
 const mainMenuItems = computed(() => {

@@ -1,7 +1,7 @@
 import { ref } from 'vue'
-import Node from '../models/Node'
-import { generateUUid, setEdgeCorrectNodeOrder } from '../utils/Utils'
+import { generateUUid } from '../utils/Utils'
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM } from '../utils/projectCodec'
+import { DUPLICATE_PHYSICAL_EDGE_REASON } from '../domain/design/DesignCommandService'
 import { SIMULATION_EDITING_LOCK_MESSAGE } from './uiServices'
 
 /**
@@ -9,7 +9,8 @@ import { SIMULATION_EDITING_LOCK_MESSAGE } from './uiServices'
  */
 export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
   hideSlotState = () => {},
-  showAlert = (_title, message) => window.alert(message)
+  showAlert = (_title, message) => window.alert(message),
+  executeDesignOperations = null
 } = {}) {
   const mapCenter = ref([...DEFAULT_MAP_CENTER])
   const mapZoom = ref(DEFAULT_MAP_ZOOM)
@@ -17,6 +18,10 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
   const selectedItem = ref(null)
   const selectedType = ref(null)
   const justCreatedNode = ref(false)
+
+  function showDesignOperationFailure(title, fallbackMessage, error) {
+    showAlert(title, error?.message || fallbackMessage)
+  }
 
   function handleSelectLocal(item, type) {
     selectedItem.value = item
@@ -29,7 +34,7 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
     }
   }
 
-  function addNewNode(name, type, position){
+  async function addNewNode(name, type, position){
     if (editingLocked.value) {
       showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
       return
@@ -38,39 +43,39 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
     const nodeId = generateUUid('node')
     const nodeName = `Node ${projectData.value.net.nodes.length + 1}`
 
-    const newNode = new Node({
+    await executeDesignOperations([{
+      kind: 'topology.create_node',
       id: nodeId,
-      name: nodeName,
-      position,
-      data: { type }
-    })
-    projectData.value.net.nodes.push(newNode)
-    
+      value: { name: nodeName, type, position },
+    }])
+    const newNode = projectData.value.net.nodes.find(node => node.id === nodeId)
     addLog('info', `Created new node: ${nodeName}`, 'Map')
-    
-    setTimeout(() => {
-      handleSelectLocal(newNode, 'node')
-    }, 100)
+    setTimeout(() => handleSelectLocal(newNode, 'node'), 100)
     justCreatedNode.value = true
+    return newNode
   }
 
   function handleMapClick( event ) {
     let coords = [event.lngLat.lng, event.lngLat.lat]
     if( event.originalEvent.altKey ){
-      addNewNode( null, "City", coords)
+      void addNewNode(null, 'City', coords).catch(error => {
+        showDesignOperationFailure(
+          'Unable to create node',
+          'The node could not be created.',
+          error,
+        )
+      })
     }
   }
 
-  function deleteSelected(item, type) {
+  async function deleteSelected(item, type) {
     if (!item) return
 
     if (type === 'annotation') {
-      const annotations = Array.isArray(projectData.value.annotations)
-        ? projectData.value.annotations
-        : []
-      projectData.value.annotations = annotations.filter(annotation => (
-        annotation !== item && annotation.id !== item.id
-      ))
+      await executeDesignOperations([{
+        kind: 'annotations.remove',
+        id: item.id,
+      }])
       addLog('warning', `Deleted annotation: ${item.id}`, 'Map')
       handleSelectLocal(null, null)
       return
@@ -86,15 +91,11 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
       const connectedEdges = projectData.value.net.edges.filter(edge => 
         edge.source === item || edge.target === item
       )
-      projectData.value.net.edges = projectData.value.net.edges.filter(edge => 
-        edge.source !== item && edge.target !== item
-      )
-      projectData.value.net.nodes = projectData.value.net.nodes.filter(node => node !== item)
-      
+      await executeDesignOperations([{ kind: 'topology.remove_node', id: item.id }])
       addLog('warning', `Deleted node: ${nodeName} (${connectedEdges.length} edges removed)`, 'Map')
     } else if (type === 'edge') {
       const edgeName = `${item.source.name} to ${item.target.name}`
-      projectData.value.net.edges = projectData.value.net.edges.filter(edge => edge !== item)
+      await executeDesignOperations([{ kind: 'topology.remove_edge', id: item.id }])
       addLog('warning', `Deleted edge: ${edgeName}`, 'Map')
     }
 
@@ -102,33 +103,40 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
     handleSelectLocal(null, null)
   }
 
-  function handleEdgeCreated(edge) {
+  async function handleEdgeCreated(edge) {
     if (editingLocked.value) {
       showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
       return
     }
 
-    if (edge.isLogic !== true) {
-      const sourceId = edge.source?.id ?? edge.source
-      const targetId = edge.target?.id ?? edge.target
-      const endpointPair = [sourceId, targetId].sort().join('\u0000')
-      const duplicate = projectData.value.net.edges.some(existing => (
-        existing.isLogic !== true
-        && [existing.source?.id ?? existing.source, existing.target?.id ?? existing.target]
-          .sort()
-          .join('\u0000') === endpointPair
-      ))
-      if (duplicate) {
-        showAlert(
-          'Duplicate physical edge',
-          'Only one physical edge may connect a pair of nodes.',
-        )
-        return
-      }
+    try {
+      await executeDesignOperations([{
+        kind: 'topology.create_edge',
+        id: edge.id,
+        value: {
+          source: edge.source.id,
+          target: edge.target.id,
+          isLogic: edge.isLogic,
+          data: {
+            type: edge.data?.type,
+            ...(edge.isLogic === true
+              ? {}
+              : {
+                  curvePoints: edge.data?.curvePoints || [],
+                  physicalOverrides: edge.data?.physicalOverrides ?? null,
+                }),
+          },
+        },
+      }])
+      addLog('info', `Created new edge: ${edge.source.name} to ${edge.target.name}`, 'Map')
+    } catch (error) {
+      const duplicatePhysicalEdge = error?.details?.reason
+        === DUPLICATE_PHYSICAL_EDGE_REASON
+      showAlert(
+        duplicatePhysicalEdge ? 'Duplicate physical edge' : 'Unable to create edge',
+        error?.message || 'The edge could not be created.',
+      )
     }
-
-    projectData.value.net.edges.push(edge)
-    addLog('info', `Created new edge: ${edge.source.name} to ${edge.target.name}`, 'Map')
   }
 
   function moveNode(fromIndex, toIndex) {
@@ -147,13 +155,20 @@ export function useNodeEdgeOperations(projectData, editingLocked, addLog, {
       return false
     }
 
-    const [node] = nodes.splice(fromIndex, 1)
-    nodes.splice(toIndex, 0, node)
-
-    // Edge protocol nodeA/nodeB follows list order. Re-normalizing only swaps
-    // endpoint references; the edge and both durable Node objects stay intact.
-    projectData.value.net.edges.forEach(edge => setEdgeCorrectNodeOrder(edge, nodes))
-    addLog('info', `Changed ${node.name} to node ID ${toIndex + 1}`, 'Map')
+    const node = nodes[fromIndex]
+    executeDesignOperations([{
+      kind: 'topology.reorder_node',
+      id: node.id,
+      to_index: toIndex,
+    }]).then(() => {
+      addLog('info', `Changed ${node.name} to node ID ${toIndex + 1}`, 'Map')
+    }).catch(error => {
+      showDesignOperationFailure(
+        'Unable to reorder node',
+        'The node order could not be changed.',
+        error,
+      )
+    })
     return true
   }
 

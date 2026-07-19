@@ -73,9 +73,10 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, onUnmounted, ref, watch } from 'vue'
 import { PencilLine, Save, X } from '@lucide/vue'
 import { useDomId } from '../../composables/useDomId'
+import { EDITOR_DRAFT_REGISTRY_KEY } from '../../composables/editorDraftRegistry'
 import { renderMarkdown } from '../../utils/markdown.js'
 import { getClipboardImageFiles, imageFilesToMarkdown } from '../../utils/markdownImagePaste'
 
@@ -126,6 +127,7 @@ const editor = ref(null)
 const pasteError = ref('')
 const isEmbeddingImage = ref(false)
 const renderedMarkdown = computed(() => renderMarkdown(props.modelValue))
+const draftRegistry = inject(EDITOR_DRAFT_REGISTRY_KEY, null)
 let pasteOperation = 0
 
 function resetPasteState() {
@@ -195,11 +197,52 @@ function saveMarkdown() {
   isEditing.value = false
 }
 
+function flushDraft() {
+  if (!isEditing.value) return { valid: true }
+  if (isEmbeddingImage.value) {
+    return {
+      busy: true,
+      details: { reason: 'image-paste' },
+    }
+  }
+  if (draft.value === props.modelValue) {
+    isEditing.value = false
+    return { valid: true }
+  }
+
+  return new Promise(resolve => {
+    emit(
+      'update:modelValue',
+      draft.value,
+      () => {
+        isEditing.value = false
+        resolve({ valid: true })
+      },
+      error => {
+        resolve({
+          valid: false,
+          details: {
+            message: error?.message || 'The Markdown draft could not be saved.',
+          },
+        })
+        return true
+      },
+    )
+  })
+}
+
 function cancelEditing() {
   draft.value = props.modelValue
   isEditing.value = false
   resetPasteState()
 }
+
+const unregisterDraft = draftRegistry?.register({
+  id: `markdown:${resolvedIdPrefix.value}`,
+  flush: flushDraft,
+})
+
+onUnmounted(() => unregisterDraft?.())
 </script>
 
 <style scoped>

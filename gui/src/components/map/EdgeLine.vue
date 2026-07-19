@@ -13,6 +13,7 @@
       :point="point"
       @move="moveCurvePoint"
       @cycle="cycleCurvePoint"
+      @interaction-busy="emit('interactionBusy', $event)"
     />
   </div>
 </template>
@@ -45,7 +46,7 @@ const props = defineProps({
   physicalConfig: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'designOperations', 'interactionBusy'])
 const sourceId = `edge-${props.edge.id}`
 const layerId = edgeLineLayerId(props.edge.id)
 const clickLayerId = edgeClickLayerId(props.edge.id)
@@ -174,11 +175,20 @@ function handleEdgeClick(event) {
     props.edge,
     [event.lngLat.lng, event.lngLat.lat],
   )
-  props.edge.data.curvePoints.splice(projection.segmentIndex, 0, {
+  const curvePoints = props.edge.data.curvePoints.map(point => ({
+    ...point,
+    position: [...point.position],
+  }))
+  curvePoints.splice(projection.segmentIndex, 0, {
     id: generateUUid('curve'),
     position: projection.position,
     type: 'smooth',
   })
+  emit('designOperations', [{
+    kind: 'topology.update_edge',
+    edge_id: props.edge.id,
+    value: { data: { curvePoints } },
+  }])
 }
 
 function handleMouseEnter(event) {
@@ -193,16 +203,35 @@ function handleMouseLeave() {
 }
 
 function moveCurvePoint(point, position) {
-  point.position = [...position]
+  const curvePoints = props.edge.data.curvePoints.map(candidate => ({
+    ...candidate,
+    position: candidate.id === point.id ? [...position] : [...candidate.position],
+  }))
+  emit('designOperations', [{
+    kind: 'topology.update_edge',
+    edge_id: props.edge.id,
+    value: { data: { curvePoints } },
+  }])
 }
 
 function cycleCurvePoint(point) {
+  let curvePoints
   if (point.type === 'smooth') {
-    point.type = 'sharp'
-    return
+    curvePoints = props.edge.data.curvePoints.map(candidate => ({
+      ...candidate,
+      type: candidate.id === point.id ? 'sharp' : candidate.type,
+      position: [...candidate.position],
+    }))
+  } else {
+    curvePoints = props.edge.data.curvePoints
+      .filter(candidate => candidate.id !== point.id)
+      .map(candidate => ({ ...candidate, position: [...candidate.position] }))
   }
-  const index = props.edge.data.curvePoints.findIndex(candidate => candidate.id === point.id)
-  if (index >= 0) props.edge.data.curvePoints.splice(index, 1)
+  emit('designOperations', [{
+    kind: 'topology.update_edge',
+    edge_id: props.edge.id,
+    value: { data: { curvePoints } },
+  }])
 }
 
 onMounted(() => {

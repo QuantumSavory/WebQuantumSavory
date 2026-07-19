@@ -52,6 +52,14 @@
 - MapLibre takes marker elements out of Vue's normal DOM tree. Keep `BaseMap`'s marker-component render order stable and decoupled from simulator node order; changing that render order can make Vue move MapLibre-owned elements and abort other reactive updates.
 - `App.vue` strips UI-only and read-only slot/protocol fields before sending data to the API. Do not submit saved UI state directly to the backend.
 - Store the global Qubit and Qumode representation defaults as `qubitRepresentation` and `qumodeRepresentation` in `simulationConfig`. Keep option allowlists, legacy `QuantumOpticsRepr` defaults, storage normalization, simulator payloads, and script-export payloads centralized through `src/utils/representations.js` and `projectCodec.js`; do not revive the unused per-slot `representationType` field.
+- `src/domain/design/DesignCommandService.js` is the transport-neutral
+  authoring boundary. GUI controls and the optional MCP bridge must dispatch
+  its registered operations; keep editing semantics out of Vue presentation
+  and out of `src/features/mcp/`.
+- `src/features/mcp/` owns only capability-gated control, browser binding,
+  canonical snapshot synchronization, activity presentation, and relaying
+  lifecycle actions through the existing simulation controller. It must not
+  mutate `projectData` or call simulation API endpoints directly.
 - Projects, the user UUID, panel state, and view preferences use established `localStorage` keys. Preserve keys and migration/rebuild behavior so existing projects remain readable.
 - All durable project documents pass through the schema-v1 codec. Preserve schema-v0 decoding, normalize at the codec boundary without mutating imported input, and keep project-name trimming consistent across save, load, import, and storage operations.
 - Switching, importing, resetting, or deleting a project must stop both polling loops, reset simulation state, close stale result windows, and remove obsolete entanglement overlays.
