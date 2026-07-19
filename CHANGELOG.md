@@ -1,12 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Added composable log filtering by severity, normalized App/Web API/Simulator source, and authoritative QuantumSavory simulator group, including canonical recovery for resumable protocol logs while retaining their structured metadata in searchable Raw JSON.
-- Added a structured simulation log explorer with extensible group, event, protocol,
-  node, severity, source, and simulated-time filtering; exact large identities;
-  node-name resolution; structured event context; and legacy-log compatibility.
-
 ## 1.9.0
 
 - Added advanced Qubit and Qumode representation defaults with backend-capability guidance, persistent project settings, and matching GUI-simulation and Julia-script-export behavior.
@@ -15,6 +8,9 @@
 - Fixed wrapped Tools tabs and reorganized Layout Tools into a full-width live-help card above equal Physical Defaults, Drawing Tools, and Helpers cards, with consistent pointer and keyboard-focus guidance.
 - Added persisted frontend-only map annotations with safe Markdown and LaTeX, fill and border colors, one-shot placement, selection, dragging, minimum-size corner resizing, deletion, and editing throughout every simulation phase.
 - Added optional transparent dashed annotation areas whose independently persisted `freeCorner` selects a dominant normalized-axis attachment, always shares a positive annotation-edge segment instead of a lone corner, and expands across the full edge when the selection extends beyond it, while keeping annotation data out of simulator and generated-script payloads.
+- Added composable log filtering by severity, normalized App/Web API/Simulator source, and authoritative QuantumSavory simulator group, including canonical recovery for resumable protocol logs while retaining their structured metadata in searchable Raw JSON.
+- Added a structured simulation log explorer with extensible group, event, protocol, node, severity, source, and simulated-time filtering; exact large identities; node-name resolution; structured event context; and legacy-log compatibility.
+- Added an MCP server for collaborative local work with an AI agent.
 
 ## 1.8.0
 
