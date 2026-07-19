@@ -216,6 +216,7 @@ import {
   isVariableReferenced
 } from '../../models/Variable'
 import { api } from '../../utils/ApiConnector'
+import { watermarkGeneratedPng } from '../../utils/pngWatermark'
 import { generateUUid } from '../../utils/Utils'
 
 const PREVIEW_DEBOUNCE_MS = 500
@@ -668,12 +669,12 @@ function schedulePreview(variable, delay = PREVIEW_DEBOUNCE_MS) {
   previewTimers.set(variableId, timer)
 }
 
-function previewImageUrl(response) {
+async function previewImageUrl(response, { signal } = {}) {
   const png = response?.png_base64
   if (typeof png !== 'string' || png.length === 0) {
     throw new Error('The server returned an invalid state preview')
   }
-  return png.startsWith('data:image/png;base64,') ? png : `data:image/png;base64,${png}`
+  return watermarkGeneratedPng(png, { signal })
 }
 
 async function renderPreview(variable, generation) {
@@ -702,7 +703,8 @@ async function renderPreview(variable, generation) {
       ? traceLifecycleError(liveVariable)
       : ''
     if (lifecycleError) throw new Error(lifecycleError)
-    const imageUrl = previewImageUrl(response)
+    const imageUrl = await previewImageUrl(response, { signal: controller.signal })
+    if (previewGenerations.get(variableId) !== generation || isUnmounted) return
     state.imageUrl = imageUrl
     if (dirtyStateDrafts.has(variableId)) commitStateDraft(liveVariable)
   } catch (error) {
