@@ -21,6 +21,9 @@ export const DEFAULT_MAP_CENTER = [-98.5795, 39.8283]
 export const DEFAULT_MAP_ZOOM = 4
 export const DEFAULT_PHYSICAL_CONFIG = Object.freeze({
   refractiveIndex: DEFAULT_REFRACTIVE_INDEX,
+  nodeTemplate: Object.freeze({
+    slots: Object.freeze([]),
+  }),
 })
 export const TRANSIENT_SLOT_FIELDS = Object.freeze([
   'isLocked',
@@ -77,13 +80,47 @@ function validateOptionalNumber(value, name, { positive = false } = {}) {
   }
 }
 
-function normalizePhysicalConfig(value) {
-  if (value == null) return { ...DEFAULT_PHYSICAL_CONFIG }
-  if (!isRecord(value)) throw new Error('Project physicalConfig must be an object')
-  validateOptionalNumber(value.refractiveIndex, 'Project refractive index', { positive: true })
+function normalizeNodeTemplate(value, context) {
+  if (value == null) return { slots: [] }
+  if (!isRecord(value)) throw new Error('Project nodeTemplate must be an object')
+  if (value.slots != null && !Array.isArray(value.slots)) {
+    throw new Error('Project nodeTemplate slots must be an array')
+  }
+
+  const slotIds = new Set()
+  const slots = (value.slots || []).map((slot, index) => {
+    if (!isRecord(slot)) {
+      throw new Error(`Project nodeTemplate slot ${index + 1} must be an object`)
+    }
+    if (typeof slot.id !== 'string' || !slot.id) {
+      throw new Error(`Project nodeTemplate slot ${index + 1} requires an ID`)
+    }
+    if (slotIds.has(slot.id)) {
+      throw new Error(`Project nodeTemplate contains duplicate slot ID: ${slot.id}`)
+    }
+    if (typeof slot.type !== 'string' || !slot.type) {
+      throw new Error(`Project nodeTemplate slot ${slot.id} requires a type`)
+    }
+    slotIds.add(slot.id)
+    return {
+      id: slot.id,
+      type: slot.type,
+      backgroundNoise: normalizeBackgroundNoise(slot.backgroundNoise, context),
+    }
+  })
+  return { slots }
+}
+
+function normalizePhysicalConfig(value, context = {}) {
+  if (value != null && !isRecord(value)) {
+    throw new Error('Project physicalConfig must be an object')
+  }
+  const source = value || {}
+  validateOptionalNumber(source.refractiveIndex, 'Project refractive index', { positive: true })
   return {
-    ...cloneValue(value),
-    refractiveIndex: value.refractiveIndex ?? DEFAULT_REFRACTIVE_INDEX,
+    ...cloneValue(source),
+    refractiveIndex: source.refractiveIndex ?? DEFAULT_REFRACTIVE_INDEX,
+    nodeTemplate: normalizeNodeTemplate(source.nodeTemplate, context),
   }
 }
 
@@ -137,12 +174,12 @@ export function normalizeProjectName(value, fallback = DEFAULT_PROJECT_NAME) {
   return normalized || fallback
 }
 
-function validateTopology(source) {
+function validateTopology(source, context) {
   const nodes = Array.isArray(source.net?.nodes) ? source.net.nodes : []
   const nodeIds = new Set()
   const physicalEndpointPairs = new Set()
 
-  normalizePhysicalConfig(source.net?.physicalConfig)
+  normalizePhysicalConfig(source.net?.physicalConfig, context)
 
   for (const node of nodes) {
     const id = node?.id
@@ -370,7 +407,7 @@ export function createEmptyProject(name = DEFAULT_PROJECT_NAME) {
       nodes: [],
       edges: [],
       protocols: [],
-      physicalConfig: { ...DEFAULT_PHYSICAL_CONFIG },
+      physicalConfig: cloneValue(DEFAULT_PHYSICAL_CONFIG),
     },
   }
 }
@@ -387,7 +424,7 @@ export function decodeStoredProject(raw, context = {}) {
       `Project schema version ${schemaVersion} is newer than supported version ${PROJECT_SCHEMA_VERSION}`,
     )
   }
-  validateTopology(source)
+  validateTopology(source, context)
   const name = normalizeProjectName(context.storageName, normalizeProjectName(source.name))
   const nodes = Array.isArray(source.net?.nodes)
     ? source.net.nodes.map(node => hydrateNode(node, context))
@@ -450,7 +487,7 @@ export function decodeStoredProject(raw, context = {}) {
       protocols: Array.isArray(source.net?.protocols)
         ? source.net.protocols.map(hydrateProtocol)
         : [],
-      physicalConfig: normalizePhysicalConfig(source.net?.physicalConfig),
+      physicalConfig: normalizePhysicalConfig(source.net?.physicalConfig, context),
     },
   }
 
@@ -520,7 +557,7 @@ export function encodeStoredProject(project, context = {}) {
       protocols: Array.isArray(sourceNet.protocols)
         ? sourceNet.protocols.map(plainProtocol)
         : [],
-      physicalConfig: normalizePhysicalConfig(sourceNet.physicalConfig),
+      physicalConfig: normalizePhysicalConfig(sourceNet.physicalConfig, context),
     },
     uiGlobal,
   }

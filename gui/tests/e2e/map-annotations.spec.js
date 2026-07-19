@@ -147,6 +147,14 @@ test.describe('Map annotations and Tools presentation', () => {
     const helpersCard = tools.locator('.helpers-card')
     await expect(helpCard.getByRole('heading', { name: 'Help' })).toBeVisible()
 
+    const heightResizeTarget = page.getByTestId('bottom-panel-height-resize-target')
+    await heightResizeTarget.focus()
+    await heightResizeTarget.press('Home')
+    const compactHelpHeight = (await box(helpCard)).height
+    await heightResizeTarget.press('End')
+    const expandedHelpHeight = (await box(helpCard)).height
+    expect(Math.abs(compactHelpHeight - expandedHelpHeight)).toBeLessThanOrEqual(1)
+
     const [helpBounds, defaultsBounds, drawingBounds, helpersBounds] = await Promise.all([
       box(helpCard),
       box(defaultsCard),
@@ -162,6 +170,26 @@ test.describe('Map annotations and Tools presentation', () => {
     expect(Math.abs(
       helpBounds.x + helpBounds.width - helpersBounds.x - helpersBounds.width,
     )).toBeLessThanOrEqual(1)
+
+    await heightResizeTarget.press('Home')
+    await defaultsCard.getByRole('button', { name: 'Add Slot' }).click()
+    await expect(defaultsCard.locator('.slot-row')).toHaveCount(1)
+    await page.keyboard.down('Alt')
+    await page.locator('.maplibregl-canvas').click({ position: { x: 300, y: 220 } })
+    await page.keyboard.up('Alt')
+    await expect(page.locator('.node-marker')).toHaveCount(1)
+    const templateResult = await page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      const templateSlot = setup.projectData.net.physicalConfig.nodeTemplate.slots[0]
+      const node = setup.projectData.net.nodes[0]
+      return {
+        templateSlotId: templateSlot.id,
+        nodeSlotId: node.data.slots[0].id,
+        nodeProtocols: node.data.protocols,
+      }
+    })
+    expect(templateResult.nodeSlotId).not.toBe(templateResult.templateSlotId)
+    expect(templateResult.nodeProtocols).toEqual([])
 
     const helpCases = [
       {

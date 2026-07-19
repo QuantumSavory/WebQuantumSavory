@@ -1,11 +1,39 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import LayoutToolsPanel from '../../src/components/panels/LayoutToolsPanel.vue'
+import { api } from '../../src/utils/ApiConnector'
+
+function mountPanel(options = {}) {
+  return mount(LayoutToolsPanel, {
+    ...options,
+    global: {
+      ...options.global,
+      directives: {
+        tooltip: () => {},
+        ...options.global?.directives,
+      },
+    },
+  })
+}
 
 describe('layout tools physical settings', () => {
+  beforeEach(() => {
+    api.updateConfig({
+      slotTypes: ['Qubit', 'Qumode'],
+      bgNoiseOptions: [
+        api.getDefaultBgNoise(),
+        {
+          type: 'ThermalNoise',
+          doc: 'Thermal background',
+          parameters: [{ field: 'rate', type: 'Float64', doc: 'Noise rate' }],
+        },
+      ],
+    })
+  })
+
   it('places full-width help before three focused tool cards', () => {
-    const wrapper = mount(LayoutToolsPanel)
+    const wrapper = mountPanel()
     const cards = wrapper.findAll('.layout-tools-card')
 
     expect(cards).toHaveLength(4)
@@ -24,7 +52,7 @@ describe('layout tools physical settings', () => {
   })
 
   it('keeps the session badge toggle available while simulation editing is locked', async () => {
-    const wrapper = mount(LayoutToolsPanel, {
+    const wrapper = mountPanel({
       props: {
         disabled: true,
         physicalConfig: { refractiveIndex: 1.468 },
@@ -34,6 +62,7 @@ describe('layout tools physical settings', () => {
     })
 
     expect(wrapper.get('#default-refractive-index').attributes()).toHaveProperty('disabled')
+    expect(wrapper.get('.template-node .add-slot-btn').attributes()).toHaveProperty('disabled')
     expect(wrapper.get('#curve-editing-enabled').attributes()).toHaveProperty('disabled')
     expect(wrapper.get('#physical-badges-visible').attributes()).not.toHaveProperty('disabled')
     expect(wrapper.get('.annotation-button').attributes()).not.toHaveProperty('disabled')
@@ -47,7 +76,7 @@ describe('layout tools physical settings', () => {
   })
 
   it('rejects invalid refractive indices and emits drawing changes', async () => {
-    const wrapper = mount(LayoutToolsPanel, {
+    const wrapper = mountPanel({
       props: {
         physicalConfig: { refractiveIndex: 1.468 },
         curveEditingEnabled: false,
@@ -65,8 +94,79 @@ describe('layout tools physical settings', () => {
     expect(wrapper.emitted('update:curve-editing-enabled')).toEqual([[true]])
   })
 
+  it('offers a slot-only template node through the shared slot editor', async () => {
+    const wrapper = mountPanel({
+      props: {
+        physicalConfig: {
+          refractiveIndex: 1.468,
+          nodeTemplate: {
+            slots: [{
+              id: 'template_slot',
+              type: 'Qubit',
+              backgroundNoise: { type: 'default', parameters: [] },
+            }],
+          },
+        },
+      },
+    })
+    const template = wrapper.get('.template-node')
+
+    expect(template.get('h4').text()).toBe('Template node')
+    expect(template.find('[aria-label="Show results"]').exists()).toBe(false)
+    expect(template.find('input[type="text"]').exists()).toBe(false)
+    expect(template.text()).not.toContain('Protocols')
+
+    await template.get('.add-slot-btn').trigger('click')
+    expect(wrapper.emitted('design-operations')[0][0]).toEqual([{
+      kind: 'slots.create',
+      template: true,
+      value: {
+        type: 'Qubit',
+        backgroundNoise: {
+          type: 'default',
+          doc: 'No background noise',
+          parameters: [],
+        },
+      },
+    }])
+
+    await template.get('.slot-icon').trigger('click')
+    expect(wrapper.emitted('design-operations')[1][0]).toEqual([{
+      kind: 'slots.update',
+      template: true,
+      slot_id: 'template_slot',
+      value: { type: 'Qumode' },
+    }])
+
+    await template.get('.bg-noise-select').setValue('ThermalNoise')
+    expect(wrapper.emitted('design-operations')[2][0]).toEqual([{
+      kind: 'slots.update',
+      template: true,
+      slot_id: 'template_slot',
+      value: {
+        backgroundNoise: {
+          type: 'ThermalNoise',
+          doc: 'Thermal background',
+          parameters: [{
+            field: 'rate',
+            type: 'Float64',
+            doc: 'Noise rate',
+            value: null,
+          }],
+        },
+      },
+    }])
+
+    await template.get('[aria-label="Delete slot"]').trigger('click')
+    expect(wrapper.emitted('design-operations')[3][0]).toEqual([{
+      kind: 'slots.remove',
+      template: true,
+      slot_id: 'template_slot',
+    }])
+  })
+
   it('shows drawing-control help on pointer hover and keyboard focus', async () => {
-    const wrapper = mount(LayoutToolsPanel, {
+    const wrapper = mountPanel({
       props: { annotationCreationEnabled: true },
     })
     const helpTitle = () => wrapper.get('#layout-tools-help-title').text()
@@ -106,7 +206,7 @@ describe('layout tools physical settings', () => {
     'Star Network Generator',
     'Graph Network Generator',
   ])('shows live help for %s on hover and focus', async label => {
-    const wrapper = mount(LayoutToolsPanel)
+    const wrapper = mountPanel()
     const button = wrapper.findAll('.helpers-card .helper-button')
       .find(candidate => candidate.text().includes(label))
 

@@ -48,102 +48,18 @@
       <!-- Section 2: Slots Table -->
       <section class="panel-section">
         <div class="panel-section-title">SLOTS ({{ props.node.data.slots.length }})</div>
-        <div v-if="props.node.data.slots.length > 0" class="slots-container">
-          <!-- Slots List -->
-          <div class="slots-list">
-            <div v-for="slot in props.node.data.slots" :key="slot.id" :class="{ 'slot-row-container': true, 'expanded-slot': slot.ui_expanded}">
-              <div :class="{ 'slot-row': true, 'expanded-slot': false }" >
-                <div v-if="batchEditMode" class="slot-cell checkbox-cell">
-                  <input 
-                    type="checkbox" 
-                    :checked="selectedSlots.has(slot.id)"
-                    @change="toggleSlotSelection(slot.id)"
-                    class="slot-checkbox"
-                  />
-                </div>
-                <div class="slot-cell type-cell">
-                  <SlotIcon 
-                    @click="switchSlotType(slot)" 
-                    :registerSlot="slot" 
-                    :node="props.node"
-                    :class="{ 'slot-type-icon--disabled': isNodeEditingLocked }"
-                    :style="{ cursor: isNodeEditingLocked ? 'not-allowed' : 'pointer' }" 
-                  />
-                </div>
-                <div class="slot-cell bg-noise-cell">
-                  <select :value="slot.backgroundNoise.type" @change="updateSlotBgNoise(slot, $event)" class="bg-noise-select" :disabled="editingLocked">
-                    <option v-for="opt in bgNoiseOptions" :key="opt.type" :value="opt.type">{{ opt.type == 'default' ? 'No background noise' : opt.type }}</option>
-                  </select>
-                </div>
-                <div class="slot-cell slot-order-cell">
-                  <button
-                    type="button"
-                    class="noborder"
-                    :disabled="editingLocked || props.node.data.slots[0] === slot"
-                    :aria-label="`Move slot ${slot.id} up`"
-                    @click="moveSlot(slot, -1)"
-                  >
-                    <ChevronUp :size="14" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    class="noborder"
-                    :disabled="editingLocked || props.node.data.slots.at(-1) === slot"
-                    :aria-label="`Move slot ${slot.id} down`"
-                    @click="moveSlot(slot, 1)"
-                  >
-                    <ChevronDown :size="14" aria-hidden="true" />
-                  </button>
-                </div>
-                <!-- <div class="slot-cell last-op-cell">
-                  {{slot.lastOperationTime}}
-                </div> -->
-                <SlotEditor 
-                  :registerSlot="slot"
-                  :node="props.node"
-                  @deleteSlot="deleteSlot(slot)" 
-                  @toggleDetails="toggleSlotExpanded(slot)"
-                />
-                
-              </div>
-              <div class="slot-row-expanded" v-if="slot.ui_expanded">
-                <b>Parameters</b>
-                <div class="bg-noise-param-rows">
-                  <div class="bg-noise-param-row" v-for="param in slot.backgroundNoise.parameters" :key="param.field">
-                    <div 
-                      v-tooltip.top="{
-                        value: api.getBackgroundNoiseParameterDefinition( slot.backgroundNoise.type, param.field )?.doc || 'NO DOC',
-                        pt: {
-                          arrow: {
-                            style: {
-                              borderTopColor: '#fff'
-                            }
-                          }
-                        }
-                      }"
-                      class="">
-                      {{ param.field }}
-                    </div>
-                    <div>
-                      <input
-                        type="number"
-                        :value="param.value"
-                        :disabled="editingLocked"
-                        @change="updateSlotNoiseParameter(slot, param, $event)"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="slot-controls">
-          <button type="button" class="add-slot-btn noborder" @click="addSlot">
-            <Plus :size="14" aria-hidden="true" />
-            Add Slot
-          </button>
-        </div>
+        <SlotsEditor
+          :slots="props.node.data.slots"
+          :node="props.node"
+          :disabled="editingLocked"
+          :selection-enabled="batchEditMode"
+          :selected-slot-ids="selectedSlots"
+          @add-slot="addSlot"
+          @remove-slot="deleteSlot"
+          @reorder-slot="moveSlot"
+          @toggle-selection="toggleSlotSelection"
+          @update-slot="updateSlot"
+        />
         
         <!-- Add N Slots Mini Form -->
         <div v-if="showAddNSlotsForm" class="add-n-slots-form">
@@ -273,17 +189,13 @@ import { api } from '../../utils/ApiConnector'
 import BasePanel from './BasePanel.vue'
 import FloatingProtocol from '../../models/FloatingProtocol'
 import ProtocolsManager from './ProtocolsManager.vue'
-import SlotIcon from '../map/SlotIcon.vue'
-import SlotEditor from './SlotEditor.vue'
+import SlotsEditor from './SlotsEditor.vue'
 import Menu from 'primevue/menu'
 import NodeIndex from './NodeIndex.vue'
 import {
-  ChevronDown,
-  ChevronUp,
   EllipsisVertical,
   ListChecks,
   ListPlus,
-  Plus,
   Trash2,
 } from '@lucide/vue'
 import LucideMenuIcon from '../LucideMenuIcon.vue'
@@ -327,7 +239,7 @@ const { showAlert } = useUiServices()
 
 const bgNoiseOptions = api.config.value.bgNoiseOptions;
 
-// Helper: get icon for slot type
+// Helper: get icon for the add-many and batch-edit slot templates.
 function typeIcon(type) {
   if (!type) return '•'
   const t = type; //.trim().toLowerCase()
@@ -337,57 +249,8 @@ function typeIcon(type) {
 }
 
 
-function updateSlotBgNoise(slot, event) {
-  const bgType = event.target.value
-  try {
-    const bgTypeDefinition = bgNoiseOptions.find(opt => opt.type === bgType);
-    const backgroundNoise = {
-      type: bgTypeDefinition.type,
-      doc: bgTypeDefinition.doc,
-      parameters: bgTypeDefinition.parameters.map(param => ({
-        field: param.field,
-        type: param.type,
-        doc: param.doc, 
-        value: null,
-      }))
-    }
-    emit('design-operations', [{
-      kind: 'slots.update',
-      node_id: props.node.id,
-      slot_id: slot.id,
-      value: { backgroundNoise }
-    }])
-  } catch (error) {
-    console.warn('Error updating slot background noise:', error)
-  }
-}
-
-function updateSlotNoiseParameter(slot, parameter, event) {
-  const value = Number(event.target.value)
-  if (!Number.isFinite(value)) {
-    event.target.value = parameter.value ?? ''
-    return
-  }
-  const backgroundNoise = {
-    ...slot.backgroundNoise,
-    parameters: slot.backgroundNoise.parameters.map(candidate => (
-      candidate.field === parameter.field ? { ...candidate, value } : { ...candidate }
-    ))
-  }
-  emit('design-operations', [{
-    kind: 'slots.update',
-    node_id: props.node.id,
-    slot_id: slot.id,
-    value: { backgroundNoise }
-  }])
-}
-
-function toggleSlotExpanded(slot) {
-  slot.ui_expanded = !slot.ui_expanded;
-}
-
 // Handler: add new slot
-function addSlot() {
+function addSlot(value) {
   // Prevent adding slots if simulation has run
   if (props.editingLocked) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
@@ -397,10 +260,7 @@ function addSlot() {
   emit('design-operations', [{
     kind: 'slots.create',
     node_id: props.node.id,
-    value: {
-      type: 'Qubit',
-      backgroundNoise: api.getDefaultBgNoise()
-    }
+    value,
   }])
 }
 
@@ -418,19 +278,29 @@ function deleteSlot(slot) {
   }])
 }
 
-function moveSlot(slot, offset) {
+function moveSlot({ slot, toIndex }) {
   if (props.editingLocked) {
     showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
     return
   }
-  const index = props.node.data.slots.findIndex(candidate => candidate.id === slot.id)
-  const toIndex = index + offset
-  if (index < 0 || toIndex < 0 || toIndex >= props.node.data.slots.length) return
   emit('design-operations', [{
     kind: 'slots.reorder',
     node_id: props.node.id,
     slot_id: slot.id,
     to_index: toIndex,
+  }])
+}
+
+function updateSlot({ slot, value }) {
+  if (props.editingLocked) {
+    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
+    return
+  }
+  emit('design-operations', [{
+    kind: 'slots.update',
+    node_id: props.node.id,
+    slot_id: slot.id,
+    value,
   }])
 }
 
@@ -710,20 +580,6 @@ function handleNameKey(e) {
   if (e.key === 'Escape') editingName.value = false
 }
 
-function switchSlotType(slot) {
-  if (isNodeEditingLocked.value) {
-    showAlert('Editing unavailable', SIMULATION_EDITING_LOCK_MESSAGE)
-    return
-  }
-  const type = slot.type === 'Qubit' ? 'Qumode' : 'Qubit'
-  emit('design-operations', [{
-    kind: 'slots.update',
-    node_id: props.node.id,
-    slot_id: slot.id,
-    value: { type }
-  }])
-}
-
 // Watch for justCreated to trigger name editing
 watch(
   () => props.justCreated,
@@ -750,13 +606,6 @@ if (props.justCreated) {
 
 
 <style scoped>
-.add-slot-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-
 .node-name {
   font-size: 1.15rem;
   font-weight: 500;
@@ -785,10 +634,6 @@ if (props.justCreated) {
   border-bottom: none;
 }
 
-.slot-type-icon--disabled {
-  opacity: 0.4;
-}
-
 .node-name-input {
   font-size: 1.08rem;
   font-weight: 500;
@@ -800,48 +645,12 @@ if (props.justCreated) {
   width: 90%;
   background: #fff;
 }
-/* New Flexbox-based Slots Layout */
-.slots-container {
-  margin-bottom: 0.62rem;
-}
-
-.slots-list {
-  /* max-height: 200px;
-  overflow-y: auto; */
-  overflow-x: hidden;
-  padding-right: 0px;
-  box-sizing: border-box;
-}
-
-.slot-row {
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid #f0f0f0;
-  height: 26px;
-  font-size: 1rem;
-}
-.slot-row-container {
-  border: solid 1px transparent;
-}
-
-.slot-row:hover {
-  background: #fafafa;
-}
-
 .slot-cell {
   display: flex;
   align-items: center;
   padding: 2px 3px;
   box-sizing: border-box;
   min-height: 25px;
-}
-
-/* Column-specific styles */
-.checkbox-header, .checkbox-cell {
-  width: 20px;
-  min-width: 20px;
-  max-width: 20px;
-  justify-content: center;
 }
 
 .type-header, .type-cell {
@@ -856,21 +665,6 @@ if (props.justCreated) {
   min-width: 0;
 }
 
-
-.last-op-header, .last-op-cell {
-  width: 80px;
-  min-width: 80px;
-  max-width: 80px;
-  justify-content: right;
-  padding-right: 10px;
-}
-
-
-.last-op-header {
-  padding-right: 15px;
-}
-
- 
 .type-icon {
   cursor: pointer;
   font-size: 1rem;
@@ -897,16 +691,6 @@ if (props.justCreated) {
 
  
  
- 
-
-/* Slot controls container */
-.slot-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-/* Options dropdown container */
  
 
 .options-btn {
@@ -1022,13 +806,6 @@ if (props.justCreated) {
 }
 
 
-/* Batch Edit Styles */
-.slot-checkbox {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
 .batch-edit-form {
   margin-top: 12px;
   padding: 12px 0px;
@@ -1072,42 +849,6 @@ if (props.justCreated) {
   border-radius: 4px;
   font-size: 12px;
   color: #1565c0;
-}
-
- 
-
-.expanded-slot{
-  border-radius: 4px 4px 0px 0px;
-  margin: 0px 0px 10px;
-  border: solid 1px #4345ac30;
-}
-
-.expanded-slot .slot-row {
-  background: #f1f2fe;
-  margin-bottom: 0px;
-  border-bottom: none;
-}
-
-.slot-row-expanded {
-  padding: 10px;
-  position: relative;
-}
-  
-.bg-noise-param-rows{
-  display: flex;
-  flex-direction: column;
-}
-.bg-noise-param-row{
-  padding: 3px 3px;
-  display: flex;
-  flex-direction: row;
-  flex: 1;
-}
-.bg-noise-param-row input{
-      margin-left: 5px;
-    width: 70px;
-    padding: 0 5px;
-    text-align: right;
 }
 
 </style>

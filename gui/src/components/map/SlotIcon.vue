@@ -22,7 +22,7 @@ import { Circle, CircleSlash2 } from '@lucide/vue'
 
 const props = defineProps({
   registerSlot: { type: Object, required: true },
-  node: { type: Object, required: true }
+  node: { type: Object, default: null }
 });
 
 function getSlotColor(){
