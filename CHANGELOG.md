@@ -4,6 +4,9 @@
 
 - Watermarked every generated protocol, slot-state, and States Zoo PNG in the browser with
   `QuantumSavory.org`.
+- Made nullable protocol Tag parameters use the shared Default/Nothing/Tag type selector and
+  reveal the named-tag autocomplete only for Tag, while retaining the direct autocomplete for
+  Tag-only parameters.
 
 ## 1.9.1
 

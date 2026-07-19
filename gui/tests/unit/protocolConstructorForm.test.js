@@ -39,9 +39,9 @@ const tooltip = {
 
 const NamedTagTypeAutocompleteStub = {
   name: 'NamedTagTypeAutocomplete',
-  props: ['modelValue', 'nullable', 'disabled', 'parameterName', 'ariaDescribedby'],
+  props: ['modelValue', 'includeDefault', 'disabled', 'parameterName', 'ariaDescribedby'],
   emits: ['update:modelValue'],
-  template: '<button type="button" class="named-tag-type-stub" :disabled="disabled" :data-value="String(modelValue)" :data-nullable="String(nullable)">Named tag type</button>'
+  template: '<button type="button" class="named-tag-type-stub" :disabled="disabled" :data-value="String(modelValue)" :data-include-default="String(includeDefault)">Named tag type</button>'
 }
 
 function mountForm(props, { stubs = {} } = {}) {
@@ -236,7 +236,7 @@ describe('ProtocolConstructorForm', () => {
     expect(wrapper.get('input[type="number"]').attributes('disabled')).toBeDefined()
   })
 
-  it('uses live semantic metadata for old nullable tag snapshots and persists exact IDs', async () => {
+  it('uses the standard union selector for old nullable tag snapshots', async () => {
     api._config.value = {
       protocolTypes: {
         node: [],
@@ -258,7 +258,7 @@ describe('ProtocolConstructorForm', () => {
       name: 'tag',
       type: ['Nothing', 'DataType'],
       selectedType: 'DataType',
-      value: null
+      value: 'nothing'
     }
     const wrapper = mountForm({
       protocol: { type: ENTANGLER_TYPE, parameters: [parameter] },
@@ -267,15 +267,15 @@ describe('ProtocolConstructorForm', () => {
     }, {
       stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
     })
-    const control = wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' })
-
-    expect(control.props()).toMatchObject({
-      modelValue: null,
-      nullable: true,
-      disabled: false,
-      parameterName: 'tag'
-    })
-    expect(wrapper.find('.complexTypeSelector').exists()).toBe(false)
+    const typeSelector = wrapper.get('.complexTypeSelector')
+    expect(typeSelector.findAll('option').map(option => option.text())).toEqual([
+      'Default',
+      'Nothing',
+      'Tag'
+    ])
+    expect(typeSelector.element.value).toBe('Nothing')
+    expect(parameter.selectedType).toBe('Nothing')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
     expect(wrapper.find('.unknown-type-indicator').exists()).toBe(false)
     expect(wrapper.get('.param-item-row').classes()).not.toContain('grayed-parameter')
     expect(wrapper.get('[aria-label="Set tag from a variable"]').attributes('disabled'))
@@ -283,24 +283,126 @@ describe('ProtocolConstructorForm', () => {
     expect(wrapper.get('.variable-binding-control').attributes('data-tooltip'))
       .toContain('cannot use Variables yet')
 
+    await typeSelector.setValue('default')
+    expect(parameter.value).toBeNull()
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
+
+    await typeSelector.setValue('DataType')
+    let control = wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' })
+    expect(control.props()).toMatchObject({
+      modelValue: null,
+      includeDefault: false,
+      disabled: false,
+      parameterName: 'tag'
+    })
+
+    const refreshedParameter = {
+      ...parameter,
+      selectedType: 'DataType',
+      value: null
+    }
+    await wrapper.setProps({
+      protocol: { type: ENTANGLER_TYPE, parameters: [refreshedParameter] }
+    })
+    await nextTick()
+    control = wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' })
+    expect(refreshedParameter.selectedType).toBe('DataType')
+
     control.vm.$emit('update:modelValue', NAMED_TAG_ID)
     await nextTick()
-    expect(parameter.value).toBe(NAMED_TAG_ID)
-    expect(parameter.type).toEqual(['Nothing', 'DataType'])
-
-    control.vm.$emit('update:modelValue', 'nothing')
-    await nextTick()
-    expect(parameter.value).toBe('nothing')
-
-    control.vm.$emit('update:modelValue', null)
-    await nextTick()
-    expect(parameter.value).toBeNull()
+    expect(refreshedParameter.value).toBe(NAMED_TAG_ID)
+    expect(refreshedParameter.type).toEqual(['Nothing', 'DataType'])
 
     await wrapper.setProps({ editingLocked: true })
     expect(control.props('disabled')).toBe(true)
-    control.vm.$emit('update:modelValue', NAMED_TAG_ID)
+    control.vm.$emit('update:modelValue', 'Example.Other.Tag')
     await nextTick()
-    expect(parameter.value).toBeNull()
+    expect(refreshedParameter.value).toBe(NAMED_TAG_ID)
+  })
+
+  it('keeps the old nullable-tag Default representation backward compatible', () => {
+    api._config.value = {
+      protocolTypes: {
+        node: [],
+        floating: [],
+        edge: [{
+          type: ENTANGLER_TYPE,
+          group: 'edge',
+          parameters: [{
+            field: 'tag',
+            type: 'Union{Nothing, Type{<:QuantumSavory.AbstractTag}}',
+            kind: 'named_tag_type',
+            nullable: true
+          }]
+        }]
+      }
+    }
+    const parameter = {
+      name: 'tag',
+      type: ['Nothing', 'DataType'],
+      selectedType: 'DataType',
+      value: null
+    }
+    const wrapper = mountForm({
+      protocol: { type: ENTANGLER_TYPE, parameters: [parameter] },
+      category: 'edge'
+    }, {
+      stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
+    })
+
+    expect(parameter.selectedType).toBe('default')
+    expect(wrapper.get('.complexTypeSelector').element.value).toBe('default')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
+  })
+
+  it('does not carry an empty Tag branch into another protocol with the same field name', async () => {
+    const otherProtocolType = 'Example.OtherTagProtocol'
+    const nullableTagParameter = {
+      field: 'tag',
+      type: 'Union{Nothing, Type{<:QuantumSavory.AbstractTag}}',
+      kind: 'named_tag_type',
+      nullable: true
+    }
+    api._config.value = {
+      protocolTypes: {
+        node: [],
+        floating: [],
+        edge: [{
+          type: ENTANGLER_TYPE,
+          group: 'edge',
+          parameters: [nullableTagParameter]
+        }, {
+          type: otherProtocolType,
+          group: 'edge',
+          parameters: [nullableTagParameter]
+        }]
+      }
+    }
+    const wrapper = mountForm({
+      protocol: {
+        type: ENTANGLER_TYPE,
+        parameters: [{ name: 'tag', selectedType: 'default', value: null }]
+      },
+      category: 'edge'
+    }, {
+      stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
+    })
+
+    await wrapper.get('.complexTypeSelector').setValue('DataType')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
+
+    const otherParameter = { name: 'tag', selectedType: 'DataType', value: null }
+    await wrapper.setProps({
+      protocol: {
+        type: otherProtocolType,
+        parameters: [otherParameter]
+      }
+    })
+    await nextTick()
+
+    expect(otherParameter.selectedType).toBe('default')
+    expect(wrapper.get('.complexTypeSelector').element.value).toBe('default')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
   })
 
   it('uses non-nullable live Consumer metadata instead of a saved Any type', () => {
@@ -331,7 +433,9 @@ describe('ProtocolConstructorForm', () => {
       stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
     })
 
-    expect(wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' }).props('nullable')).toBe(false)
+    expect(wrapper.find('.complexTypeSelector').exists()).toBe(false)
+    expect(wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' }).props('includeDefault'))
+      .toBe(true)
     expect(wrapper.get('.param-item-row').classes()).not.toContain('grayed-parameter')
     expect(wrapper.find('.unknown-type-indicator').exists()).toBe(false)
   })
@@ -405,7 +509,8 @@ describe('ProtocolConstructorForm', () => {
 
     expect(parameter.value).toBeNull()
     expect(wrapper.find('.variable-selector').exists()).toBe(false)
-    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
+    expect(wrapper.get('.complexTypeSelector').element.value).toBe('default')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
   })
 
   it('keeps the existing ProtocolEditor chrome and parameter selectors', async () => {
