@@ -1,5 +1,12 @@
 import { MercatorCoordinate } from 'maplibre-gl'
 import { generateUUid, setEdgeCorrectNodeOrder } from './Utils'
+import { isMapPosition } from './mapCoordinates'
+
+const PROJECTED_BOUNDARY_TOLERANCE = 1e-7
+
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, value))
+}
 
 export function endpointId(endpoint) {
   return endpoint?.id ?? endpoint
@@ -9,15 +16,7 @@ export function edgeHasNode(edge, nodeId) {
   return endpointId(edge.source) === nodeId || endpointId(edge.target) === nodeId
 }
 
-export function isMapPosition(position) {
-  return Array.isArray(position)
-    && position.length === 2
-    && position.every(coordinate => Number.isFinite(coordinate))
-    && position[0] >= -180
-    && position[0] <= 180
-    && position[1] >= -90
-    && position[1] <= 90
-}
+export { isMapPosition }
 
 export function assertGeneratedMapPosition(position) {
   if (!isMapPosition(position)) {
@@ -37,14 +36,17 @@ export function projectMapPosition(position) {
     lat: position[1]
   })
   if (![projected.x, projected.y].every(Number.isFinite)
-    || projected.x < 0
-    || projected.x > 1
-    || projected.y < 0
-    || projected.y > 1) {
+    || projected.x < -PROJECTED_BOUNDARY_TOLERANCE
+    || projected.x > 1 + PROJECTED_BOUNDARY_TOLERANCE
+    || projected.y < -PROJECTED_BOUNDARY_TOLERANCE
+    || projected.y > 1 + PROJECTED_BOUNDARY_TOLERANCE) {
     throw new Error('Layout templates must be within the Web Mercator map bounds.')
   }
   // Invert Mercator's screen-like y axis so positive angles rotate counterclockwise.
-  return [projected.x, -projected.y]
+  return [
+    clamp(projected.x, 0, 1),
+    -clamp(projected.y, 0, 1),
+  ]
 }
 
 export function unprojectMapPosition(position) {

@@ -4,6 +4,9 @@
 
 - Watermarked every generated protocol, slot-state, and States Zoo PNG in the browser with
   `QuantumSavory.org`.
+- Kept curved-edge drawing and geodesic length calculation stable during world-wrapped
+  node drags by previewing moves outside project state, transactionally rejecting unsupported
+  geometry with an in-app warning, and restoring the node and curve handle.
 
 ## 1.9.1
 

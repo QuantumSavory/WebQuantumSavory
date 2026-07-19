@@ -2,15 +2,31 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import BaseMap from '../../src/components/map/BaseMap.vue'
+import Edge from '../../src/models/Edge'
+import Node from '../../src/models/Node'
 
 const mapConstructor = vi.hoisted(() => vi.fn())
-
-vi.mock('maplibre-gl', () => ({
-  default: {
-    Map: mapConstructor,
-    NavigationControl: vi.fn()
-  }
+const slotConnectionUtils = vi.hoisted(() => ({
+  findSlotElements: vi.fn(() => []),
+  calculateStateNodePosition: vi.fn(() => [0, 0]),
+  getSlotMapPosition: vi.fn(() => [0, 0]),
+  generateConnectionId: vi.fn((stateId, slotId) => `${stateId}-${slotId}`),
 }))
+
+vi.mock('maplibre-gl', async importOriginal => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    MercatorCoordinate: actual.MercatorCoordinate ?? actual.default.MercatorCoordinate,
+    default: {
+      ...actual.default,
+      Map: mapConstructor,
+      NavigationControl: vi.fn(),
+    },
+  }
+})
+
+vi.mock('../../src/utils/SlotConnectionUtils', () => slotConnectionUtils)
 
 let wrapper
 
@@ -18,6 +34,11 @@ afterEach(() => {
   wrapper?.unmount()
   wrapper = undefined
   mapConstructor.mockReset()
+  slotConnectionUtils.findSlotElements.mockReset().mockReturnValue([])
+  slotConnectionUtils.calculateStateNodePosition.mockReset().mockReturnValue([0, 0])
+  slotConnectionUtils.getSlotMapPosition.mockReset().mockReturnValue([0, 0])
+  slotConnectionUtils.generateConnectionId.mockReset()
+    .mockImplementation((stateId, slotId) => `${stateId}-${slotId}`)
 })
 
 describe('BaseMap initialization', () => {
@@ -134,6 +155,98 @@ describe('BaseMap initialization', () => {
 
     expect(wrapper.emitted('map-click')).toBeUndefined()
     expect(wrapper.emitted('select')).toBeUndefined()
+  })
+
+  it('keeps node drags in ephemeral route previews until the caller finishes', async () => {
+    const map = makeInteractiveMap()
+    const nodeA = new Node({ id: 'a', name: 'A', position: [-72, 42] })
+    const nodeB = new Node({ id: 'b', name: 'B', position: [-70, 42] })
+    const edge = new Edge({
+      id: 'edge',
+      source: nodeA,
+      target: nodeB,
+      data: {
+        protocols: [],
+        curvePoints: [{ id: 'curve', position: [-71, 44], type: 'smooth' }],
+        physicalOverrides: null,
+      },
+    })
+    const NodeMarkerStub = {
+      name: 'NodeMarker',
+      props: ['node'],
+      emits: ['nodePositionPreview', 'nodePositionChanged'],
+      template: '<button class="node-marker-stub" />',
+    }
+    const EdgeLineStub = {
+      name: 'EdgeLine',
+      props: ['edge', 'positionOverrides'],
+      template: '<div class="edge-line-stub" />',
+    }
+    mapConstructor.mockImplementation(() => map)
+    wrapper = mount(BaseMap, {
+      props: { nodes: [nodeA, nodeB], edges: [edge] },
+      global: {
+        stubs: {
+          NodeMarker: NodeMarkerStub,
+          EdgeLine: EdgeLineStub,
+          StateNode: true,
+          StateConnectionOverlay: true,
+        },
+      },
+    })
+    map.handlers.get('load')()
+    await nextTick()
+
+    const nodeMarker = wrapper.findAllComponents(NodeMarkerStub)[1]
+    const edgeLine = wrapper.getComponent(EdgeLineStub)
+    const markerListeners = nodeMarker.vm.$.vnode.props
+    markerListeners.onNodePositionPreview({
+      node: nodeB,
+      position: [-69, 43],
+      previousPosition: [-70, 42],
+    })
+    await nextTick()
+
+    expect(edgeLine.props('positionOverrides').get(nodeB.id)).toEqual([-69, 43])
+    expect(nodeB.position).toEqual([-70, 42])
+
+    markerListeners.onNodePositionPreview({
+      node: nodeB,
+      position: [181, 42],
+      previousPosition: [-70, 42],
+    })
+    await nextTick()
+    expect(edgeLine.props('positionOverrides').get(nodeB.id)).toEqual([-69, 43])
+
+    const slotElement = document.createElement('span')
+    const slotReference = { nodeId: nodeB.id, slotId: 'slot-b' }
+    slotConnectionUtils.findSlotElements.mockReturnValue([{
+      ...slotReference,
+      slotElement,
+      slotRef: slotReference,
+    }])
+    slotConnectionUtils.calculateStateNodePosition.mockReturnValue([-70, 42])
+    slotConnectionUtils.getSlotMapPosition.mockReturnValue([-70, 42])
+    expect(wrapper.vm.showSlotConnectionState({
+      id: 'state',
+      slots: [slotReference],
+    })).toBe(true)
+
+    const finishMarker = vi.fn()
+    markerListeners.onNodePositionChanged({
+      node: nodeB,
+      position: [181, 42],
+      previousPosition: [-70, 42],
+      finish: finishMarker,
+    })
+    const change = wrapper.emitted('node-position-changed').at(-1)[0]
+    slotConnectionUtils.calculateStateNodePosition.mockClear()
+    change.finish()
+    expect(edgeLine.props('positionOverrides').has(nodeB.id)).toBe(false)
+    expect(finishMarker).toHaveBeenCalledOnce()
+    expect(slotConnectionUtils.calculateStateNodePosition).toHaveBeenCalledOnce()
+    expect(finishMarker.mock.invocationCallOrder[0])
+      .toBeLessThan(slotConnectionUtils.calculateStateNodePosition.mock.invocationCallOrder[0])
   })
 
   it.each(['Delete', 'Backspace'])('deletes the selected annotation with %s', async key => {

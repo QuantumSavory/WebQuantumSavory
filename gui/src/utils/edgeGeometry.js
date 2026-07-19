@@ -3,14 +3,15 @@ import length from '@turf/length'
 import { Bezier } from 'bezier-js'
 
 import {
-  isMapPosition,
   projectMapPosition,
   unprojectMapPosition,
 } from './layoutTemplates'
+import { isMapPosition } from './mapCoordinates'
 
 export const SPEED_OF_LIGHT_METERS_PER_SECOND = 299_792_458
 export const DEFAULT_REFRACTIVE_INDEX = 1.468
 export const CURVE_POINT_TYPES = Object.freeze(['smooth', 'sharp'])
+export const INVALID_EDGE_GEOMETRY_REASON = 'INVALID_EDGE_GEOMETRY'
 
 const MIN_CURVE_SAMPLES = 8
 const MAX_CURVE_SAMPLES = 4096
@@ -18,6 +19,18 @@ const MIN_PROJECTED_X = 0
 const MAX_PROJECTED_X = 1
 const MIN_PROJECTED_Y = -1
 const MAX_PROJECTED_Y = 0
+
+export class EdgeGeometryError extends Error {
+  constructor(edge, cause) {
+    super(
+      'The change was not applied because it would make an edge impossible '
+      + 'to draw or measure. Keep nodes and curve points within one supported map world.',
+      { cause },
+    )
+    this.name = 'EdgeGeometryError'
+    this.edgeId = edge?.id ?? null
+  }
+}
 
 function coordinatePair(point) {
   return [point.x, point.y]
@@ -164,13 +177,22 @@ function threeSignificantDigitKey(value) {
   return Number(value.toPrecision(3)).toString()
 }
 
+function endpointPosition(endpoint, positionOverrides) {
+  const override = endpoint?.id == null
+    ? null
+    : positionOverrides?.get?.(endpoint.id)
+  return override
+    ?? endpoint?.getPosition?.()
+    ?? endpoint?.position
+}
+
 /**
  * Return the one sampled GeoJSON route shared by drawing, hit testing, length,
  * midpoint, and physical-delay resolution.
  */
 export function sampleEdgeRoute(edge, options = {}) {
-  const sourcePosition = edge?.source?.getPosition?.() ?? edge?.source?.position
-  const targetPosition = edge?.target?.getPosition?.() ?? edge?.target?.position
+  const sourcePosition = endpointPosition(edge?.source, options.positionOverrides)
+  const targetPosition = endpointPosition(edge?.target, options.positionOverrides)
   const curvePoints = edge?.isLogic === true ? [] : (edge?.data?.curvePoints ?? [])
   const { positions } = routeDefinition(sourcePosition, targetPosition, curvePoints)
 
@@ -227,12 +249,12 @@ export function sampleEdgeRoute(edge, options = {}) {
 }
 
 /** Project a map click onto the closest cubic segment of an edge route. */
-export function projectPointOntoEdge(edge, mapPosition) {
+export function projectPointOntoEdge(edge, mapPosition, options = {}) {
   if (!isMapPosition(mapPosition)) {
     throw new Error('The curve insertion point must be a valid map position.')
   }
-  const sourcePosition = edge?.source?.getPosition?.() ?? edge?.source?.position
-  const targetPosition = edge?.target?.getPosition?.() ?? edge?.target?.position
+  const sourcePosition = endpointPosition(edge?.source, options.positionOverrides)
+  const targetPosition = endpointPosition(edge?.target, options.positionOverrides)
   const curvePoints = edge?.data?.curvePoints ?? []
   const projectedClick = projectMapPosition(mapPosition)
   const segments = bezierSegments(sourcePosition, targetPosition, curvePoints)
@@ -252,6 +274,49 @@ export function projectPointOntoEdge(edge, mapPosition) {
   return closest
 }
 
+/**
+ * Assert the render/length invariant shared by map previews and design commits.
+ * Returning the sample lets callers avoid immediately calculating it again.
+ */
+export function assertEdgeGeometry(edge, options = {}) {
+  try {
+    const sampled = sampleEdgeRoute(edge, options)
+    const coordinates = sampled.line?.geometry?.coordinates
+    if (
+      !Array.isArray(coordinates)
+      || coordinates.length < 2
+      || !coordinates.every(isMapPosition)
+      || !isMapPosition(sampled.midpoint)
+      || !Number.isFinite(sampled.distanceMeters)
+      || sampled.distanceMeters < 0
+      || sampled.converged !== true
+    ) {
+      throw new Error('The sampled edge route is not finite and converged.')
+    }
+    return sampled
+  } catch (error) {
+    if (error instanceof EdgeGeometryError) throw error
+    throw new EdgeGeometryError(edge, error)
+  }
+}
+
+export function assertEdgeGeometries(edges, options = {}) {
+  for (const edge of edges || []) assertEdgeGeometry(edge, options)
+}
+
+/** Validate only the routes whose endpoint would move, without mutating a node. */
+export function assertNodeMoveGeometry(node, position, edges) {
+  if (!isMapPosition(position)) {
+    throw new EdgeGeometryError(null, new Error('The node position is outside map bounds.'))
+  }
+  const positionOverrides = new Map([[node.id, [...position]]])
+  const connectedEdges = (edges || []).filter(edge => (
+    edge?.source?.id === node.id || edge?.target?.id === node.id
+  ))
+  assertEdgeGeometries(connectedEdges, { positionOverrides })
+  return position
+}
+
 function finiteNonnegative(value, name) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     throw new Error(`${name} must be a finite nonnegative number.`)
@@ -267,10 +332,10 @@ function finitePositive(value, name) {
 }
 
 /** Resolve persisted overrides to the physical values used by badges and payloads. */
-export function resolveEdgePhysicalProperties(edge, physicalConfig = {}) {
+export function resolveEdgePhysicalProperties(edge, physicalConfig = {}, options = {}) {
   if (edge?.isLogic === true) return null
 
-  const sampled = sampleEdgeRoute(edge)
+  const sampled = sampleEdgeRoute(edge, options)
   const overrides = edge?.data?.physicalOverrides
   const manualDelay = overrides?.delaySeconds != null
   const propagationDelaySeconds = manualDelay

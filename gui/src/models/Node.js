@@ -1,5 +1,6 @@
 import Slot from './Slot'
 import { generateUUid } from '../utils/Utils'
+import { isMapPosition } from '../utils/mapCoordinates'
 /**
  * Represents a node in the map
  */
@@ -13,7 +14,7 @@ export default class Node {
    * @param {Object} [options.data={}] - Additional data associated with the node
    */
   constructor({ id, name, position, data = { slots:[]} }) {
-    if (!id || !position || !Array.isArray(position) || position.length !== 2) {
+    if (!id || !isMapPosition(position)) {
       throw new Error('Node requires id and valid position [longitude, latitude]')
     }
 
@@ -48,16 +49,8 @@ export default class Node {
    * @returns {boolean} - Success status
    */
   updatePosition(newPosition) {
-    if (!Array.isArray(newPosition) || newPosition.length !== 2) {
-      console.error('Invalid position format. Expected [longitude, latitude]')
-      return false
-    }
-
-    const [longitude, latitude] = newPosition
-
-    // Basic validation for coordinates
-    if (longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) {
-      console.error('Invalid coordinates. Longitude: -180 to 180, Latitude: -90 to 90')
+    if (!isMapPosition(newPosition)) {
+      console.error('Invalid coordinates for the supported Web Mercator map area')
       return false
     }
 
@@ -97,4 +90,4 @@ export default class Node {
       data: { ...this.data }
     }
   }
-} 
+}
