@@ -35,7 +35,7 @@
       
       <!-- PNG View -->
       <div v-else-if="currentView === 'png'" class="image-container">
-        <img v-if="imgSrc" :src="'data:image/png;base64,'+imgSrc" :alt="imageAlt" />
+        <img v-if="imgSrc" :src="imgSrc" :alt="imageAlt" />
         <div v-else class="no-content">There is no valid plot currently</div> 
       </div>
       
@@ -62,6 +62,7 @@
 import { watch, onUnmounted, ref, onMounted, computed } from 'vue'
 import { LoaderCircle, X } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
+import { watermarkGeneratedPng } from '../../utils/pngWatermark'
 
 const props = defineProps({
   windowId: {
@@ -232,8 +233,15 @@ async function fetchResults() {
     
     if (generation !== fetchGeneration || projectName !== props.projectData?.name) return
 
+    const watermarkedPng = response?.png_base64
+      ? await watermarkGeneratedPng(response.png_base64, {
+        signal: fetchAbortController.signal,
+      })
+      : null
+    if (generation !== fetchGeneration || projectName !== props.projectData?.name) return
+
     // Set PNG content
-    imgSrc.value = response?.png_base64
+    imgSrc.value = watermarkedPng
     
     // Set HTML content if available
     if (response?.html_base64) {

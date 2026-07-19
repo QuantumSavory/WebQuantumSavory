@@ -17,6 +17,9 @@
 - `src/components/ui/` contains shared application primitives. Dialogs compose `AppDialog`, and common actions use `AppButton`; keep application-shell dependencies out of these reusable components.
 - `src/components/ui/MarkdownEditor.vue` owns the reusable safe Markdown/KaTeX edit, render, and clipboard-image lifecycle used by project descriptions and selected annotations; every instance must have unique accessible editor/help IDs.
 - `src/utils/markdown.js` owns the configured safe Markdown/KaTeX renderer shared by descriptions and tooltips; `src/directives/markdownTooltip.js` wraps PrimeVue's directive while preserving its behavioral binding options and reactivity.
+- `src/utils/pngWatermark.js` is the sole browser compositing boundary for server-generated
+  protocol, slot-state, and States Zoo PNGs. Route every new generated PNG surface through it
+  and never expose unwatermarked bytes as a failure fallback.
 - `src/utils/projectCodec.js` is the schema boundary for empty projects, stored-project decoding/encoding, backend payloads, script-export payloads, and summaries. `src/models/ProjectStore.js` owns local-storage persistence, while `src/composables/useProjectSession.js` owns named-project transitions and session cleanup.
 - `src/composables/simulationLifecycle.js` defines the pure phase reducer and capability model. `src/composables/useSimulationController.js` owns backend simulation commands, state/log/aliveness polling, and lifecycle cleanup; consumers should use its phase and capability contracts rather than reconstructing status.
 - `src/utils/logRecords.js` owns log severity, source, and simulator-group normalization plus record comparison semantics. `LogsPanel` owns only transient filter and disclosure state and presentation.

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Watermarked every generated protocol, slot-state, and States Zoo PNG in the browser with
+  `QuantumSavory.org`.
+
 ## 1.9.1
 
 - Added project-persisted template-node slots and background-noise settings to Physical Defaults, with fresh independent slot copies applied through every standard node-creation path.

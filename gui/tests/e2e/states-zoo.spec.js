@@ -162,6 +162,16 @@ async function addState(page, panel) {
   return row
 }
 
+async function expectWatermarkedPng(image, sourcePng, previousSource) {
+  const rawSource = `data:image/png;base64,${sourcePng}`
+  await expect(image).toHaveAttribute('src', /^data:image\/png;base64,/)
+  await expect.poll(async () => {
+    const source = await image.getAttribute('src')
+    return source !== rawSource && source !== previousSource
+  }).toBe(true)
+  return image.getAttribute('src')
+}
+
 async function addNodeWithSymbolicProtocol(page) {
   await page.keyboard.down('Alt')
   await page.locator('canvas').first().click({ position: { x: 450, y: 300 } })
@@ -707,7 +717,7 @@ test.describe('States Zoo variables', () => {
     const row = await addState(page, panel)
     const image = row.locator('.states-zoo-preview-image')
     const preview = row.locator('.states-zoo-preview')
-    await expect(image).toHaveAttribute('src', `data:image/png;base64,${TRANSPARENT_PNG}`)
+    const initialImage = await expectWatermarkedPng(image, TRANSPARENT_PNG)
 
     const typePreview = page.waitForResponse(response => (
       response.url().endsWith('/states_zoo_preview') && response.ok()
@@ -726,7 +736,7 @@ test.describe('States Zoo variables', () => {
     await expect.poll(() => previewRequests.length).toBe(requestBaseline + 1)
     await expect(preview).toHaveAttribute('aria-busy', 'true')
     await expect(row.locator('.states-zoo-preview-overlay')).toBeVisible()
-    await expect(image).toHaveAttribute('src', `data:image/png;base64,${TRANSPARENT_PNG}`)
+    await expect(image).toHaveAttribute('src', initialImage)
 
     const debouncedPreview = pendingPreviews.shift()
     await debouncedPreview.route.fulfill({
@@ -734,7 +744,7 @@ test.describe('States Zoo variables', () => {
       contentType: 'application/json',
       json: { success: true, png_base64: RED_PNG },
     })
-    await expect(image).toHaveAttribute('src', `data:image/png;base64,${RED_PNG}`)
+    const redImage = await expectWatermarkedPng(image, RED_PNG, initialImage)
     await expect(preview).toHaveAttribute('aria-busy', 'false')
 
     await parameterInput.fill('0.5')
@@ -748,25 +758,25 @@ test.describe('States Zoo variables', () => {
       contentType: 'application/json',
       json: { success: true, png_base64: BLUE_PNG },
     })
-    await expect(image).toHaveAttribute('src', `data:image/png;base64,${BLUE_PNG}`)
+    const blueImage = await expectWatermarkedPng(image, BLUE_PNG, redImage)
     await stalePreview.route.fulfill({
       status: 200,
       contentType: 'application/json',
       json: { success: true, png_base64: TRANSPARENT_PNG },
     }).catch(() => {})
     await page.waitForTimeout(100)
-    await expect(image).toHaveAttribute('src', `data:image/png;base64,${BLUE_PNG}`)
+    await expect(image).toHaveAttribute('src', blueImage)
 
     previewBehavior = 'error'
     await parameterInput.fill('0.7')
     await expect(row.locator('.states-zoo-preview-error')).toContainText('Preview failed')
-    await expect(image).toHaveAttribute('src', `data:image/png;base64,${BLUE_PNG}`)
+    await expect(image).toHaveAttribute('src', blueImage)
     const retryButton = row.getByRole('button', { name: 'Retry preview' })
     await expect(retryButton).toBeEnabled()
 
     previewBehavior = 'success'
     await retryButton.click()
-    await expect(image).toHaveAttribute('src', `data:image/png;base64,${TRANSPARENT_PNG}`)
+    await expectWatermarkedPng(image, TRANSPARENT_PNG, blueImage)
     await expect(row.locator('.states-zoo-preview-error')).toHaveCount(0)
 
     const beforeDelete = previewRequests.length
