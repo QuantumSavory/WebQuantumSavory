@@ -232,6 +232,20 @@
     lambda_protocol_id = lambda_payload["net"]["edges"][1]["data"]["protocols"][1]["id"]
     @test lambda_protocols[lambda_protocol_id].chooseslotA(7)
 
+    # Exported node functions must not gain edge-only values merely because the
+    # generated script has physical edges elsewhere.
+    node_only_expression = WebQuantumSavory._script_custom_function_expression(
+      "() -> (node_a, delay)",
+      1,
+      "Node-only context regression",
+    )
+    @test !occursin("node_a =", node_only_expression)
+    @test !occursin("delay =", node_only_expression)
+    node_only_module = Module(gensym(:NodeOnlyContextExport))
+    Core.eval(node_only_module, :(using Base))
+    node_only_function = Core.eval(node_only_module, Meta.parse(node_only_expression))
+    @test_throws UndefVarError node_only_function()
+
     forged_lambda_payload = deepcopy(tagged_payload)
     forged_lambda_parameters =
       forged_lambda_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
@@ -1091,6 +1105,15 @@
 
         ordinary_length = WebQuantumSavory.create_lambda("values -> length(values)")
         @test ordinary_length([1, 2, 3]) == 3
+
+        for self_node_index in (1, nothing), edge_only_name in ("node_a", "delay")
+          node_or_floating_function = WebQuantumSavory.create_lambda(
+            "() -> $edge_only_name";
+            node_name_to_index=node_name_to_index,
+            self_node_index=self_node_index,
+          )
+          @test_throws UndefVarError node_or_floating_function()
+        end
 
         # Edge and floating functions receive `nodeid`, but no `self` binding.
         for ctx in (

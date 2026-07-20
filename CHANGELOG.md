@@ -12,6 +12,8 @@
 - Made nullable protocol Tag parameters use the shared Default/Nothing/Tag type selector and
   reveal the named-tag autocomplete only for Tag, while retaining the direct autocomplete for
   Tag-only parameters.
+- Added edge distance, delay, refractive index, and endpoint IDs as runtime/export-parity
+  custom-function context, with the expanded reference moved into a compact helper popup.
 
 ## 1.9.1
 
