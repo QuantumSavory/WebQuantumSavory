@@ -50,6 +50,12 @@ test('version badge opens complete system information with exact locked dependen
     await expect(dialog.getByTestId('system-quantumsavory-commit')).toHaveCount(0)
   }
 
+  const changelog = dialog.getByTestId('system-changelog')
+  await expect(changelog.getByRole('heading', { name: 'Changelog', level: 1 })).toBeVisible()
+  await expect(changelog.getByRole('heading', { name: 'Unreleased', level: 2 })).toBeVisible()
+  await expect(changelog.getByRole('heading', { name: '1.9.1', level: 2 })).toBeVisible()
+  await expect(changelog).toContainText('project-persisted template-node slots')
+
   const dependencyGroups = [
     ['Runtime dependencies', 'system-runtime-dependencies', 'dependencies'],
     ['Development dependencies', 'system-development-dependencies', 'devDependencies'],

@@ -12,6 +12,8 @@
 - Made nullable protocol Tag parameters use the shared Default/Nothing/Tag type selector and
   reveal the named-tag autocomplete only for Tag, while retaining the direct autocomplete for
   Tag-only parameters.
+- Rendered the repository changelog in System Information through the shared safe
+  Markdown presentation pipeline.
 
 ## 1.9.1
 
