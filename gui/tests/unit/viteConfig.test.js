@@ -14,8 +14,10 @@ describe('Vite development proxy', () => {
 
   it('injects the repository changelog without broadening the development file allowlist', () => {
     const changelog = JSON.parse(viteConfig.define.__WEBQUANTUMSAVORY_CHANGELOG__)
+    const buildInfo = JSON.parse(viteConfig.define.__WEBQUANTUMSAVORY_BUILD_INFO__)
 
     expect(changelog).toContain('# Changelog')
+    expect(changelog).toContain(`## ${buildInfo.appVersion}`)
     expect(changelog).toContain('## 1.9.1')
     expect(viteConfig.server?.fs).toBeUndefined()
   })

@@ -7,6 +7,7 @@ import {
   changelogMarkdown,
   readChangelogMarkdown,
 } from '../../config/changelogContent.js'
+import { frontendBuildInfo } from '../../config/frontendBuildInfo.js'
 
 const changelogUrl = new URL('../../../CHANGELOG.md', import.meta.url)
 
@@ -17,6 +18,7 @@ describe('CHANGELOG build content', () => {
     expect(changelogMarkdown).toBe(expected)
     expect(readChangelogMarkdown(changelogUrl)).toBe(expected)
     expect(changelogMarkdown).toContain('# Changelog')
+    expect(changelogMarkdown).toContain(`## ${frontendBuildInfo.appVersion}`)
     expect(changelogMarkdown).toContain('## 1.9.1')
   })
 })

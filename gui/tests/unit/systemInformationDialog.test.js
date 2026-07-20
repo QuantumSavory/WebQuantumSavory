@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import SystemInformationDialog from '../../src/components/SystemInformationDialog.vue'
+import { frontendBuildInfo } from '../../src/utils/frontendBuildInfo.js'
 
 const AppDialogStub = {
   props: ['show', 'title'],
@@ -61,7 +62,7 @@ describe('SystemInformationDialog', () => {
     const changelog = wrapper.get('[data-testid="system-changelog"]')
     expect(changelog.get('h1').text()).toBe('Changelog')
     expect(changelog.findAll('h2').map(heading => heading.text()))
-      .toEqual(expect.arrayContaining(['Unreleased', '1.9.1']))
+      .toEqual(expect.arrayContaining([frontendBuildInfo.appVersion, '1.9.1']))
     expect(changelog.text()).toContain('project-persisted template-node slots')
   })
 

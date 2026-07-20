@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.2
 
 - Watermarked every generated protocol, slot-state, and States Zoo PNG in the browser with
   `QuantumSavory.org`.
