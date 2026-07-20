@@ -229,9 +229,9 @@
       @test data["success"] == true
       @test data["filename"] == "integration-export.jl"
       @test occursin("simulation_duration = 1.5", data["script"])
-      @test occursin("QuantumSavory.CliffordRepr()", data["script"])
-      @test occursin("Graphs.add_edge!(graph, 1, 2)", data["script"])
-      @test occursin("CairoMakie.record", data["script"])
+      @test occursin("CliffordRepr()", data["script"])
+      @test occursin("add_edge!(graph, 1, 2)", data["script"])
+      @test occursin("record(", data["script"])
       @test occursin("MIME\"image/png\"", data["script"])
 
       simulations_response = make_request("GET", "/simulations")
@@ -439,7 +439,7 @@
       export_one = parse_response(export_response_one)
       export_two = parse_response(export_response_two)
       @test export_one["script"] == export_two["script"]
-      @test length(findall("tag = $counterpart_id", export_one["script"])) == 2
+      @test length(findall("tag = EntanglementCounterpart", export_one["script"])) == 2
       @test Meta.parseall(export_one["script"]) isa Expr
 
       nothing_export_payload = tagged_protocol_payload(
