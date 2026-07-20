@@ -19,9 +19,9 @@ const AppButtonStub = {
   template: '<button @click="$emit(\'click\', $event)"><slot /></button>',
 }
 
-function mountDialog(platformInfo = {}) {
+function mountDialog(platformInfo = {}, extraProps = {}) {
   return mount(SystemInformationDialog, {
-    props: { show: true, platformInfo },
+    props: { show: true, platformInfo, ...extraProps },
     global: {
       stubs: {
         AppDialog: AppDialogStub,
@@ -57,6 +57,12 @@ describe('SystemInformationDialog', () => {
     expect(wrapper.find('[data-testid="system-quantumsavory-commit"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="system-runtime-dependencies"]').text()).toContain('vue')
     expect(wrapper.get('[data-testid="system-development-dependencies"]').text()).toContain('vitest')
+
+    const changelog = wrapper.get('[data-testid="system-changelog"]')
+    expect(changelog.get('h1').text()).toBe('Changelog')
+    expect(changelog.findAll('h2').map(heading => heading.text()))
+      .toEqual(expect.arrayContaining(['Unreleased', '1.9.1']))
+    expect(changelog.text()).toContain('project-persisted template-node slots')
   })
 
   it('retains frontend diagnostics when backend metadata is unavailable', () => {
@@ -71,5 +77,16 @@ describe('SystemInformationDialog', () => {
     const wrapper = mountDialog()
     await wrapper.get('button').trigger('click')
     expect(wrapper.emitted('close')).toEqual([[]])
+  })
+
+  it('renders changelog content through the shared safe Markdown pipeline', () => {
+    const wrapper = mountDialog({}, {
+      changelogMarkdown: '# Changelog\n\n<script>alert(1)</script>',
+    })
+    const changelog = wrapper.get('[data-testid="system-changelog"]')
+
+    expect(changelog.get('h1').text()).toBe('Changelog')
+    expect(changelog.find('script').exists()).toBe(false)
+    expect(changelog.text()).toContain('<script>alert(1)</script>')
   })
 })

@@ -14,6 +14,8 @@
   Tag-only parameters.
 - Added edge distance, delay, refractive index, and endpoint IDs as runtime/export-parity
   custom-function context, with the expanded reference moved into a compact helper popup.
+- Rendered the repository changelog in System Information through the shared safe
+  Markdown presentation pipeline.
 
 ## 1.9.1
 

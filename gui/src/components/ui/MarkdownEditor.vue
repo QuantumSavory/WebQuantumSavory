@@ -61,11 +61,11 @@
           Edit
         </button>
       </div>
-      <div
+      <MarkdownContent
         v-if="modelValue"
         class="markdown-rendered"
+        :content="modelValue"
         data-testid="markdown-rendered"
-        v-html="renderedMarkdown"
       />
       <p v-else class="markdown-empty">{{ emptyText }}</p>
     </template>
@@ -77,8 +77,8 @@ import { computed, inject, nextTick, onUnmounted, ref, watch } from 'vue'
 import { PencilLine, Save, X } from '@lucide/vue'
 import { useDomId } from '../../composables/useDomId'
 import { EDITOR_DRAFT_REGISTRY_KEY } from '../../composables/editorDraftRegistry'
-import { renderMarkdown } from '../../utils/markdown.js'
 import { getClipboardImageFiles, imageFilesToMarkdown } from '../../utils/markdownImagePaste'
+import MarkdownContent from './MarkdownContent.vue'
 
 const props = defineProps({
   modelValue: {
@@ -126,7 +126,6 @@ const draft = ref(props.modelValue)
 const editor = ref(null)
 const pasteError = ref('')
 const isEmbeddingImage = ref(false)
-const renderedMarkdown = computed(() => renderMarkdown(props.modelValue))
 const draftRegistry = inject(EDITOR_DRAFT_REGISTRY_KEY, null)
 let pasteOperation = 0
 
@@ -340,73 +339,6 @@ onUnmounted(() => unregisterDraft?.())
   margin: var(--app-space-3) var(--app-space-1);
   color: var(--app-color-text-muted);
   font-style: italic;
-}
-
-.markdown-rendered {
-  padding: 2px 7px var(--app-space-4);
-  overflow-wrap: anywhere;
-  line-height: 1.5;
-}
-
-.markdown-rendered :deep(h1),
-.markdown-rendered :deep(h2),
-.markdown-rendered :deep(h3) {
-  margin: 0.8em 0 0.35em;
-  line-height: 1.25;
-}
-
-.markdown-rendered :deep(h1:first-child),
-.markdown-rendered :deep(h2:first-child),
-.markdown-rendered :deep(h3:first-child) {
-  margin-top: 0;
-}
-
-.markdown-rendered :deep(p),
-.markdown-rendered :deep(ul),
-.markdown-rendered :deep(ol),
-.markdown-rendered :deep(blockquote),
-.markdown-rendered :deep(pre) {
-  margin: 0 0 0.75em;
-}
-
-.markdown-rendered :deep(ul),
-.markdown-rendered :deep(ol) {
-  padding-left: 1.6em;
-}
-
-.markdown-rendered :deep(blockquote) {
-  padding-left: 0.8em;
-  border-left: 3px solid var(--app-color-border);
-  color: var(--app-color-text-muted);
-}
-
-.markdown-rendered :deep(code) {
-  padding: 0.1em 0.3em;
-  border-radius: 3px;
-  background: var(--app-color-surface-hover);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.markdown-rendered :deep(pre) {
-  overflow: auto;
-  padding: var(--app-space-3) 10px;
-  border-radius: var(--app-radius-control);
-  background: var(--app-color-surface-hover);
-}
-
-.markdown-rendered :deep(pre code) {
-  padding: 0;
-  background: transparent;
-}
-
-.markdown-rendered :deep(img) {
-  max-width: 100%;
-  height: auto;
-}
-
-.markdown-rendered :deep(.katex-display) {
-  overflow-x: auto;
-  overflow-y: hidden;
 }
 
 @media (max-width: 620px) {

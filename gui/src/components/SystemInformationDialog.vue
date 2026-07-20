@@ -93,6 +93,14 @@
           <p v-else>Dependency information is unavailable.</p>
         </details>
       </section>
+
+      <section
+        class="system-changelog"
+        aria-label="Changelog"
+        data-testid="system-changelog"
+      >
+        <MarkdownContent :content="changelogMarkdown" />
+      </section>
     </div>
 
     <template #footer>
@@ -105,6 +113,8 @@
 import { computed } from 'vue'
 import AppButton from './ui/AppButton.vue'
 import AppDialog from './ui/AppDialog.vue'
+import MarkdownContent from './ui/MarkdownContent.vue'
+import { changelogMarkdown as embeddedChangelogMarkdown } from '../utils/changelogContent.js'
 import { normalizeSystemInformation } from '../utils/systemInformation.js'
 
 const props = defineProps({
@@ -115,6 +125,10 @@ const props = defineProps({
   platformInfo: {
     type: Object,
     default: () => ({}),
+  },
+  changelogMarkdown: {
+    type: String,
+    default: embeddedChangelogMarkdown,
   },
 })
 
@@ -188,6 +202,12 @@ const information = computed(() => normalizeSystemInformation(props.platformInfo
 
 .system-dependency-group p {
   color: var(--app-color-text-muted);
+}
+
+.system-changelog {
+  min-width: 0;
+  padding-top: var(--app-space-5);
+  border-top: 1px solid var(--app-color-border);
 }
 
 @media (max-width: 520px) {
