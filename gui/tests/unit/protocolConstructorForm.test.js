@@ -230,6 +230,40 @@ describe('ProtocolConstructorForm', () => {
     expect(parameter.value).toBeInstanceOf(VariableReference)
   })
 
+  it('keeps a linked numeric parameter synchronized with the Variable input mode', async () => {
+    const parameter = {
+      name: 'rounds',
+      type: 'Int64',
+      selectedType: 'Int64',
+      value: new VariableReference('variable-rounds'),
+    }
+    const variable = {
+      id: 'variable-rounds',
+      name: 'rounds',
+      type: 'Int64',
+      selectedType: 'Int64',
+      value: 2,
+    }
+    const wrapper = mountForm({
+      protocol: { type: PROTOCOL_TYPE, parameters: [parameter] },
+      category: 'node',
+      variables: [variable],
+    })
+
+    await wrapper.setProps({
+      variables: [{
+        ...variable,
+        selectedType: 'expression:Int64',
+        value: { kind: 'numeric_expression', source: 'self + 1' },
+      }],
+    })
+    await nextTick()
+
+    expect(parameter.selectedType).toBe('expression:Int64')
+    expect(wrapper.get('[aria-label="Input option for rounds"]').element.value)
+      .toBe('expression:Int64')
+  })
+
   it('restores a direct value after the authoritative linked draft is replaced', async () => {
     const variable = { id: 'variable-rounds', name: 'rounds', type: 'Int64' }
     const wrapper = mountForm({

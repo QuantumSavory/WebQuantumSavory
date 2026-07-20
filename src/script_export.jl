@@ -819,6 +819,14 @@ function _script_noise_expression(
     haskey(metadata, name) || throw(validation_error("$context has unknown parameter '$name'"))
     value = get(parameter, "value", nothing)
     value === nothing && continue
+    numeric_expression = _parse_numeric_expression(
+      value;
+      context="$context parameter '$name'",
+    )
+    numeric_expression === nothing || throw(validation_error(
+      "$context parameter '$name' does not support numeric expressions",
+      Dict{String,Any}("parameter_name" => name),
+    ))
     expression = _script_regular_expression(
       metadata[name],
       value,

@@ -1092,7 +1092,7 @@ function _query_term(raw_term, expected, catalog; context::AbstractString)
       error isa APIError && rethrow()
       throw(validation_error(
         "Custom predicate is invalid",
-        Dict{String,Any}("evaluation_error" => sprint(showerror, error)),
+        evaluation_failure_details(error),
       ))
     end
   end

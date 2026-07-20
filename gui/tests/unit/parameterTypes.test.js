@@ -63,6 +63,14 @@ describe('parameter input descriptors', () => {
       .toEqual(expect.arrayContaining(['expression:Float64', 'expression:Int64']))
   })
 
+  it('can explicitly exclude expression modes for numeric literal-only editors', () => {
+    expect(buildParameterInputOptions(
+      ['Float64', 'Int64'],
+      {},
+      { numericExpressions: false },
+    ).map(option => option.id)).toEqual(['default', 'Float64', 'Int64'])
+  })
+
   it('accepts only the exact durable numeric-expression tag', () => {
     expect(isNumericExpressionValue({
       kind: 'numeric_expression',

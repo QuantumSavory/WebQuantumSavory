@@ -48,6 +48,17 @@ describe('shared MCP contract registry', () => {
     }
   })
 
+  it('advertises the durable Variable input-option selector for edits', () => {
+    const variables = MCP_TOOLS.find(tool => tool.name === 'variables_edit')
+    const valueSchema = variables.input_schema.properties.actions.items
+      .properties.value
+
+    expect(valueSchema.properties.selectedType).toEqual({
+      type: 'string',
+      minLength: 1,
+    })
+  })
+
   it('maps every specialist action to exactly one registered browser handler', () => {
     const project = createEmptyProject('Specialists')
     const service = new DesignCommandService({ getProject: () => project })

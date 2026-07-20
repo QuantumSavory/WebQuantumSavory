@@ -80,7 +80,11 @@ function uniqueDescriptors(options) {
  * contract. Every field has one Default-first selector, even for singleton
  * Julia types.
  */
-export function buildParameterInputOptions(inputType, metadata = {}) {
+export function buildParameterInputOptions(
+  inputType,
+  metadata = {},
+  { numericExpressions = true } = {},
+) {
   const declaredTypes = Array.isArray(inputType) ? inputType : [inputType]
   const options = [
     descriptor({
@@ -141,7 +145,10 @@ export function buildParameterInputOptions(inputType, metadata = {}) {
       wireType: declaredType,
       enabled,
     }))
-    if (declaredType === 'Float64' || declaredType === 'Int64') {
+    if (
+      numericExpressions
+      && (declaredType === 'Float64' || declaredType === 'Int64')
+    ) {
       options.push(descriptor({
         id: numericExpressionOptionId(declaredType),
         label: `${declaredType} Expression`,

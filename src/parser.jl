@@ -1255,6 +1255,14 @@ function _instantiate_noise(noise_def)
         @warn "Noise parameter has no value, skipping" parameter_name=name
         continue
       end
+      numeric_expression = _parse_numeric_expression(
+        value;
+        context="Background noise parameter '$original_name'",
+      )
+      numeric_expression === nothing || throw(validation_error(
+        "Background noise parameter '$original_name' does not support numeric expressions",
+        Dict{String,Any}("parameter_name" => original_name),
+      ))
 
       ptype = get(param_types, original_name, "Any")
 
@@ -1470,11 +1478,10 @@ function _handle_numeric_expression_parameter!(
     error isa APIError && rethrow(error)
     throw(validation_error(
       "Failed to evaluate numeric expression for parameter '$(name)'",
-      Dict{String,Any}(
+      evaluation_failure_details(error, Dict{String,Any}(
         "parameter_name" => string(name),
         "target_type" => target_type,
-        "evaluation_error" => sprint(showerror, error),
-      ),
+      )),
     ))
   end
 end

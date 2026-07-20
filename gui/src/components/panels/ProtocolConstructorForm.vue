@@ -265,7 +265,13 @@ function initialOption(param) {
 }
 
 function initializeParameter(param) {
-  if (initializedParameters.has(param) || isVariableAssigned(param)) return
+  if (isVariableAssigned(param)) {
+    const linkedOption = inputOptionForVariable(param, assignedVariable(param))
+    if (linkedOption) param.selectedType = linkedOption.id
+    initializedParameters.add(param)
+    return
+  }
+  if (initializedParameters.has(param)) return
   param.selectedType = initialOption(param).id
   initializedParameters.add(param)
 }

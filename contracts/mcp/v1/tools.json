@@ -408,6 +408,7 @@
                   "properties": {
                     "name": { "type": "string" },
                     "type": { "type": "string", "minLength": 1 },
+                    "selectedType": { "type": "string", "minLength": 1 },
                     "value": {}
                   },
                   "additionalProperties": false

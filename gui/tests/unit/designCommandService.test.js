@@ -600,6 +600,38 @@ describe('DesignCommandService', () => {
       }],
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
 
+    await expect(service.execute({
+      operations: [{
+        kind: 'slots.update',
+        node_id: 'node_a',
+        slot_id: project.net.nodes[0].data.slots[0].id,
+        value: {
+          backgroundNoise: {
+            type: 'ThermalNoise',
+            parameters: [{
+              field: 'rate',
+              type: 'Float64',
+              selectedType: 'expression:Float64',
+              value: { kind: 'numeric_expression', source: '1 / 2' },
+            }],
+          },
+        },
+      }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: expect.stringContaining('does not support numeric expressions'),
+    })
+    await expect(serviceFor(project).requireBackgroundNoise({
+      type: 'TemporarilyUnavailableNoise',
+      parameters: [{
+        field: 'rate',
+        value: { kind: 'numeric_expression', source: '1 / 2', result: 0.5 },
+      }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: expect.stringContaining('does not support numeric expressions'),
+    })
+
     await service.execute({
       operations: [{
         kind: 'protocols.create',
@@ -785,6 +817,98 @@ describe('DesignCommandService', () => {
         },
       }],
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+  })
+
+  it('infers MCP expression updates and reconciles stale linked parameter modes', async () => {
+    const project = createEmptyProject('Expression variable updates')
+    project.net.nodes.push(new Node({
+      id: 'node_a',
+      name: 'Alice',
+      position: [0, 0],
+      data: { slots: [], protocols: [] },
+    }))
+    const validateNumericExpressionValue = vi.fn(async () => ({
+      valid: true,
+      deferred: true,
+    }))
+    const service = serviceFor(project, {
+      protocolCatalog: () => ({
+        node: [{
+          type: 'Example.NumericProtocol',
+          parameters: [{ field: 'timeout', type: 'Float64' }],
+        }],
+        edge: [],
+        floating: [],
+      }),
+      validateNumericExpressionValue,
+    })
+
+    await service.execute({
+      operations: [{
+        kind: 'variables.create',
+        id: 'variable_timeout',
+        value: {
+          name: 'timeout',
+          type: 'Float64',
+          selectedType: 'Float64',
+          value: 1,
+        },
+      }, {
+        kind: 'protocols.create',
+        placement: 'node',
+        owner_id: 'node_a',
+        value: {
+          type: 'Example.NumericProtocol',
+          parameters: [{
+            name: 'timeout',
+            selectedType: 'Float64',
+            value: new VariableReference('variable_timeout'),
+          }],
+        },
+      }],
+    })
+
+    const expression = { kind: 'numeric_expression', source: 'self / 2' }
+    await service.execute({
+      operations: operationsForTool('variables_edit', {
+        actions: [{
+          action: 'update',
+          variable_id: 'variable_timeout',
+          value: { value: expression },
+        }],
+      }),
+    })
+
+    expect(project.variables[0]).toMatchObject({
+      type: 'Float64',
+      selectedType: 'expression:Float64',
+      value: expression,
+    })
+    const protocol = project.net.nodes[0].data.protocols[0]
+    expect(protocol.parameters[0].selectedType).toBe('Float64')
+
+    await service.execute({
+      operations: [{
+        kind: 'protocols.update',
+        placement: 'node',
+        owner_id: 'node_a',
+        protocol_id: protocol.id,
+        value: { parameters: protocol.parameters },
+      }],
+    })
+
+    expect(protocol.parameters[0]).toMatchObject({
+      selectedType: 'expression:Float64',
+      value: { kind: 'variable', id: 'variable_timeout' },
+    })
+    expect(validateNumericExpressionValue).toHaveBeenLastCalledWith(
+      'Float64',
+      'self / 2',
+      expect.objectContaining({
+        placement: 'node',
+        context: { node_names: ['Alice'], self: 1 },
+      }),
+    )
   })
 
   it('commits intrinsic selections into the minimized simulator payload', async () => {

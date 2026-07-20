@@ -3014,6 +3014,29 @@
     )
     @test occursin("useful development details", development_failure[:error])
     @test haskey(development_failure, :error_type)
+
+    evaluation_error = WebQuantumSavory.validation_error(
+      "A runtime expression failed",
+      Dict{String,Any}(
+        "parameter_name" => "timeout",
+        "evaluation_error" => "sensitive response-boundary details",
+      ),
+    )
+    production_error_response = WebQuantumSavory.create_error_response(
+      evaluation_error;
+      environment="prod",
+    )
+    @test production_error_response["details"]["parameter_name"] == "timeout"
+    @test production_error_response["details"]["evaluation_error"] == "Evaluation failed"
+    @test !occursin("sensitive", string(production_error_response))
+    development_error_response = WebQuantumSavory.create_error_response(
+      evaluation_error;
+      environment="dev",
+    )
+    @test occursin(
+      "sensitive response-boundary details",
+      development_error_response["details"]["evaluation_error"],
+    )
   end
 
   @testset "Unsafe Evaluation Surfaces" begin
@@ -4415,6 +4438,12 @@
       "kind" => "numeric_expression",
       "source" => source,
     )
+    capture_error(thunk) = try
+      thunk()
+      nothing
+    catch error
+      error
+    end
 
     parsed_expression = WebQuantumSavory._parse_numeric_expression(
       expression("delay / 2"),
@@ -4658,6 +4687,28 @@
       invalid_variable_payload,
     )
 
+    noise_expression = Dict(
+      "type" => "AmplitudeDamping",
+      "parameters" => [Dict(
+        "name" => "τ",
+        "value" => expression("1 / 2"),
+      )],
+    )
+    noise_error = capture_error(
+      () -> WebQuantumSavory._instantiate_noise(noise_expression),
+    )
+    @test noise_error isa WebQuantumSavory.APIError
+    @test noise_error.status_code == 400
+    @test occursin("does not support numeric expressions", noise_error.message)
+    script_noise_error = capture_error(
+      () -> WebQuantumSavory._script_noise_expression(
+        noise_expression,
+        "Test background noise",
+      ),
+    )
+    @test script_noise_error isa WebQuantumSavory.APIError
+    @test occursin("does not support numeric expressions", script_noise_error.message)
+
     withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
       kwargs = Dict{Symbol,Any}()
       @test WebQuantumSavory._handle_typed_parameter!(
@@ -4677,6 +4728,24 @@
         Dict{Symbol,Any}();
         constructor_metadata=(min=0.0, max=1.0),
       )
+
+      sensitive_error = capture_error(() -> WebQuantumSavory._handle_typed_parameter!(
+        Dict{Symbol,Any}(),
+        :bounded,
+        Float64,
+        expression("error(\"sensitive runtime expression details\")"),
+        Dict{Symbol,Any}();
+        constructor_metadata=(min=0.0, max=1.0),
+      ))
+      @test sensitive_error isa WebQuantumSavory.APIError
+      @test sensitive_error.error_code == "VALIDATION_ERROR"
+      production_response = WebQuantumSavory.create_error_response(
+        sensitive_error;
+        environment="prod",
+      )
+      @test production_response["details"]["parameter_name"] == "bounded"
+      @test production_response["details"]["evaluation_error"] == "Evaluation failed"
+      @test !occursin("sensitive runtime expression details", string(production_response))
     end
 
     bounded_script_expression = WebQuantumSavory._script_value_expression(

@@ -21,6 +21,7 @@ import {
 } from '../../utils/edgeGeometry.js'
 import { isMapPosition } from '../../utils/mapCoordinates.js'
 import {
+  NUMERIC_EXPRESSION_KIND,
   buildParameterInputOptions,
   buildVariableInputOptions,
   inferParameterInputOption,
@@ -928,8 +929,13 @@ export class DesignCommandService {
     return normalized
   }
 
-  effectiveParameterDescriptor(declaredType, parameter = {}, metadata = {}) {
-    const choices = buildParameterInputOptions(declaredType, metadata)
+  effectiveParameterDescriptor(
+    declaredType,
+    parameter = {},
+    metadata = {},
+    descriptorOptions = {},
+  ) {
+    const choices = buildParameterInputOptions(declaredType, metadata, descriptorOptions)
     const value = parameter.value
     // Intrinsic legacy values remain authoritative even when an older snapshot
     // carried a contradictory selectedType.
@@ -1157,6 +1163,17 @@ export class DesignCommandService {
         'Background noise parameters must be an array.',
       )
     }
+    const expressionParameter = noise.parameters.find(parameter => (
+      record(parameter?.value)
+      && parameter.value.kind === NUMERIC_EXPRESSION_KIND
+    ))
+    if (expressionParameter) {
+      const field = expressionParameter.field || expressionParameter.name || 'unknown'
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Background noise parameter ${field} does not support numeric expressions.`,
+      )
+    }
     if (!definition) return deepClone(noise)
 
     const definitions = Array.isArray(definition.parameters) ? definition.parameters : []
@@ -1199,6 +1216,7 @@ export class DesignCommandService {
         parameterDefinition.type,
         suppliedParameter,
         parameterDefinition,
+        { numericExpressions: false },
       )
       const value = await this.requireTypedValue(
         effectiveType,
@@ -1382,44 +1400,24 @@ export class DesignCommandService {
             `Variable ${variable.name} is incompatible with parameter ${parameter.name}.`,
           )
         }
-        const requestedOption = Object.hasOwn(suppliedParameter, 'selectedType')
-          ? this.effectiveParameterDescriptor(
-              parameterDefinition.type,
-              suppliedParameter,
-              parameterDefinition,
-            )
-          : parameterInputOptionForVariable(
-              parameterDefinition.type,
-              parameterDefinition,
-              variable,
-            )
-        const requestedOptionMatches = requestedOption && (
-          (
-            isNumericExpressionOptionId(variable.selectedType)
-            && requestedOption.id === variable.selectedType
-          )
-          || (
-            !isNumericExpressionOptionId(variable.selectedType)
-            && parameterTypeSupportsVariableType(
-              requestedOption.wireType || 'default',
-              assignmentType,
-            )
-          )
-          || (requestedOption.id === 'Lambda' && variable.type === 'Function')
+        const linkedOption = parameterInputOptionForVariable(
+          parameterDefinition.type,
+          parameterDefinition,
+          variable,
         )
-        if (!requestedOptionMatches) {
+        if (!linkedOption) {
           throw new DesignCommandError(
             'VALIDATION_FAILED',
-            `Selected input option is incompatible with variable ${variable.name}.`,
+            `Variable ${variable.name} has no compatible input option for parameter ${parameter.name}.`,
           )
         }
-        normalizedSelectedType = requestedOption.id
+        normalizedSelectedType = linkedOption.id
         if (
-          requestedOption.inputKind === 'numeric-expression'
+          linkedOption.inputKind === 'numeric-expression'
           && isNumericExpressionValue(variable.value)
         ) {
           await this.requireTypedValue(
-            requestedOption,
+            linkedOption,
             variable.value,
             `Variable ${variable.name} for protocol parameter ${parameter.name}`,
             {
@@ -1570,14 +1568,24 @@ export class DesignCommandService {
       || Object.hasOwn(value, 'value')
     ) {
       const changingOption = Object.hasOwn(value, 'type') || Object.hasOwn(value, 'selectedType')
-      const selectedType = value.selectedType
-        ?? (Object.hasOwn(value, 'type') ? value.type : variable.selectedType || variable.type)
+      const taggedExpressionUpdate = (
+        Object.hasOwn(value, 'value')
+        && isNumericExpressionValue(value.value)
+        && !Object.hasOwn(value, 'selectedType')
+      )
       const proposed = {
         type: value.type ?? variable.type,
-        selectedType,
         value: Object.hasOwn(value, 'value')
           ? value.value
           : (changingOption ? null : variable.value),
+        ...(!taggedExpressionUpdate
+          ? {
+              selectedType: value.selectedType
+                ?? (Object.hasOwn(value, 'type')
+                  ? value.type
+                  : variable.selectedType || variable.type),
+            }
+          : {}),
       }
       const option = this.effectiveVariableDescriptor(proposed)
       variable.type = option.wireType || 'default'

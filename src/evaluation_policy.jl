@@ -55,3 +55,30 @@ function evaluation_failure_response(error; environment::AbstractString=Genie.Co
 
   response
 end
+
+"""Attach an evaluation failure to otherwise public API-error details."""
+function evaluation_failure_details(
+  error,
+  public_details::Dict{String,Any}=Dict{String,Any}();
+  environment::AbstractString=Genie.Configuration.env(),
+)
+  details = copy(public_details)
+  details["evaluation_error"] = evaluation_failure_response(
+    error;
+    environment,
+  )[:error]
+  return details
+end
+
+"""Redact evaluation details at the final API response boundary."""
+function redact_evaluation_failure_details(
+  details::Dict{String,Any};
+  environment::AbstractString=Genie.Configuration.env(),
+)
+  lowercase(strip(environment)) in ("dev", "test") && return details
+  haskey(details, "evaluation_error") || return details
+
+  redacted = copy(details)
+  redacted["evaluation_error"] = "Evaluation failed"
+  return redacted
+end
