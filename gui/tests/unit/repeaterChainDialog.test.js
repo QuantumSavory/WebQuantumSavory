@@ -112,7 +112,7 @@ const AppButtonStub = {
 
 const NamedTagTypeAutocompleteStub = {
   name: 'NamedTagTypeAutocomplete',
-  props: ['modelValue', 'nullable', 'disabled', 'parameterName', 'ariaDescribedby'],
+  props: ['modelValue', 'includeDefault', 'disabled', 'parameterName', 'ariaDescribedby'],
   emits: ['update:modelValue'],
   template: '<button type="button" class="named-tag-type-stub" :disabled="disabled">Named tag type</button>'
 }
@@ -433,10 +433,18 @@ describe('RepeaterChainDialog protocol automation', () => {
     await selectValidTemplate(wrapper)
     await wrapper.get('#chain-replace-entangler').setValue(true)
 
+    const typeSelector = constructorFor(wrapper, ENTANGLER_TYPE)
+      .get('.complexTypeSelector')
+    expect(typeSelector.findAll('option').map(option => option.text())).toEqual([
+      'Default',
+      'Nothing',
+      'Tag'
+    ])
+    expect(typeSelector.element.value).toBe('DataType')
     const control = wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' })
     expect(control.props()).toMatchObject({
       modelValue: NAMED_TAG_ID,
-      nullable: true,
+      includeDefault: false,
       parameterName: 'tag'
     })
 
@@ -449,6 +457,7 @@ describe('RepeaterChainDialog protocol automation', () => {
     expect(valuesByName(generated).tag).toEqual({
       name: 'tag',
       type: 'DataType',
+      selectedType: 'DataType',
       value: REPLACEMENT_TAG_ID
     })
   })

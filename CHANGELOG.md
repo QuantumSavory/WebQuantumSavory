@@ -9,6 +9,9 @@
 - Kept curved-edge drawing and geodesic length calculation stable during world-wrapped
   node drags by previewing moves outside project state, transactionally rejecting unsupported
   geometry with an in-app warning, and restoring the node and curve handle.
+- Made nullable protocol Tag parameters use the shared Default/Nothing/Tag type selector and
+  reveal the named-tag autocomplete only for Tag, while retaining the direct autocomplete for
+  Tag-only parameters.
 
 ## 1.9.1
 

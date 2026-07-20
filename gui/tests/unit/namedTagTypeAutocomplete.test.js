@@ -161,24 +161,21 @@ describe('NamedTagTypeAutocomplete', () => {
       .toBe(`ReadyTag — ${floatTag}`)
   })
 
-  it('offers Default and nullable Nothing as semantic values', async () => {
+  it('lets the outer nullable-union selector own Default and Nothing', async () => {
     vi.spyOn(api, 'fetchTagTypes').mockResolvedValue(catalog())
-    const wrapper = mountControl({ nullable: true })
+    const wrapper = mountControl({ includeDefault: false })
     await flushPromises()
 
     const choices = await suggestions(wrapper)
-    expect(choices.slice(0, 2).map(option => option.label)).toEqual(['Default', 'Nothing'])
+    expect(choices.map(option => option.label)).toEqual(['EntanglementCounterpart'])
+    expect(wrapper.get('input[role="combobox"]').element.value).toBe('')
 
-    autocomplete(wrapper).vm.$emit('option-select', { value: choices[1] })
-    await nextTick()
-    expect(wrapper.emitted('update:modelValue').at(-1)).toEqual(['nothing'])
-
-    autocomplete(wrapper).vm.$emit('option-select', { value: choices[0] })
-    await nextTick()
-    expect(wrapper.emitted('update:modelValue').at(-1)).toEqual([null])
-
-    await wrapper.setProps({ nullable: false })
-    expect((await suggestions(wrapper)).map(option => option.label)).not.toContain('Nothing')
+    await wrapper.setProps({ includeDefault: true })
+    expect((await suggestions(wrapper)).map(option => option.label)).toEqual([
+      'Default',
+      'EntanglementCounterpart'
+    ])
+    expect(wrapper.get('input[role="combobox"]').element.value).toBe('Default')
   })
 
   it('force-clears forged text to the constructor default', async () => {
@@ -217,16 +214,13 @@ describe('NamedTagTypeAutocomplete', () => {
     const fetchTypes = vi.spyOn(api, 'fetchTagTypes')
       .mockRejectedValueOnce(new Error('Catalog offline'))
       .mockResolvedValueOnce(catalog())
-    const wrapper = mountControl({ nullable: true })
+    const wrapper = mountControl({ includeDefault: false })
     await flushPromises()
 
     expect(wrapper.get('[role="alert"]').text()).toContain('Catalog offline')
     expect(wrapper.get('input[role="combobox"]').attributes('aria-describedby'))
       .toContain(wrapper.get('[role="alert"]').attributes('id'))
-    expect((await suggestions(wrapper)).map(option => option.label)).toEqual([
-      'Default',
-      'Nothing'
-    ])
+    expect(await suggestions(wrapper)).toEqual([])
 
     await wrapper.get('[aria-label="Retry loading named tag types"]').trigger('click')
     await flushPromises()

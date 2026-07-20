@@ -673,6 +673,32 @@ describe('backend payload codecs', () => {
     expect(project.net.nodes[0].data.protocols[0].parameters[2].selectedType).toBe('Float64')
   })
 
+  it('serializes nullable named-tag union choices with their established wire values', () => {
+    const project = createEmptyProject('Named tags')
+    project.net.protocols.push(new FloatingProtocol({
+      id: 'protocol_tag_choices',
+      type: 'Example.TagProtocol',
+      parameters: [
+        { name: 'default_tag', selectedType: 'default', value: null },
+        { name: 'nothing_tag', selectedType: 'Nothing', value: 'nothing' },
+        {
+          name: 'selected_tag',
+          selectedType: 'DataType',
+          value: 'QuantumSavory.EntanglementCounterpart',
+        },
+      ],
+    }))
+
+    expect(toSimulationPayload(project).net.protocols[0].parameters).toEqual([
+      { name: 'nothing_tag', type: 'Nothing', value: 'nothing' },
+      {
+        name: 'selected_tag',
+        type: 'DataType',
+        value: 'QuantumSavory.EntanglementCounterpart',
+      },
+    ])
+  })
+
   it('adds run and representation configuration for script export', () => {
     const project = createEmptyProject('Script')
     project.description = 'Not simulator input'

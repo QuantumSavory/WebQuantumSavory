@@ -111,6 +111,16 @@ async function mockConfiguration(page) {
     contentType: 'application/json',
     json: { background_types: [] },
   }))
+  await page.route('**/states_zoo_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { states_zoo_types: [] },
+  }))
+  await page.route('**/slot_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { slot_types: ['Qubit', 'Qumode'] },
+  }))
   await page.route('**/protocol_types', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -361,22 +371,30 @@ test.describe('Protocol parameter options', () => {
     const panel = page.locator('#edgePanel')
     const entangler = await openProtocolEditor(panel, 'EntanglerProt')
     const tagRow = parameterRow(entangler, 'tag')
+    const tagTypeSelector = tagRow.locator('.complexTypeSelector')
     const tagInput = tagRow.getByRole('combobox', { name: 'tag named tag type' })
 
-    await expect(tagRow.locator('.complexTypeSelector')).toHaveCount(0)
+    await expect(tagTypeSelector.locator('option')).toHaveText([
+      'Default',
+      'Nothing',
+      'Tag',
+    ])
+    await expect(tagTypeSelector).toHaveValue('DataType')
     await expect(tagRow.locator('.unknown-type-indicator')).toHaveCount(0)
     await expect(tagInput).toHaveValue(`ReadyTag — ${TAG_BETA}`)
     await expect(tagRow.getByRole('button', { name: 'Set tag from a variable' })).toBeDisabled()
 
-    await tagInput.fill('Nothing')
-    await page.locator('.named-tag-type-overlay')
-      .getByRole('option', { name: 'Nothing', exact: true }).click()
+    await tagTypeSelector.selectOption('Nothing')
+    await expect(tagInput).toHaveCount(0)
+    await expect(tagRow.locator('.param-value')).toHaveText('Nothing')
     await expect.poll(() => serializedEdgeParameter(page, 'tag')).toMatchObject({
       name: 'tag',
-      type: 'DataType',
+      type: 'Nothing',
       value: 'nothing',
     })
 
+    await tagTypeSelector.selectOption('DataType')
+    await expect(tagInput).toBeVisible()
     await tagInput.fill('Example.Alpha')
     await page.locator('.named-tag-type-overlay')
       .getByRole('option', { name: /ReadyTag.*Example\.Alpha/ }).click()
@@ -387,9 +405,9 @@ test.describe('Protocol parameter options', () => {
       value: TAG_ALPHA,
     })
 
-    await tagInput.fill('ReadyTag')
-    await tagInput.press('Tab')
-    await expect(tagInput).toHaveValue('Default')
+    await tagTypeSelector.selectOption('default')
+    await expect(tagInput).toHaveCount(0)
+    await expect(tagRow.locator('.param-value')).toHaveText('Use protocol default')
     await expect.poll(() => serializedEdgeParameter(page, 'tag')).toBeUndefined()
 
     const consumer = await openProtocolEditor(panel, 'EntanglementConsumer')
