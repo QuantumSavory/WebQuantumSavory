@@ -15,6 +15,12 @@ import {
   TRANSIENT_SLOT_FIELDS,
 } from '../../utils/projectCodec.js'
 import {
+  INVALID_EDGE_GEOMETRY_REASON,
+  assertEdgeGeometries,
+  assertNodeMoveGeometry,
+} from '../../utils/edgeGeometry.js'
+import { isMapPosition } from '../../utils/mapCoordinates.js'
+import {
   VARIABLE_PARAMETER_TYPES,
   isCodeType,
   isSymbolicType,
@@ -60,21 +66,26 @@ function requireString(value, label) {
 }
 
 function requirePosition(value, label = 'position') {
-  if (
-    !Array.isArray(value)
-    || value.length !== 2
-    || !value.every(Number.isFinite)
-    || value[0] < -180
-    || value[0] > 180
-    || value[1] < -90
-    || value[1] > 90
-  ) {
+  if (!isMapPosition(value)) {
     throw new DesignCommandError(
       'VALIDATION_FAILED',
-      `${label} must be [longitude, latitude] within map bounds.`,
+      `${label} must be [longitude, latitude] within the supported map bounds.`,
     )
   }
   return [...value]
+}
+
+function invalidEdgeGeometry(error) {
+  return new DesignCommandError(
+    'VALIDATION_FAILED',
+    error.message,
+    {
+      details: {
+        reason: INVALID_EDGE_GEOMETRY_REASON,
+        edge_id: error.edgeId,
+      },
+    },
+  )
 }
 
 function requireFinite(value, label, { positive = false } = {}) {
@@ -497,6 +508,16 @@ export class DesignCommandService {
         context,
       )
     }
+    const affectedEdges = candidate.net.edges.filter(edge => (
+      context.affectedIds.has(edge.id)
+      || context.affectedIds.has(edge.source.id)
+      || context.affectedIds.has(edge.target.id)
+    ))
+    try {
+      assertEdgeGeometries(affectedEdges)
+    } catch (error) {
+      throw invalidEdgeGeometry(error)
+    }
     const validatedCandidate = decodeDesignDocument(encodeDesignDocument(candidate), {
       defaultBackgroundNoise: this.defaultBackgroundNoise,
       minimumTime: 0,
@@ -642,7 +663,14 @@ export class DesignCommandService {
     const node = byId(project.net.nodes, id, 'Node')
     const value = operation.value || operation
     if (Object.hasOwn(value, 'name')) node.name = requireString(value.name, 'Node name')
-    if (Object.hasOwn(value, 'position')) node.position = requirePosition(value.position)
+    if (Object.hasOwn(value, 'position')) {
+      try {
+        assertNodeMoveGeometry(node, value.position, project.net.edges)
+      } catch (error) {
+        throw invalidEdgeGeometry(error)
+      }
+      node.position = [...value.position]
+    }
     if (record(value.data)) {
       if (Object.keys(value.data).some(key => key !== 'type')) {
         throw new DesignCommandError(
@@ -1015,7 +1043,7 @@ export class DesignCommandService {
         value !== 'default'
         && (
           !functions.includes(value)
-          || (placement !== 'node' && value.endsWith('(self)'))
+          || (!['node', 'variable'].includes(placement) && value.endsWith('(self)'))
         )
       ) {
         throw new DesignCommandError(
@@ -1353,6 +1381,7 @@ export class DesignCommandService {
       type,
       Object.hasOwn(value, 'value') ? value.value : null,
       `Variable ${value.name || id}`,
+      { placement: 'variable' },
     )
     const variable = new Variable({
       id,
@@ -1393,6 +1422,7 @@ export class DesignCommandService {
         variable.type,
         value.value,
         `Variable ${variable.name}`,
+        { placement: 'variable' },
       )
     }
     context.affectedIds.add(variable.id)

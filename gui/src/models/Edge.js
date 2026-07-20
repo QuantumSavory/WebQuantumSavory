@@ -24,7 +24,9 @@ export default class Edge {
     if (this.isLogic) {
       delete this.data.curvePoints
       delete this.data.physicalOverrides
+      delete this.data.distanceMeters
       delete this.data.propagationDelaySeconds
+      delete this.data.refractiveIndex
     } else {
       this.data.curvePoints = Array.isArray(this.data.curvePoints)
         ? this.data.curvePoints

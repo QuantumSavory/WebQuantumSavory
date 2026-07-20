@@ -396,7 +396,12 @@ function _script_self_function(value, node_index, context::String)
   return nothing
 end
 
-function _script_custom_function_expression(source::AbstractString, node_index, context::String)
+function _script_custom_function_expression(
+  source::AbstractString,
+  node_index,
+  context::String;
+  edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
+)
   source = strip(String(source))
   isempty(source) && throw(validation_error("$context must not be blank"))
   try
@@ -409,8 +414,16 @@ function _script_custom_function_expression(source::AbstractString, node_index, 
   end
 
   indented = replace(source, "\n" => "\n        ")
-  self_binding = node_index === nothing ? "" : "    self = $node_index\n"
-  return "(let\n" * self_binding * "    function_value = let\n" *
+  context_bindings = node_index === nothing ? "" : "    self = $node_index\n"
+  if edge_context !== nothing
+    context_bindings *=
+      "    length = $(_script_literal(edge_context.distance_meters, "edge length"))\n" *
+      "    delay = $(_script_literal(edge_context.delay_seconds, "edge delay"))\n" *
+      "    refractive_index = $(_script_literal(edge_context.refractive_index, "edge refractive index"))\n" *
+      "    node_a = $(edge_context.node_a)\n" *
+      "    node_b = $(edge_context.node_b)\n"
+  end
+  return "(let\n" * context_bindings * "    function_value = let\n" *
     "        $indented\n" *
     "    end\n" *
     "    function_value isa Core.Function || Base.throw(Base.ArgumentError(\"Custom function source must evaluate to a Julia Function\"))\n" *
@@ -418,7 +431,13 @@ function _script_custom_function_expression(source::AbstractString, node_index, 
     "end)"
 end
 
-function _script_function_expression(value, special_type::String, node_index, context::String)
+function _script_function_expression(
+  value,
+  special_type::String,
+  node_index,
+  context::String;
+  edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
+)
   value isa AbstractString || throw(validation_error(
     "$context must be a function name or Julia function expression",
     Dict{String,Any}("received_type" => string(typeof(value))),
@@ -435,7 +454,12 @@ function _script_function_expression(value, special_type::String, node_index, co
     "$context is not an allowlisted function reference",
     Dict{String,Any}("value" => source),
   ))
-  return _script_custom_function_expression(source, node_index, context)
+  return _script_custom_function_expression(
+    source,
+    node_index,
+    context;
+    edge_context=edge_context,
+  )
 end
 
 function _script_validate_deferred_lambda(value, context::String)
@@ -522,11 +546,18 @@ function _script_value_expression(
   value,
   context::String;
   node_index=nothing,
+  edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
   imports::Union{Nothing,_ScriptImportRegistry}=nothing,
 )
   special_type = _script_special_type(raw_type)
   if special_type in ("Function", "Lambda")
-    return _script_function_expression(value, special_type, node_index, context)
+    return _script_function_expression(
+      value,
+      special_type,
+      node_index,
+      context;
+      edge_context=edge_context,
+    )
   elseif special_type == "Symbolic"
     return _script_symbolic_expression(value, context; imports)
   end
@@ -810,6 +841,7 @@ function _script_protocol_parameter_expression(
   variable_bindings,
   context::String;
   node_index=nothing,
+  edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
   declared_type=nothing,
   imports::Union{Nothing,_ScriptImportRegistry}=nothing,
 )
@@ -845,6 +877,7 @@ function _script_protocol_parameter_expression(
         binding.variable.value,
         "Variable '$(_script_comment(binding.variable.name))' assigned to $context parameter '$name'";
         node_index=node_index,
+        edge_context=edge_context,
         imports,
       )
       expression === nothing && throw(validation_error(
@@ -865,6 +898,7 @@ function _script_protocol_parameter_expression(
     value,
     "$context parameter '$name'";
     node_index=node_index,
+    edge_context=edge_context,
     imports,
   )
   return name, expression
@@ -880,6 +914,7 @@ function _script_protocol!(
   node_index=nothing,
   node_a=nothing,
   node_b=nothing,
+  edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
   imports::Union{Nothing,_ScriptImportRegistry}=nothing,
 )
   _is_object_like(protocol_definition) || throw(validation_error("$context must be an object"))
@@ -918,6 +953,7 @@ function _script_protocol!(
       variable_bindings,
       context;
       node_index=node_index,
+      edge_context=edge_context,
       declared_type=declared_parameter_types[constructor_name],
       imports,
     )
@@ -1140,12 +1176,14 @@ function generate_julia_script(payload)
     protocols isa AbstractVector || throw(validation_error("Edge $edge_index protocols must be an array"))
     source = id_to_index[String(edge["source"])]
     target = id_to_index[String(edge["target"])]
+    edge_function_context = _edge_function_context(edge, source, target)
     for (protocol_index, protocol) in enumerate(protocols)
       _script_protocol!(
         lines, protocol, variable_bindings, used, protocol_entries,
         "Edge $edge_index protocol $protocol_index";
         node_a=source,
         node_b=target,
+        edge_context=edge_function_context,
         imports,
       )
     end

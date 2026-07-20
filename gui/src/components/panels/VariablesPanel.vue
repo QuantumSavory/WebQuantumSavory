@@ -71,7 +71,7 @@
               :parameter="draftFor(variable)"
               :type="draftFor(variable).type"
               :disabled="disabled"
-              category="node"
+              category="variable"
               placeholder="value"
               initially-open
               @commit="commitVariable(variable, { value: draftFor(variable).value })"

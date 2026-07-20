@@ -76,6 +76,16 @@ async function mockBackendMetadata(page, {
     contentType: 'application/json',
     json: { background_types: [] },
   }))
+  await page.route('**/states_zoo_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { states_zoo_types: [] },
+  }))
+  await page.route('**/slot_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { slot_types: ['Qubit', 'Qumode'] },
+  }))
   await page.route('**/protocol_types', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -757,6 +767,7 @@ test.describe('Layout Tools repeater chain generator', () => {
     expect(generatedTags).toEqual(Array.from({ length: 3 }, () => ({
       name: 'tag',
       type: 'Any',
+      selectedType: 'DataType',
       value: TAG_ALPHA,
     })))
   })

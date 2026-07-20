@@ -697,16 +697,17 @@ async function handleAnnotationCreated(annotation) {
   }
 }
 
-async function handleNodePositionChanged({ node, previousPosition }) {
-  const position = [...node.position]
+async function handleNodePositionChanged({ node, position, finish }) {
   try {
     await executeGuiDesignOperations([{
       kind: 'topology.update_node',
       node_id: node.id,
-      value: { position }
+      value: { position: [...position] }
     }])
   } catch {
-    if (Array.isArray(previousPosition)) node.updatePosition(previousPosition)
+    // executeGuiDesignOperations owns the standard warning dialog.
+  } finally {
+    finish?.()
   }
 }
 

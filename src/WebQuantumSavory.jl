@@ -544,6 +544,7 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
     nodeA_idx = get(id_to_idx, src_id, 0)
     nodeB_idx = get(id_to_idx, dst_id, 0)
     (nodeA_idx > 0 && nodeB_idx > 0) || continue
+    edge_function_context = _edge_function_context(edge, nodeA_idx, nodeB_idx)
 
     for prot_def in edge_prots
       ctx = Dict{Symbol,Any}(
@@ -552,6 +553,7 @@ function launch_protocols(data, net, sim, protocol_mapping = Dict{String, Any}()
         :nodeA => nodeA_idx,
         :nodeB => nodeB_idx,
         NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+        EDGE_FUNCTION_CONTEXT_KEY => edge_function_context,
       )
       prot = _instantiate_protocol(prot_def, ctx, state; variables=variables)
       prot === nothing && continue

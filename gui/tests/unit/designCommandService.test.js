@@ -10,6 +10,7 @@ import {
   DesignCommandService,
   operationsForTool,
 } from '../../src/domain/design/DesignCommandService'
+import { INVALID_EDGE_GEOMETRY_REASON } from '../../src/utils/edgeGeometry'
 import { createEmptyProject, encodeDesignDocument } from '../../src/utils/projectCodec'
 
 function serviceFor(project, options = {}) {
@@ -198,6 +199,67 @@ describe('DesignCommandService', () => {
       ],
     })).rejects.toMatchObject({
       code: 'RESULT_NOT_FOUND',
+    })
+
+    expect(encodeDesignDocument(project)).toEqual(before)
+    expect(markDirty).not.toHaveBeenCalled()
+  })
+
+  it('rejects endpoint and curve moves that cannot be drawn or measured atomically', async () => {
+    const project = createEmptyProject('Geometry rollback')
+    const nodeA = new Node({ id: 'node_a', name: 'A', position: [-72, 42] })
+    const nodeB = new Node({ id: 'node_b', name: 'B', position: [-70, 42] })
+    const edge = new Edge({
+      id: 'edge_a',
+      source: nodeA,
+      target: nodeB,
+      data: {
+        type: 'connection',
+        protocols: [],
+        curvePoints: [{ id: 'curve_a', position: [-71, 44], type: 'smooth' }],
+        physicalOverrides: null,
+      },
+    })
+    project.net.nodes.push(nodeA, nodeB)
+    project.net.edges.push(edge)
+    const before = encodeDesignDocument(project)
+    const markDirty = vi.fn()
+    const service = serviceFor(project, { markDirty })
+
+    for (const position of [[181, 42], [0, 89]]) {
+      await expect(service.execute({
+        operations: [{
+          kind: 'topology.update_node',
+          node_id: nodeB.id,
+          value: { position },
+        }],
+      })).rejects.toMatchObject({
+        code: 'VALIDATION_FAILED',
+        details: { reason: INVALID_EDGE_GEOMETRY_REASON },
+      })
+      expect(encodeDesignDocument(project)).toEqual(before)
+    }
+
+    await expect(service.execute({
+      operations: [{
+        kind: 'topology.update_edge',
+        edge_id: edge.id,
+        value: {
+          data: {
+            curvePoints: [{
+              id: 'curve_a',
+              position: [181, 44],
+              type: 'smooth',
+            }],
+          },
+        },
+      }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      details: {
+        reason: INVALID_EDGE_GEOMETRY_REASON,
+        edge_id: edge.id,
+      },
     })
 
     expect(encodeDesignDocument(project)).toEqual(before)
@@ -655,6 +717,42 @@ describe('DesignCommandService', () => {
         value: { simulationConfig: { qubitRepresentation: 'GabsRepr' } },
       }],
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+  })
+
+  it('validates Lambda variables with deferred node-and-edge context', async () => {
+    const project = createEmptyProject('Contextual variables')
+    const validateCodeValue = vi.fn(async () => ({ valid: true }))
+    const service = serviceFor(project, { validateCodeValue })
+
+    await service.execute({
+      operations: [{
+        kind: 'variables.create',
+        id: 'variable_context',
+        value: {
+          name: 'contextual',
+          type: 'Lambda',
+          value: 'values -> self + node_a + node_b + length + Base.length(values)',
+        },
+      }],
+    })
+    expect(validateCodeValue).toHaveBeenLastCalledWith(
+      'Lambda',
+      'values -> self + node_a + node_b + length + Base.length(values)',
+      { placement: 'variable' },
+    )
+
+    await service.execute({
+      operations: [{
+        kind: 'variables.update',
+        variable_id: 'variable_context',
+        value: { value: 'values -> delay + refractive_index + Base.length(values)' },
+      }],
+    })
+    expect(validateCodeValue).toHaveBeenLastCalledWith(
+      'Lambda',
+      'values -> delay + refractive_index + Base.length(values)',
+      { placement: 'variable' },
+    )
   })
 
   it('synchronizes weighted States Zoo trace companions atomically', async () => {

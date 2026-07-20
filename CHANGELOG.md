@@ -6,6 +6,16 @@
   `QuantumSavory.org`.
 - Parallelized Buildkite's server-backed checks on isolated ports while retaining
   per-job serialization across overlapping builds.
+- Kept curved-edge drawing and geodesic length calculation stable during world-wrapped
+  node drags by previewing moves outside project state, transactionally rejecting unsupported
+  geometry with an in-app warning, and restoring the node and curve handle.
+- Made nullable protocol Tag parameters use the shared Default/Nothing/Tag type selector and
+  reveal the named-tag autocomplete only for Tag, while retaining the direct autocomplete for
+  Tag-only parameters.
+- Added edge distance, delay, refractive index, and endpoint IDs as runtime/export-parity
+  custom-function context, with the expanded reference moved into a compact helper popup.
+- Rendered the repository changelog in System Information through the shared safe
+  Markdown presentation pipeline.
 - Made generated Julia scripts use concise explicit imports for exporter-owned
   helpers and constructors while preserving the broad package context available
   to user-authored symbolic and custom-function source.

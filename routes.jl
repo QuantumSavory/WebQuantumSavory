@@ -866,6 +866,24 @@ end
                             type:
                               type: string
                               description: Type of connection
+                            distanceMeters:
+                              type: number
+                              format: double
+                              minimum: 0
+                              nullable: true
+                              description: Optional resolved physical-edge distance in meters; a number must be finite and nonnegative, while omission or null leaves custom-function context unknown
+                            propagationDelaySeconds:
+                              type: number
+                              format: double
+                              minimum: 0
+                              description: Optional resolved physical-edge propagation delay in seconds; when present it must be finite and nonnegative, while omission by a legacy client defaults to zero
+                            refractiveIndex:
+                              type: number
+                              format: double
+                              minimum: 0
+                              exclusiveMinimum: true
+                              nullable: true
+                              description: Optional resolved dimensionless physical-edge refractive index; a number must be finite and greater than zero, while omission or null leaves custom-function context unknown
                             protocols:
                               type: array
                               items:
@@ -1841,8 +1859,8 @@ end
                 example: "function add(a, b)\nreturn a + b\nend"
               placement:
                 type: string
-                enum: [node, edge, floating, query]
-                description: Optional validation placement; protocol placements provide representative custom-function context, query matches tag-query runtime without injected context, and omission defaults to floating context
+                enum: [node, edge, floating, variable, query]
+                description: Optional validation placement; protocol placements provide representative custom-function context, variable provides the deferred-assignment superset, query matches tag-query runtime without injected context, and omission defaults to floating context
             required:
               - code
     responses:
@@ -1918,10 +1936,11 @@ route("/test_code", method="POST") do
   code_string = payload["code"]
   placement = get(payload, "placement", nothing)
   if placement !== nothing && !(
-    placement isa AbstractString && placement in ("node", "edge", "floating", "query")
+    placement isa AbstractString &&
+      placement in ("node", "edge", "floating", "variable", "query")
   )
     throw(validation_error(
-      "Field 'placement' must be 'node', 'edge', 'floating', or 'query'",
+      "Field 'placement' must be 'node', 'edge', 'floating', 'variable', or 'query'",
       Dict("field" => "placement"),
     ))
   end

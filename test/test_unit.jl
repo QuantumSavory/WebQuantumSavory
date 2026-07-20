@@ -77,7 +77,9 @@
       "type" => "T2Dephasing",
       "parameters" => [Dict("name" => "t2", "value" => 5)],
     )
+    payload["net"]["edges"][1]["data"]["distanceMeters"] = 12_500.0
     payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = 0.125
+    payload["net"]["edges"][1]["data"]["refractiveIndex"] = 1.5
     parameters = payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
     parameter_by_name = Dict(parameter["name"] => parameter for parameter in parameters)
     parameter_by_name["pairstate"]["value"] = Dict("kind" => "variable", "id" => "state-variable")
@@ -281,11 +283,13 @@
     lambda_parameters = lambda_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
     lambda_by_name = Dict(parameter["name"] => parameter for parameter in lambda_parameters)
     raw_context_lambda =
-      "slots -> (MessageBuffer; EntanglementConsumer; LinearAlgebra.tr; first(slots))"
+      "slot -> (MessageBuffer; EntanglementConsumer; LinearAlgebra.tr; " *
+      "length == 12500.0 && delay == 0.125 && refractive_index == 1.5 && " *
+      "node_a == 1 && node_b == 2 && Base.length((slot,)) == 1 && slot > 0)"
     lambda_by_name["chooseA"]["type"] = "Lambda"
     lambda_by_name["chooseA"]["value"] = raw_context_lambda
     lambda_by_name["chooseB"]["type"] = "Lambda"
-    lambda_by_name["chooseB"]["value"] = "slots -> last(slots)"
+    lambda_by_name["chooseB"]["value"] = "slot -> slot > 0"
     lambda_script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
       WebQuantumSavory.generate_julia_script(lambda_payload)
     end
@@ -293,7 +297,13 @@
     @test occursin("chooseslotA = (let", lambda_script)
     @test occursin("chooseslotB = (let", lambda_script)
     @test occursin(raw_context_lambda, lambda_script)
-    @test occursin("slots -> last(slots)", lambda_script)
+    @test occursin("length = 12500.0", lambda_script)
+    @test occursin("delay = 0.125", lambda_script)
+    @test occursin("refractive_index = 1.5", lambda_script)
+    @test occursin("node_a = 1", lambda_script)
+    @test occursin("node_b = 2", lambda_script)
+    @test occursin("Base.length((slot,))", lambda_script)
+    @test occursin("slot -> slot > 0", lambda_script)
     @test Meta.parseall(lambda_script) isa Expr
     lambda_import_lines = filter(
       line -> startswith(line, "using ") && occursin(": ", line),
@@ -315,9 +325,24 @@
       "lambda-explicit-import-export.jl",
     )
     lambda_protocol = only(getfield(lambda_module, :protocols)).second
-    @test Base.invokelatest(lambda_protocol.chooseslotA, [3, 4]) == 3
-    @test Base.invokelatest(lambda_protocol.chooseslotB, [3, 4]) == 4
+    @test Base.invokelatest(lambda_protocol.chooseslotA, 7)
+    @test !Base.invokelatest(lambda_protocol.chooseslotA, -1)
+    @test Base.invokelatest(lambda_protocol.chooseslotB, 7)
     @test lambda_protocol.tag === QuantumSavory.ProtocolZoo.EntanglementCounterpart
+
+    # Exported node functions must not gain edge-only values merely because the
+    # generated script has physical edges elsewhere.
+    node_only_expression = WebQuantumSavory._script_custom_function_expression(
+      "() -> (node_a, delay)",
+      1,
+      "Node-only context regression",
+    )
+    @test !occursin("node_a =", node_only_expression)
+    @test !occursin("delay =", node_only_expression)
+    node_only_module = Module(gensym(:NodeOnlyContextExport))
+    Core.eval(node_only_module, :(using Base))
+    node_only_function = Core.eval(node_only_module, Meta.parse(node_only_expression))
+    @test_throws UndefVarError node_only_function()
 
     forged_lambda_payload = deepcopy(tagged_payload)
     forged_lambda_parameters =
@@ -595,6 +620,25 @@
       @test_throws UndefVarError Base.invokelatest(self_function, 3)
     end
 
+    virtual_edge_expression = WebQuantumSavory._script_value_expression(
+      "Lambda",
+      "() -> isnothing(length) && isnothing(delay) && isnothing(refractive_index) && " *
+      "node_a == 2 && node_b == 1",
+      "Virtual edge custom function";
+      edge_context=WebQuantumSavory._EdgeFunctionContext(
+        nothing,
+        nothing,
+        nothing,
+        2,
+        1,
+      ),
+    )
+    virtual_edge_function = Core.eval(
+      contextual_module,
+      Meta.parse(virtual_edge_expression),
+    )
+    @test Base.invokelatest(virtual_edge_function)
+
     weighted_variable = only(filter(
       variable -> variable["id"] == "weighted-state-variable",
       payload["variables"],
@@ -805,6 +849,10 @@
         module WebQuantumSavoryScriptCollisionA
           const Shared = Val{:a}
           const network = :a
+          const var"for" = :keyword
+          macro shared()
+            QuoteNode(:macro_a)
+          end
         end
       ))
     end
@@ -812,6 +860,9 @@
       Core.eval(Main, :(
         module WebQuantumSavoryScriptCollisionB
           const Shared = Val{:b}
+          macro shared()
+            QuoteNode(:macro_b)
+          end
         end
       ))
     end
@@ -820,7 +871,10 @@
     collision_sources = [
       (collision_a, :Shared),
       (collision_a, :network),
+      (collision_a, :for),
+      (collision_a, Symbol("@shared")),
       (collision_b, :Shared),
+      (collision_b, Symbol("@shared")),
     ]
     forward_registry =
       WebQuantumSavory._script_import_registry(collision_sources)
@@ -837,6 +891,9 @@
     @test forward_references == reverse_references
     @test all(reference != "Shared" for reference in values(forward_references))
     @test forward_references[(collision_a, :network)] != "network"
+    @test forward_references[(collision_a, :for)] != "for"
+    @test forward_references[(collision_a, Symbol("@shared"))] != "@shared"
+    @test forward_references[(collision_b, Symbol("@shared"))] != "@shared"
     forward_import_lines =
       WebQuantumSavory._script_import_lines(forward_registry)
     reverse_import_lines =
@@ -850,6 +907,9 @@
         forward_references[(collision_a, :Shared)],
         forward_references[(collision_b, :Shared)],
         forward_references[(collision_a, :network)],
+        forward_references[(collision_a, :for)],
+        forward_references[(collision_a, Symbol("@shared"))] * "()",
+        forward_references[(collision_b, Symbol("@shared"))] * "()",
       ),
       ", ",
     )
@@ -860,7 +920,7 @@
       "collision-explicit-import-export.jl",
     )
     @test getfield(collision_module, :collision_values) ==
-      (Val{:a}, Val{:b}, :a)
+      (Val{:a}, Val{:b}, :a, :keyword, :macro_a, :macro_b)
 
     catalog_candidates = WebQuantumSavory._script_import_candidates()
     catalog_registry =
@@ -1053,6 +1113,25 @@
       @test success
       @test validation_error === nothing
 
+      for placement in ("edge", "variable")
+        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+          "candidates -> length > 0 && delay >= 0 && refractive_index > 0 && " *
+          "node_a == 1 && node_b == 2 && Base.length(candidates) > 0";
+          placement=placement,
+        )
+        @test success
+        @test results isa Dict
+        @test validation_error === nothing
+      end
+
+      success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
+        "candidate -> candidate == self && node_a < node_b";
+        placement="variable",
+      )
+      @test success
+      @test results isa Dict
+      @test validation_error === nothing
+
       for placement in (nothing, "edge", "floating")
         success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
           "<(self)";
@@ -1230,13 +1309,59 @@
         @test variable_functions[2](2)
         @test !variable_functions[2](1)
 
+        physical_edge_context = WebQuantumSavory._EdgeFunctionContext(
+          1250.0,
+          0.25,
+          1.5,
+          1,
+          2,
+        )
+        edge_ctx = Dict{Symbol,Any}(
+          :nodeA => 1,
+          :nodeB => 2,
+          WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+          WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY => physical_edge_context,
+        )
+        edge_kwargs = Dict{Symbol,Any}()
+        @test WebQuantumSavory._handle_typed_parameter!(
+          edge_kwargs,
+          :selector,
+          "Lambda",
+          "candidates -> length == 1250.0 && delay == 0.25 && " *
+          "refractive_index == 1.5 && node_a == 1 && node_b == 2 && " *
+          "Base.length(candidates) == 2",
+          edge_ctx,
+        )
+        @test edge_kwargs[:selector]([1, 2])
+
+        virtual_function = WebQuantumSavory.create_lambda(
+          "() -> isnothing(length) && isnothing(delay) && isnothing(refractive_index) && " *
+          "node_a == 2 && node_b == 1";
+          edge_context=WebQuantumSavory._EdgeFunctionContext(
+            nothing,
+            nothing,
+            nothing,
+            2,
+            1,
+          ),
+        )
+        @test virtual_function()
+
+        ordinary_length = WebQuantumSavory.create_lambda("values -> length(values)")
+        @test ordinary_length([1, 2, 3]) == 3
+
+        for self_node_index in (1, nothing), edge_only_name in ("node_a", "delay")
+          node_or_floating_function = WebQuantumSavory.create_lambda(
+            "() -> $edge_only_name";
+            node_name_to_index=node_name_to_index,
+            self_node_index=self_node_index,
+          )
+          @test_throws UndefVarError node_or_floating_function()
+        end
+
         # Edge and floating functions receive `nodeid`, but no `self` binding.
         for ctx in (
-          Dict{Symbol,Any}(
-            :nodeA => 1,
-            :nodeB => 2,
-            WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
-          ),
+          edge_ctx,
           Dict{Symbol,Any}(
             WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
           ),
@@ -2014,6 +2139,24 @@
         @test delay_error isa WebQuantumSavory.APIError
         @test occursin("propagation delay", delay_error.message)
       end
+
+      for (field, invalid_value, message) in (
+        ("distanceMeters", -1, "distance"),
+        ("distanceMeters", Inf, "distance"),
+        ("refractiveIndex", 0, "refractive index"),
+        ("refractiveIndex", "glass", "refractive index"),
+      )
+        invalid_payload = deepcopy(test_payload)
+        invalid_payload["net"]["edges"][1]["data"][field] = invalid_value
+        physical_error = try
+          WebQuantumSavory.validate_payload(invalid_payload)
+          nothing
+        catch error
+          error
+        end
+        @test physical_error isa WebQuantumSavory.APIError
+        @test occursin(message, physical_error.message)
+      end
   end
 
   @testset "Simulation Variables" begin
@@ -2310,7 +2453,19 @@
       payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
       simulation_name = "physical_propagation_delays"
       payload["name"] = simulation_name
+      payload["net"]["edges"][1]["data"]["distanceMeters"] = 12_500.0
       payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = 0.125
+      payload["net"]["edges"][1]["data"]["refractiveIndex"] = 1.5
+      entangler_definition = payload["net"]["edges"][1]["data"]["protocols"][1]
+      choose_a = only(filter(
+        parameter -> parameter["name"] == "chooseA",
+        entangler_definition["parameters"],
+      ))
+      choose_a["type"] = "Lambda"
+      choose_a["value"] =
+        "slot -> length == 12500.0 && delay == 0.125 && " *
+        "refractive_index == 1.5 && node_a == 1 && node_b == 2 ? " *
+        "slot > 0 : false"
       virtual_edge = deepcopy(payload["net"]["edges"][1])
       virtual_edge["id"] = "virtual-edge"
       virtual_edge["isLogic"] = true
@@ -2321,6 +2476,33 @@
       )]
       push!(payload["net"]["edges"], virtual_edge)
 
+      physical_context = WebQuantumSavory._edge_function_context(
+        payload["net"]["edges"][1],
+        1,
+        2,
+      )
+      @test physical_context.distance_meters == 12_500.0
+      @test physical_context.delay_seconds == 0.125
+      @test physical_context.refractive_index == 1.5
+      @test physical_context.node_a == 1
+      @test physical_context.node_b == 2
+
+      virtual_context = WebQuantumSavory._edge_function_context(virtual_edge, 1, 2)
+      @test isnothing(virtual_context.distance_meters)
+      @test isnothing(virtual_context.delay_seconds)
+      @test isnothing(virtual_context.refractive_index)
+      @test virtual_context.node_a == 1
+      @test virtual_context.node_b == 2
+
+      legacy_edge = deepcopy(payload["net"]["edges"][1])
+      delete!(legacy_edge["data"], "distanceMeters")
+      delete!(legacy_edge["data"], "propagationDelaySeconds")
+      delete!(legacy_edge["data"], "refractiveIndex")
+      legacy_context = WebQuantumSavory._edge_function_context(legacy_edge, 1, 2)
+      @test isnothing(legacy_context.distance_meters)
+      @test legacy_context.delay_seconds == 0.0
+      @test isnothing(legacy_context.refractive_index)
+
       try
         state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(payload))
         @test ne(state.graph) == 1
@@ -2329,6 +2511,8 @@
           @test QuantumSavory.qchannel(state.network, endpoints).queue.delay == 0.125
         end
         WebQuantumSavory.prepare_simulation(state, simulation_name)
+        entangler = state.protocol_mapping[entangler_definition["id"]]
+        @test entangler.chooseslotA(7)
         @test state.protocol_mapping["virtual-consumer"] isa
           QuantumSavory.ProtocolZoo.EntanglementConsumer
       finally

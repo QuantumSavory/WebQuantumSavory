@@ -6,8 +6,8 @@ using QuantumSavory
 using QuantumSavory.ProtocolZoo
 using ResumableFunctions
 using ConcurrentSim
-using ..WebQuantumSavory: _evaluate_function_source, _function_context_expression,
-                          require_unsafe_code_evaluation
+using ..WebQuantumSavory: _EdgeFunctionContext, _evaluate_function_source,
+                          _function_context_expression, require_unsafe_code_evaluation
 
 import Base: Meta
 
@@ -50,8 +50,10 @@ Test Julia custom-function code in a fresh module.
 This executes code in the server process. A fresh module isolates names; it is
 not a security sandbox. `placement` supplies representative lexical context;
 omitting it uses the edge/floating context where `nodeid` is available and
-`self` is not. The `query` placement validates tag-query predicates without
-injecting protocol context, matching their runtime evaluation path.
+`self` and edge-assignment values are not. The `variable` placement supplies
+both node and edge bindings because a variable's assignments are deferred. The
+`query` placement validates tag-query predicates without injecting protocol
+context, matching their runtime evaluation path.
 
 Returns a tuple of (success::Bool, results::Dict, error::Union{Nothing, Exception})
 """
@@ -70,8 +72,9 @@ function test_code(code_string::String; placement::Union{Nothing,String}=nothing
         # so contextual names use stable representative values while preserving
         # placement availability. Query validation uses no context wrapper.
         effective_placement = placement === nothing ? "floating" : placement
-        effective_placement in ("node", "edge", "floating", "query") || throw(ArgumentError(
-            "Custom function placement must be 'node', 'edge', 'floating', or 'query'",
+        effective_placement in ("node", "edge", "floating", "variable", "query") ||
+          throw(ArgumentError(
+            "Custom function placement must be 'node', 'edge', 'floating', 'variable', or 'query'",
         ))
         if effective_placement == "query"
             function_value = _evaluate_function_source(
@@ -83,11 +86,17 @@ function test_code(code_string::String; placement::Union{Nothing,String}=nothing
             function validation_nodeid(name::String)::Int
                 return 1
             end
-            self_node_index = effective_placement == "node" ? 1 : nothing
+            self_node_index = effective_placement in ("node", "variable") ? 1 : nothing
+            edge_context = if effective_placement in ("edge", "variable")
+                _EdgeFunctionContext(1.0, 2.0, 1.5, 1, 2)
+            else
+                nothing
+            end
             transform = parsed -> _function_context_expression(
                 parsed,
                 validation_nodeid,
                 self_node_index,
+                edge_context,
             )
             _evaluate_function_source(
                 code_string;

@@ -76,7 +76,7 @@
       class="named-tag-type-error"
       role="alert"
     >
-      The saved named tag type is unavailable. Choose a catalog entry or Default.
+      {{ unavailableMessage }}
     </p>
   </div>
 </template>
@@ -93,9 +93,9 @@ const props = defineProps({
   modelValue: {
     default: null
   },
-  nullable: {
+  includeDefault: {
     type: Boolean,
-    default: false
+    default: true
   },
   disabled: {
     type: Boolean,
@@ -124,26 +124,16 @@ const DEFAULT_OPTION = Object.freeze({
   label: 'Default',
   searchText: 'default protocol constructor default'
 })
-const NOTHING_OPTION = Object.freeze({
-  key: 'special:nothing',
-  kind: 'nothing',
-  value: 'nothing',
-  name: 'Nothing',
-  label: 'Nothing',
-  searchText: 'nothing no tag'
-})
-
 const namedOptions = ref([])
 const suggestions = ref([])
-const selection = ref(DEFAULT_OPTION)
+const selection = ref(props.includeDefault ? DEFAULT_OPTION : null)
 const loading = ref(false)
 const loadError = ref('')
 const lastQuery = ref('')
 let catalogController = null
 
 const allOptions = computed(() => [
-  DEFAULT_OPTION,
-  ...(props.nullable ? [NOTHING_OPTION] : []),
+  ...(props.includeDefault ? [DEFAULT_OPTION] : []),
   ...namedOptions.value
 ])
 const normalizedValue = computed(() => {
@@ -157,8 +147,12 @@ const unavailable = computed(() => (
   !loading.value
   && !loadError.value
   && normalizedValue.value !== null
-  && !(props.nullable && normalizedValue.value === 'nothing')
   && !selectedNamedOption.value
+))
+const unavailableMessage = computed(() => (
+  props.includeDefault
+    ? 'The saved named tag type is unavailable. Choose a catalog entry or Default.'
+    : 'The saved named tag type is unavailable. Choose a catalog entry.'
 ))
 const describedBy = computed(() => [
   props.ariaDescribedby,
@@ -174,7 +168,7 @@ const autoCompletePassThrough = computed(() => ({
 }))
 
 watch(
-  () => [props.modelValue, props.nullable, namedOptions.value],
+  () => [props.modelValue, props.includeDefault, namedOptions.value],
   syncSelection,
   { immediate: true }
 )
@@ -193,9 +187,7 @@ function unavailableOption(value) {
 function syncSelection() {
   const value = normalizedValue.value
   if (value === null) {
-    selection.value = DEFAULT_OPTION
-  } else if (props.nullable && value === 'nothing') {
-    selection.value = NOTHING_OPTION
+    selection.value = props.includeDefault ? DEFAULT_OPTION : null
   } else {
     selection.value = selectedNamedOption.value || unavailableOption(value)
   }

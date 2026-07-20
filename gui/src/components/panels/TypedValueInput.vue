@@ -132,7 +132,7 @@ const numberInputStep = computed(() => {
   return normalizedType === 'int' || normalizedType === 'int64' ? 1 : 'any'
 })
 const selectableFunctions = computed(() => api.getKnownFunctions().filter(func => (
-  props.category === 'node' || !func.endsWith('(self)')
+  ['node', 'variable'].includes(props.category) || !func.endsWith('(self)')
 )))
 const codeEditorOpen = ref(false)
 const codeDraftDirty = ref(false)
