@@ -4,6 +4,7 @@ import maplibregl from 'maplibre-gl'
 import Slot from '../../models/Slot'
 import SlotIcon from './SlotIcon.vue';
 import { useUiServices } from '../../composables/uiServices'
+import { positionInProjectWorld } from '../../utils/mapCoordinates'
 
 const props = defineProps({
   node: {       type: Object,   required: true },
@@ -28,7 +29,25 @@ const isDraggingConnector = ref(false)
 const slots = ref([])
 const { showEntangledSlots } = useUiServices()
 let dragStartPosition = null
+let displayedDragStartPosition = null
 
+function markerPosition() {
+  const position = marker.value?.getLngLat()
+  return position ? [position.lng, position.lat] : null
+}
+
+function captureDragStartPosition() {
+  dragStartPosition = [...props.node.position]
+  displayedDragStartPosition = markerPosition()
+}
+
+function currentProjectWorldPosition() {
+  return positionInProjectWorld(
+    markerPosition(),
+    displayedDragStartPosition,
+    dragStartPosition,
+  )
+}
 
 onMounted(() => {
   // Create and initialize marker
@@ -44,26 +63,31 @@ onMounted(() => {
   // Handle drag events
   marker.value.on('dragstart', () => {
     if (props.editingLocked) return
-    dragStartPosition = [...props.node.position]
+    if (!dragStartPosition || !displayedDragStartPosition) {
+      captureDragStartPosition()
+    }
     emit('interactionBusy', true)
   })
 
   marker.value.on('drag', () => {
     if (props.editingLocked) return
-    const position = marker.value.getLngLat()
-    props.node.updatePosition([position.lng, position.lat])
-    emit('nodePositionPreview', props.node)
+    emit('nodePositionPreview', {
+      node: props.node,
+      position: currentProjectWorldPosition(),
+      previousPosition: [...dragStartPosition],
+    })
   })
 
   marker.value.on('dragend', () => {
     if (props.editingLocked) return
-    const position = marker.value.getLngLat()
-    props.node.updatePosition([position.lng, position.lat])
     emit('nodePositionChanged', {
       node: props.node,
-      previousPosition: dragStartPosition,
+      position: currentProjectWorldPosition(),
+      previousPosition: [...dragStartPosition],
+      finish: () => marker.value?.setLngLat(props.node.position),
     })
     dragStartPosition = null
+    displayedDragStartPosition = null
     emit('interactionBusy', false)
   })
 })
@@ -71,6 +95,12 @@ onMounted(() => {
 watch(
   () => props.editingLocked,
   locked => marker.value?.setDraggable(!locked),
+)
+
+watch(
+  () => props.node.position,
+  position => marker.value?.setLngLat(position),
+  { deep: true },
 )
 
 onUnmounted(() => {
@@ -190,6 +220,7 @@ defineExpose({ updatePosition })
     class="node-marker"
     :class="{ 'is-selected': isSelected, 'is-hovered': isHovered }"
     :data-node-id="node.id"
+    @pointerdown="captureDragStartPosition"
     @click="handleClick"
     @mouseenter="handleNodeEnter"
     @mouseleave="handleNodeLeave" 

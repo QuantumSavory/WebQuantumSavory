@@ -35,9 +35,9 @@
                   v-for="type in parameterTypeChoices(param)"
                   :key="type"
                   :value="type"
-                  :disabled="!parameterTypeIsKnown(type)"
+                  :disabled="!parameterTypeChoiceIsKnown(param, type)"
                 >
-                  {{ getTypeOptionLabel(type) }}
+                  {{ parameterTypeOptionLabel(param, type) }}
                 </option>
               </select>
             </template>
@@ -92,9 +92,9 @@
               </select>
             </div>
             <NamedTagTypeAutocomplete
-              v-else-if="isNamedTagTypeParameter(param)"
+              v-else-if="showNamedTagTypeAutocomplete(param)"
               :model-value="param.value"
-              :nullable="namedTagTypeIsNullable(param)"
+              :include-default="!namedTagTypeIsNullable(param)"
               :disabled="parameterDisabled(param)"
               :parameter-name="param.name"
               :aria-describedby="controlledDescriptionId(param)"
@@ -198,7 +198,16 @@ const props = defineProps({
 const emit = defineEmits(['commit'])
 
 const blacklistParamNames = new Set(['sim', 'net', 'node', 'nodeA', 'nodeB'])
+// Keep the established DataType wire value; only the constructor UI calls this branch Tag.
+const NAMED_TAG_TYPE_BRANCH = 'DataType'
+const NULLABLE_NAMED_TAG_TYPE_CHOICES = Object.freeze([
+  'default',
+  'Nothing',
+  NAMED_TAG_TYPE_BRANCH
+])
 const directParameterValues = new Map()
+const pendingNullableNamedTagBranches = new Map()
+const initializedNullableNamedTagParameters = new WeakSet()
 const variablePickerParameter = shallowRef(null)
 const formId = useDomId('protocol-constructor')
 
@@ -269,12 +278,57 @@ function namedTagTypeIsNullable(param) {
     && runtimeParameterDefinition(param)?.nullable === true
 }
 
+function nullableNamedTagParameterKey(param) {
+  return [
+    props.protocol?.id || '',
+    props.protocol?.type || '',
+    param.name
+  ].join('\0')
+}
+
+function nullableNamedTagSelectedType(param) {
+  if (param.value === 'nothing') return 'Nothing'
+  if (param.value != null && param.value !== '') return NAMED_TAG_TYPE_BRANCH
+  return pendingNullableNamedTagBranches.get(nullableNamedTagParameterKey(param))
+    === NAMED_TAG_TYPE_BRANCH
+    ? NAMED_TAG_TYPE_BRANCH
+    : 'default'
+}
+
+function initializeNullableNamedTagParameter(param) {
+  if (
+    !namedTagTypeIsNullable(param)
+    || initializedNullableNamedTagParameters.has(param)
+    || isVariableAssigned(param)
+  ) {
+    return
+  }
+  param.selectedType = nullableNamedTagSelectedType(param)
+  initializedNullableNamedTagParameters.add(param)
+}
+
+function showNamedTagTypeAutocomplete(param) {
+  return isNamedTagTypeParameter(param)
+    && (
+      !namedTagTypeIsNullable(param)
+      || param.selectedType === NAMED_TAG_TYPE_BRANCH
+    )
+}
+
 function paramUnknownTypes(param) {
   return isNamedTagTypeParameter(param) ? [] : unknownParameterTypes(param.type)
 }
 
 function updateNamedTagTypeValue(param, value) {
   if (parameterDisabled(param) || isVariableAssigned(param)) return
+  if (namedTagTypeIsNullable(param)) {
+    const parameterKey = nullableNamedTagParameterKey(param)
+    if (value == null || value === '') {
+      pendingNullableNamedTagBranches.set(parameterKey, NAMED_TAG_TYPE_BRANCH)
+    } else {
+      pendingNullableNamedTagBranches.delete(parameterKey)
+    }
+  }
   param.value = value
   delete param.error
   delete param.latex
@@ -283,6 +337,14 @@ function updateNamedTagTypeValue(param, value) {
 
 function onSelectedTypeChanged(param) {
   if (parameterDisabled(param)) return
+  if (namedTagTypeIsNullable(param)) {
+    const parameterKey = nullableNamedTagParameterKey(param)
+    if (param.selectedType === NAMED_TAG_TYPE_BRANCH) {
+      pendingNullableNamedTagBranches.set(parameterKey, NAMED_TAG_TYPE_BRANCH)
+    } else {
+      pendingNullableNamedTagBranches.delete(parameterKey)
+    }
+  }
   if (param.selectedType === 'default') {
     param.value = null
   } else if (isWildcardType(param.selectedType)) {
@@ -292,17 +354,38 @@ function onSelectedTypeChanged(param) {
   } else if (param.value === 'Wildcard' || param.value === 'nothing') {
     param.value = null
   }
+  if (isNamedTagTypeParameter(param)) {
+    delete param.error
+    delete param.latex
+  }
   emit('commit')
 }
 
 function parameterTypeChoices(param) {
-  if (isNamedTagTypeParameter(param)) return null
+  if (isNamedTagTypeParameter(param)) {
+    return namedTagTypeIsNullable(param) ? NULLABLE_NAMED_TAG_TYPE_CHOICES : null
+  }
   const parsedType = parseJuliaType(param.type)
   return Array.isArray(parsedType) ? parsedType : null
 }
 
+function parameterTypeChoiceIsKnown(param, type) {
+  return isNamedTagTypeParameter(param)
+    ? NULLABLE_NAMED_TAG_TYPE_CHOICES.includes(type)
+    : parameterTypeIsKnown(type)
+}
+
+function parameterTypeOptionLabel(param, type) {
+  if (isNamedTagTypeParameter(param) && type === NAMED_TAG_TYPE_BRANCH) return 'Tag'
+  return getTypeOptionLabel(type)
+}
+
 function effectiveParameterType(param) {
-  if (isNamedTagTypeParameter(param)) return 'named_tag_type'
+  if (isNamedTagTypeParameter(param)) {
+    return namedTagTypeIsNullable(param)
+      ? (param.selectedType || nullableNamedTagSelectedType(param))
+      : 'named_tag_type'
+  }
   return parameterTypeChoices(param) ? (param.selectedType || '') : param.type
 }
 
@@ -352,6 +435,10 @@ function clearVariableAssignment(param) {
   param.value = directParameterValues.has(param.name)
     ? directParameterValues.get(param.name)
     : null
+  if (namedTagTypeIsNullable(param)) {
+    param.selectedType = nullableNamedTagSelectedType(param)
+    initializedNullableNamedTagParameters.add(param)
+  }
   directParameterValues.delete(param.name)
   if (isVariablePickerOpen(param)) variablePickerParameter.value = null
   emit('commit')
@@ -402,6 +489,7 @@ watch(() => props.protocol, () => {
 })
 
 watchEffect(() => {
+  filteredParameters.value.forEach(initializeNullableNamedTagParameter)
   const param = variablePickerParameter.value
   if (param && (parameterDisabled(param) || compatibleVariables(param).length === 0)) {
     variablePickerParameter.value = null

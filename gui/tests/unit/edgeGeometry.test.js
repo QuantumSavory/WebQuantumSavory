@@ -6,6 +6,8 @@ import Edge from '../../src/models/Edge'
 import Node from '../../src/models/Node'
 import {
   SPEED_OF_LIGHT_METERS_PER_SECOND,
+  assertEdgeGeometry,
+  assertNodeMoveGeometry,
   cubicControlSegments,
   formatPhysicalValue,
   projectPointOntoEdge,
@@ -13,6 +15,7 @@ import {
   sampleEdgeRoute,
 } from '../../src/utils/edgeGeometry'
 import { projectMapPosition } from '../../src/utils/layoutTemplates'
+import { MAX_WEB_MERCATOR_LATITUDE } from '../../src/utils/mapCoordinates'
 
 function makeEdge({
   sourcePosition = [-72, 42],
@@ -120,6 +123,41 @@ describe('edge geometry adapter', () => {
     expect(projection.position[0]).toBeLessThanOrEqual(180)
     expect(projection.position[1]).toBeGreaterThanOrEqual(-90)
     expect(projection.position[1]).toBeLessThanOrEqual(90)
+  })
+
+  it('samples prospective node positions without mutating durable endpoints', () => {
+    const edge = makeEdge({
+      curvePoints: [{ id: 'anchor', position: [-71, 44], type: 'smooth' }],
+    })
+    const originalPosition = edge.target.getPosition()
+    const positionOverrides = new Map([[edge.target.id, [170, 42]]])
+
+    const sampled = sampleEdgeRoute(edge, { positionOverrides })
+    expect(sampled.distanceMeters).toBeGreaterThan(20_000_000)
+    expect(sampled.converged).toBe(true)
+    expect(edge.target.getPosition()).toEqual(originalPosition)
+    expect(assertNodeMoveGeometry(edge.target, [170, 42], [edge])).toEqual([170, 42])
+  })
+
+  it('rejects out-of-world, polar, and nonconvergent prospective routes', () => {
+    const edge = makeEdge({
+      curvePoints: [{ id: 'anchor', position: [-71, 44], type: 'smooth' }],
+    })
+
+    expect(() => assertNodeMoveGeometry(edge.target, [181, 42], [edge]))
+      .toThrow(/impossible to draw or measure/)
+    expect(() => assertNodeMoveGeometry(edge.target, [0, 89], [edge]))
+      .toThrow(/impossible to draw or measure/)
+    expect(() => assertEdgeGeometry(edge, {
+      minimumSamples: 8,
+      maximumSamples: 8,
+    })).toThrow(/impossible to draw or measure/)
+
+    expect(() => sampleEdgeRoute(makeEdge({
+      sourcePosition: [0, MAX_WEB_MERCATOR_LATITUDE],
+      targetPosition: [1, 84],
+      curvePoints: [{ id: 'near-pole', position: [0.5, 84.5], type: 'smooth' }],
+    }))).not.toThrow()
   })
 
   it('resolves automatic and manual propagation while retaining dormant overrides', () => {

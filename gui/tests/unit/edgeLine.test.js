@@ -140,15 +140,43 @@ describe('edge curve editing', () => {
     expect(map.sources.get('edge-edge').data.geometry.coordinates).toEqual([[-72, 42], [-70, 42]])
   })
 
+  it('renders node-drag overrides without mutating durable endpoints', () => {
+    const edge = makeEdge()
+    const map = makeMap()
+    const positionOverrides = new Map([[edge.target.id, [170, 42]]])
+    mount(EdgeLine, {
+      props: {
+        edge,
+        map,
+        showPhysicalBadges: false,
+        positionOverrides,
+      },
+      global: {
+        stubs: { CurvePointHandle: CurveHandleStub, EdgeBadgeStack: true },
+      },
+    })
+
+    expect(map.sources.get('edge-edge').data.geometry.coordinates)
+      .toEqual([[-72, 42], [170, 42]])
+    expect(edge.target.position).toEqual([-70, 42])
+  })
+
   it('emits drag positions and suppresses the click that follows a drag', async () => {
     const point = { id: 'point', position: [-71, 43], type: 'smooth' }
     const wrapper = mount(CurvePointHandle, { props: { map: makeMap(), point } })
     const marker = markerInstances.at(-1)
+    marker.position = { lng: 289, lat: 43 }
+    await wrapper.get('button').trigger('pointerdown')
     marker.handlers.get('dragstart')()
-    marker.position = { lng: -70.5, lat: 43.5 }
+    marker.position = { lng: 289.5, lat: 43.5 }
     marker.handlers.get('dragend')()
 
-    expect(wrapper.emitted('move')).toEqual([[point, [-70.5, 43.5]]])
+    const [movedPoint, position, finish] = wrapper.emitted('move')[0]
+    expect(movedPoint).toEqual(point)
+    expect(position).toEqual([-70.5, 43.5])
+    expect(finish).toEqual(expect.any(Function))
+    finish()
+    expect(marker.position).toEqual({ lng: -71, lat: 43 })
     await wrapper.get('button').trigger('click')
     expect(wrapper.emitted('cycle')).toBeUndefined()
     await wrapper.get('button').trigger('click')

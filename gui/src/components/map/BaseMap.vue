@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { reactive, ref, onMounted, onUnmounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import NodeMarker from './NodeMarker.vue'
@@ -13,6 +13,7 @@ import {
   annotationBoundsFromScreenCenter,
   createAnnotation,
 } from '../../utils/annotationGeometry'
+import { assertNodeMoveGeometry } from '../../utils/edgeGeometry'
 import { isEdgeLayerId } from '../../utils/mapLayers'
 import { isInteractiveMapMarkerTarget } from '../../utils/mapMarkers'
 import { 
@@ -32,6 +33,7 @@ const shiftDown = ref(false);
 const sourceNode = ref(null)
 const targetNode = ref(null)
 const temporaryEndpoint = ref(null)
+const nodePositionPreviews = reactive(new Map())
 
 // SlotConnectionState visualization
 const activeSlotConnectionState = ref(null)
@@ -79,6 +81,9 @@ watch(
   () => props.nodes.map(node => node),
   (nodes) => {
     const nodesById = new Map(nodes.map(node => [node.id, node]))
+    for (const nodeId of nodePositionPreviews.keys()) {
+      if (!nodesById.has(nodeId)) nodePositionPreviews.delete(nodeId)
+    }
     const renderedIds = renderedNodes.value
       .map(node => node.id)
       .filter(id => nodesById.has(id))
@@ -441,7 +446,16 @@ function handleSelect(item, type) {
 }
 
 // Handle node position changes to update slot connections
-function handleNodePositionPreview() {
+function handleNodePositionPreview(change) {
+  if (change?.node && Array.isArray(change.position)) {
+    try {
+      assertNodeMoveGeometry(change.node, change.position, props.edges)
+      nodePositionPreviews.set(change.node.id, [...change.position])
+    } catch {
+      // Leave the last renderable preview in place. The durable command will
+      // reject an invalid final position and surface the standard alert.
+    }
+  }
   if (isStateVisible.value && activeSlotConnectionState.value) {
     // Update slot connection positions when a node moves
     updateSlotConnectionPositions()
@@ -449,8 +463,16 @@ function handleNodePositionPreview() {
 }
 
 function handleNodePositionChanged(change) {
-  handleNodePositionPreview()
-  emit('node-position-changed', change)
+  handleNodePositionPreview(change)
+  const finishMarkerDrag = change.finish
+  emit('node-position-changed', {
+    ...change,
+    finish: () => {
+      nodePositionPreviews.delete(change.node.id)
+      finishMarkerDrag?.()
+      updateSlotConnectionPositions()
+    },
+  })
 }
 
 // Handle delete request from child components
@@ -518,8 +540,9 @@ defineExpose({
         :curve-editing-enabled="curveEditingEnabled"
         :show-physical-badges="showPhysicalBadges"
         :physical-config="physicalConfig"
+        :position-overrides="nodePositionPreviews"
         @select="handleSelect"
-        @design-operations="operations => emit('design-operations', operations)"
+        @design-operations="(...args) => emit('design-operations', ...args)"
         @interaction-busy="busy => emit('interaction-busy', busy)"
       />
       <!-- Render temporary connection line -->
