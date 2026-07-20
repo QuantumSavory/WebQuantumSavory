@@ -1,5 +1,7 @@
 import { mount, shallowMount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
+import PrimeVue from 'primevue/config'
 import CodeEditorWithSymbols from '../../src/components/panels/CodeEditorWithSymbols.vue'
 import CustomFunctionContextHelp from '../../src/components/panels/CustomFunctionContextHelp.vue'
 import NodeListPanel from '../../src/components/panels/NodeListPanel.vue'
@@ -9,17 +11,41 @@ import {
 } from '../../src/utils/customFunctionContext'
 
 describe('custom-function contextual help', () => {
-  it('renders every contextual keyword from the shared catalog', () => {
-    const wrapper = mount(CustomFunctionContextHelp)
+  it('opens every contextual keyword from the shared catalog in a helper popup', async () => {
+    const wrapper = mount(CustomFunctionContextHelp, {
+      attachTo: document.body,
+      global: { plugins: [PrimeVue] },
+    })
+    const trigger = wrapper.get('.custom-function-context-trigger')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(document.querySelector('[data-testid="custom-function-context-help"]')).toBeNull()
 
-    expect(wrapper.findAll('dt code').map(keyword => keyword.text())).toEqual([
+    await trigger.trigger('click')
+    await nextTick()
+    const popup = document.querySelector('[data-testid="custom-function-context-help"]')
+
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect([...popup.querySelectorAll('dt code')].map(keyword => keyword.textContent)).toEqual([
       'nodeid("Node name")',
-      'self'
+      'self',
+      'length',
+      'delay',
+      'refractive_index',
+      'node_a',
+      'node_b',
     ])
-    expect(wrapper.text()).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid.description)
-    expect(wrapper.text()).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid.recommendation)
-    expect(wrapper.text()).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.self.availability)
-    expect(CUSTOM_FUNCTION_CONTEXT_KEYWORDS).toHaveLength(2)
+    expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid.description)
+    expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid.recommendation)
+    expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.self.availability)
+    expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.length.recommendation)
+    expect(CUSTOM_FUNCTION_CONTEXT_KEYWORDS).toHaveLength(7)
+
+    await trigger.trigger('click')
+    await nextTick()
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(document.querySelector('[data-testid="custom-function-context-help"]')).toBeNull()
+
+    wrapper.unmount()
   })
 
   it('appears only while a custom-function editor is open', async () => {

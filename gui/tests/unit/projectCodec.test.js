@@ -7,6 +7,7 @@ import Variable, { isStatesZooTraceVariable } from '../../src/models/Variable'
 import {
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
+  DEFAULT_PHYSICAL_CONFIG,
   PROJECT_SCHEMA_VERSION,
   TRANSIENT_SLOT_FIELDS,
   createEmptyProject,
@@ -478,6 +479,11 @@ describe('encodeStoredProject', () => {
     const liveSlot = decoded.project.net.nodes[0].data.slots[0]
     liveSlot.isLocked = true
     liveSlot.assignment = { node: 1 }
+    Object.assign(decoded.project.net.edges[0].data, {
+      distanceMeters: 1250,
+      propagationDelaySeconds: 0.25,
+      refractiveIndex: 1.5,
+    })
 
     const encoded = encodeStoredProject(decoded.project, {
       name: 'Saved As',
@@ -508,6 +514,9 @@ describe('encodeStoredProject', () => {
       target: 'node_a',
       futureEdgeField: 'preserve me',
     })
+    expect(encoded.net.edges[0].data).not.toHaveProperty('distanceMeters')
+    expect(encoded.net.edges[0].data).not.toHaveProperty('propagationDelaySeconds')
+    expect(encoded.net.edges[0].data).not.toHaveProperty('refractiveIndex')
     expect(encoded.net.physicalConfig).toEqual({
       refractiveIndex: 1.468,
       nodeTemplate: { slots: [] },
@@ -656,7 +665,27 @@ describe('backend payload codecs', () => {
     expect(payload.net).not.toHaveProperty('physicalConfig')
     expect(payload.net.edges[0].data).not.toHaveProperty('curvePoints')
     expect(payload.net.edges[0].data).not.toHaveProperty('physicalOverrides')
+    expect(payload.net.edges[0].data.distanceMeters).toBeGreaterThan(0)
     expect(payload.net.edges[0].data.propagationDelaySeconds).toBeGreaterThan(0)
+    expect(payload.net.edges[0].data.refractiveIndex).toBe(DEFAULT_PHYSICAL_CONFIG.refractiveIndex)
+
+    project.net.edges[0].data.physicalOverrides = {
+      distanceMeters: 1250,
+      delaySeconds: 0.25,
+      refractiveIndex: 1.5,
+    }
+    const manualPayloadData = toSimulationPayload(project).net.edges[0].data
+    expect(manualPayloadData).toMatchObject({
+      distanceMeters: 1250,
+      propagationDelaySeconds: 0.25,
+      refractiveIndex: 1.5,
+    })
+
+    project.net.edges[0].isLogic = true
+    const virtualPayloadData = toSimulationPayload(project).net.edges[0].data
+    expect(virtualPayloadData).not.toHaveProperty('distanceMeters')
+    expect(virtualPayloadData).not.toHaveProperty('propagationDelaySeconds')
+    expect(virtualPayloadData).not.toHaveProperty('refractiveIndex')
 
     expect(slot.isLocked).toBe(true)
     expect(slot.backgroundNoise.doc).toBe('Editor documentation')

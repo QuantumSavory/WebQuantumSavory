@@ -98,7 +98,8 @@
     </div>
 
     <p v-if="resolved.manualDelay" class="manual-delay-help">
-      Manual delay overrides distance and refractive index. Their saved overrides will return when delay is reset.
+      Manual delay replaces the calculated propagation delay. Distance and refractive-index
+      overrides remain saved and return to the controls when delay is reset.
     </p>
   </div>
 </template>

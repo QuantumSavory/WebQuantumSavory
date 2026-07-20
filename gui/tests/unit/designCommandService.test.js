@@ -657,6 +657,42 @@ describe('DesignCommandService', () => {
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
   })
 
+  it('validates Lambda variables with deferred node-and-edge context', async () => {
+    const project = createEmptyProject('Contextual variables')
+    const validateCodeValue = vi.fn(async () => ({ valid: true }))
+    const service = serviceFor(project, { validateCodeValue })
+
+    await service.execute({
+      operations: [{
+        kind: 'variables.create',
+        id: 'variable_context',
+        value: {
+          name: 'contextual',
+          type: 'Lambda',
+          value: 'values -> self + node_a + node_b + length + Base.length(values)',
+        },
+      }],
+    })
+    expect(validateCodeValue).toHaveBeenLastCalledWith(
+      'Lambda',
+      'values -> self + node_a + node_b + length + Base.length(values)',
+      { placement: 'variable' },
+    )
+
+    await service.execute({
+      operations: [{
+        kind: 'variables.update',
+        variable_id: 'variable_context',
+        value: { value: 'values -> delay + refractive_index + Base.length(values)' },
+      }],
+    })
+    expect(validateCodeValue).toHaveBeenLastCalledWith(
+      'Lambda',
+      'values -> delay + refractive_index + Base.length(values)',
+      { placement: 'variable' },
+    )
+  })
+
   it('synchronizes weighted States Zoo trace companions atomically', async () => {
     const project = createEmptyProject('States')
     const previewState = vi.fn(async () => ({ trace: -0.25 }))

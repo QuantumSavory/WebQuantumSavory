@@ -96,7 +96,7 @@ async function mockConfiguration(page) {
   })
   await page.route('**/test_code', route => {
     const { code, placement } = route.request().postDataJSON()
-    if (code.startsWith('valid') && placement === 'node') {
+    if (code.startsWith('valid') && ['node', 'variable'].includes(placement)) {
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -216,11 +216,18 @@ async function expectEditorLayersAligned(valueEditor) {
 async function expectCustomFunctionValidationLifecycle(page, valueEditor) {
   const input = valueEditor.locator('textarea')
   await expect(input).toBeVisible()
-  const contextHelp = valueEditor.getByTestId('custom-function-context-help')
+  const contextTrigger = valueEditor.getByRole('button', { name: 'Custom function context' })
+  const contextHelp = page.getByTestId('custom-function-context-help')
+  await expect(contextHelp).toHaveCount(0)
+  await contextTrigger.click()
   await expect(contextHelp).toBeVisible()
   await expect(contextHelp).toContainText('nodeid("Node name")')
   await expect(contextHelp).toContainText('self')
   await expect(contextHelp).toContainText('node protocol')
+  await expect(contextHelp).toContainText('refractive_index')
+  await expect(contextHelp).toContainText('Base.length(collection)')
+  await contextTrigger.click()
+  await expect(contextHelp).toHaveCount(0)
   await expect(valueEditor.getByTestId('code-collapsed-view')).toHaveCount(0)
 
   await input.fill('invalid(')

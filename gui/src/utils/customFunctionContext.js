@@ -11,6 +11,37 @@ const contextualKeywordDefinitions = [
     syntax: 'self',
     description: 'The one-based simulator ID of the current node.',
     availability: 'Available only when the function is assigned to a node protocol.'
+  },
+  {
+    id: 'length',
+    syntax: 'length',
+    description: 'The resolved route or overridden physical-edge distance in meters.',
+    availability: 'Available only for edge protocol functions; it is nothing on virtual edges.',
+    recommendation: 'This binding shadows Base.length; use Base.length(collection) for collections.'
+  },
+  {
+    id: 'delay',
+    syntax: 'delay',
+    description: 'The resolved physical-edge propagation delay in seconds.',
+    availability: 'Available only for edge protocol functions; it is nothing on virtual edges.'
+  },
+  {
+    id: 'refractive_index',
+    syntax: 'refractive_index',
+    description: 'The resolved physical-edge refractive index.',
+    availability: 'Available only for edge protocol functions; it is nothing on virtual edges.'
+  },
+  {
+    id: 'node_a',
+    syntax: 'node_a',
+    description: 'The one-based simulator ID of the edge source endpoint.',
+    availability: 'Available only for edge protocol functions.'
+  },
+  {
+    id: 'node_b',
+    syntax: 'node_b',
+    description: 'The one-based simulator ID of the edge target endpoint.',
+    availability: 'Available only for edge protocol functions.'
   }
 ]
 

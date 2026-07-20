@@ -183,7 +183,9 @@ export function cloneEdgeData(templateData, nextId) {
         refractiveIndex: templateRefractiveIndex,
         delaySeconds: null
       }
+  delete data.distanceMeters
   delete data.propagationDelaySeconds
+  delete data.refractiveIndex
 
   return data
 }

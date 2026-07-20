@@ -143,28 +143,87 @@ _is_object_like(x) = x isa AbstractDict || startswith(string(typeof(x)), "JSON3.
 """Return whether an edge represents a virtual (logic-only) connection."""
 _is_virtual_edge(edge) = get(edge, "isLogic", false) === true
 
-"""Return a validated propagation delay for a physical edge.
-
-Legacy payloads predate physical propagation metadata and therefore retain a
-zero-delay default. Frontend payloads include only the resolved value; route
-geometry and manual overrides are storage concerns and never reach the backend.
-"""
-function _physical_edge_delay(edge, context::String="Physical edge")
-  edge_data = get(edge, "data", Dict{String,Any}())
-  _is_object_like(edge_data) || throw(validation_error("$context data must be an object"))
-  value = get(edge_data, "propagationDelaySeconds", 0.0)
-  if !(value isa Real) || value isa Bool
-    throw(validation_error("$context propagation delay must be a number"))
+"""Read one optional, finite physical-edge number from minimized payload data."""
+function _physical_edge_number(
+  edge_data,
+  key::String,
+  label::String,
+  context::String;
+  default=nothing,
+  positive::Bool=false,
+  nullable::Bool=true,
+)
+  value = get(edge_data, key, default)
+  if value === nothing
+    nullable && return nothing
+    throw(validation_error("$context $label must be a number"))
   end
-  delay = try
+  if !(value isa Real) || value isa Bool
+    throw(validation_error("$context $label must be a number"))
+  end
+  number = try
     Float64(value)
   catch
-    throw(validation_error("$context propagation delay must be representable as Float64"))
+    throw(validation_error("$context $label must be representable as Float64"))
   end
-  if !isfinite(delay) || delay < 0
-    throw(validation_error("$context propagation delay must be finite and nonnegative"))
+  if !isfinite(number) || (positive ? number <= 0 : number < 0)
+    qualifier = positive ? "positive" : "nonnegative"
+    throw(validation_error("$context $label must be finite and $qualifier"))
   end
-  return delay
+  return number
+end
+
+"""Return the validated physical properties carried by a minimized edge.
+
+Legacy payloads predate distance and refractive-index metadata, so those values
+remain unknown while their propagation delay retains the established zero
+default. Route geometry and manual overrides remain frontend storage concerns.
+"""
+function _physical_edge_properties(edge, context::String="Physical edge")
+  edge_data = get(edge, "data", Dict{String,Any}())
+  _is_object_like(edge_data) || throw(validation_error("$context data must be an object"))
+  return (
+    distance_meters=_physical_edge_number(
+      edge_data,
+      "distanceMeters",
+      "distance",
+      context,
+    ),
+    delay_seconds=_physical_edge_number(
+      edge_data,
+      "propagationDelaySeconds",
+      "propagation delay",
+      context;
+      default=0.0,
+      nullable=false,
+    ),
+    refractive_index=_physical_edge_number(
+      edge_data,
+      "refractiveIndex",
+      "refractive index",
+      context;
+      positive=true,
+    ),
+  )
+end
+
+"""Return the validated delay used by the simulator's physical channels."""
+_physical_edge_delay(edge, context::String="Physical edge") =
+  _physical_edge_properties(edge, context).delay_seconds
+
+"""Resolve the complete lexical custom-function context for one edge."""
+function _edge_function_context(edge, node_a::Int, node_b::Int)
+  if _is_virtual_edge(edge)
+    return _EdgeFunctionContext(nothing, nothing, nothing, node_a, node_b)
+  end
+  properties = _physical_edge_properties(edge, "Physical edge $(edge["id"])")
+  return _EdgeFunctionContext(
+    properties.distance_meters,
+    properties.delay_seconds,
+    properties.refractive_index,
+    node_a,
+    node_b,
+  )
 end
 
 """Build the symmetric per-link delay map used by `RegisterNet`."""
@@ -990,6 +1049,7 @@ function _handle_function_lambda_parameter!(
   state=nothing;
   self_node_index::Union{Nothing,Int}=nothing,
   node_name_to_index::Dict{String,Int}=Dict{String,Int}(),
+  edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
 )
   if isa(value, Function)
     kwargs[name] = value
@@ -1006,6 +1066,7 @@ function _handle_function_lambda_parameter!(
           value;
           node_name_to_index=node_name_to_index,
           self_node_index=self_node_index,
+          edge_context=edge_context,
         )
         # Validate the lambda - try calling it with a test value if it's a filter
         if name == :filter || name == :chooseA || name == :chooseB
@@ -1156,6 +1217,7 @@ function _handle_typed_parameter!(kwargs, name, p_raw_type, value, ctx, state=no
           NODE_NAME_TO_INDEX_CONTEXT_KEY,
           Dict{String,Int}(),
         ),
+        edge_context=get(ctx, EDGE_FUNCTION_CONTEXT_KEY, nothing),
       )
     elseif special_type == "Symbolic"
       return _handle_symbolic_parameter!(kwargs, name, value)

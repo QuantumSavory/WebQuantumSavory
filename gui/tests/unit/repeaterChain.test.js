@@ -343,7 +343,9 @@ describe('repeater-chain protocol automation', () => {
       refractiveIndex: 1.5,
       delaySeconds: 0.25
     }
+    templateEdge.data.distanceMeters = 42
     templateEdge.data.propagationDelaySeconds = 0.25
+    templateEdge.data.refractiveIndex = 1.5
 
     const result = generateRepeaterChain(net, baseOptions({ repeaterCount: 2 }))
 
@@ -354,7 +356,9 @@ describe('repeater-chain protocol automation', () => {
         refractiveIndex: 1.5,
         delaySeconds: null
       })
+      expect(edge.data).not.toHaveProperty('distanceMeters')
       expect(edge.data).not.toHaveProperty('propagationDelaySeconds')
+      expect(edge.data).not.toHaveProperty('refractiveIndex')
     })
     expect(result.virtualEdge.data).not.toHaveProperty('curvePoints')
     expect(result.virtualEdge.data).not.toHaveProperty('physicalOverrides')

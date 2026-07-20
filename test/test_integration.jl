@@ -982,7 +982,14 @@
         for (source, placement, expected_success) in (
           ("<(self)", "node", true),
           ("==(nodeid(\"Amherst\"))", "edge", true),
+          (
+            "values -> length > 0 && delay >= 0 && refractive_index > 0 && " *
+            "node_a == 1 && node_b == 2 && Base.length(values) > 0",
+            "edge",
+            true,
+          ),
           ("<(self)", "edge", false),
+          ("value -> value == self && node_a < node_b", "variable", true),
           ("x -> x > 1", "query", true),
           (
             "candidate -> let nodeid = _ -> 1; candidate == nodeid(\"Amherst\"); end",
