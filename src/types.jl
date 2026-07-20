@@ -117,6 +117,18 @@ end
 """Protocol-conversion context key containing the shared node-name lookup."""
 const NODE_NAME_TO_INDEX_CONTEXT_KEY = :node_name_to_index
 
+"""Protocol-conversion context key containing resolved edge assignment values."""
+const EDGE_FUNCTION_CONTEXT_KEY = :edge_function_context
+
+"""Resolved values captured lexically by custom functions assigned to an edge."""
+struct _EdgeFunctionContext
+    distance_meters::Union{Nothing,Float64}
+    delay_seconds::Union{Nothing,Float64}
+    refractive_index::Union{Nothing,Float64}
+    node_a::Int
+    node_b::Int
+end
+
 """Build the shared one-based node-name lookup from validated node order."""
 function _node_name_to_index(nodes)::Dict{String,Int}
     return Dict{String,Int}(
@@ -138,14 +150,36 @@ function _function_context_expression(
     parsed,
     nodeid::Function,
     self_node_index::Union{Nothing,Int},
+    edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
 )
-    if self_node_index === nothing
+    if edge_context === nothing && self_node_index === nothing
         return :(let nodeid = $(QuoteNode(nodeid))
+            $parsed
+        end)
+    elseif edge_context === nothing
+        return :(let nodeid = $(QuoteNode(nodeid)), self = $self_node_index
+            $parsed
+        end)
+    elseif self_node_index === nothing
+        return :(let
+            nodeid = $(QuoteNode(nodeid))
+            length = $(edge_context.distance_meters)
+            delay = $(edge_context.delay_seconds)
+            refractive_index = $(edge_context.refractive_index)
+            node_a = $(edge_context.node_a)
+            node_b = $(edge_context.node_b)
             $parsed
         end)
     end
 
-    return :(let nodeid = $(QuoteNode(nodeid)), self = $self_node_index
+    return :(let
+        nodeid = $(QuoteNode(nodeid))
+        self = $self_node_index
+        length = $(edge_context.distance_meters)
+        delay = $(edge_context.delay_seconds)
+        refractive_index = $(edge_context.refractive_index)
+        node_a = $(edge_context.node_a)
+        node_b = $(edge_context.node_b)
         $parsed
     end)
 end
@@ -155,11 +189,13 @@ function _contextual_function_expression(
     parsed,
     node_name_to_index::Dict{String,Int},
     self_node_index::Union{Nothing,Int},
+    edge_context::Union{Nothing,_EdgeFunctionContext},
 )
     return _function_context_expression(
         parsed,
         _nodeid_resolver(node_name_to_index),
         self_node_index,
+        edge_context,
     )
 end
 
@@ -168,12 +204,15 @@ Create a Lambda from a string representation in a temporary module.
 
 This evaluates code in the server process; the temporary module is not a
 security boundary. `nodeid` is always bound lexically from the supplied map;
-`self` is bound only when `self_node_index` identifies a node protocol.
+`self` is bound only when `self_node_index` identifies a node protocol. An
+`edge_context` adds the resolved physical properties and endpoint IDs for one
+edge assignment.
 """
 function create_lambda(
     lambda_string::String;
     node_name_to_index::Dict{String,Int}=Dict{String,Int}(),
     self_node_index::Union{Nothing,Int}=nothing,
+    edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
 )
     require_unsafe_code_evaluation()
 
@@ -184,6 +223,7 @@ function create_lambda(
                 parsed,
                 node_name_to_index,
                 self_node_index,
+                edge_context,
             ),
         )
         return LambdaImpl(value)

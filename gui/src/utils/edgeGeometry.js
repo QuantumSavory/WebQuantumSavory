@@ -337,33 +337,25 @@ export function resolveEdgePhysicalProperties(edge, physicalConfig = {}, options
 
   const sampled = sampleEdgeRoute(edge, options)
   const overrides = edge?.data?.physicalOverrides
+  const distanceMeters = overrides?.distanceMeters == null
+    ? sampled.distanceMeters
+    : finiteNonnegative(overrides.distanceMeters, 'Physical distance')
+  const refractiveIndex = overrides?.refractiveIndex == null
+    ? finitePositive(
+        physicalConfig?.refractiveIndex ?? DEFAULT_REFRACTIVE_INDEX,
+        'Refractive index',
+      )
+    : finitePositive(overrides.refractiveIndex, 'Refractive index')
   const manualDelay = overrides?.delaySeconds != null
   const propagationDelaySeconds = manualDelay
     ? finiteNonnegative(overrides.delaySeconds, 'Propagation delay')
-    : (() => {
-        const distanceMeters = overrides?.distanceMeters == null
-          ? sampled.distanceMeters
-          : finiteNonnegative(overrides.distanceMeters, 'Physical distance')
-        const refractiveIndex = overrides?.refractiveIndex == null
-          ? finitePositive(
-              physicalConfig?.refractiveIndex ?? DEFAULT_REFRACTIVE_INDEX,
-              'Refractive index',
-            )
-          : finitePositive(overrides.refractiveIndex, 'Refractive index')
-        return distanceMeters * refractiveIndex / SPEED_OF_LIGHT_METERS_PER_SECOND
-      })()
+    : distanceMeters * refractiveIndex / SPEED_OF_LIGHT_METERS_PER_SECOND
 
   return {
     ...sampled,
     manualDelay,
-    distanceMeters: manualDelay
-      ? null
-      : (overrides?.distanceMeters ?? sampled.distanceMeters),
-    refractiveIndex: manualDelay
-      ? null
-      : (overrides?.refractiveIndex
-        ?? physicalConfig?.refractiveIndex
-        ?? DEFAULT_REFRACTIVE_INDEX),
+    distanceMeters,
+    refractiveIndex,
     propagationDelaySeconds,
   }
 }

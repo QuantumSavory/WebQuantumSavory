@@ -40,6 +40,11 @@ const STORAGE_ONLY_PROJECT_FIELDS = new Set([
   'uiGlobal',
 ])
 const TRANSIENT_SLOT_FIELD_SET = new Set(TRANSIENT_SLOT_FIELDS)
+const RESOLVED_PHYSICAL_EDGE_FIELDS = Object.freeze([
+  'distanceMeters',
+  'propagationDelaySeconds',
+  'refractiveIndex',
+])
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -351,7 +356,12 @@ function plainEdge(edge) {
   const data = {
     ...omitFields(
       sourceData,
-      new Set(['protocols', 'curvePoints', 'physicalOverrides', 'propagationDelaySeconds']),
+      new Set([
+        'protocols',
+        'curvePoints',
+        'physicalOverrides',
+        ...RESOLVED_PHYSICAL_EDGE_FIELDS,
+      ]),
     ),
     protocols: Array.isArray(sourceData.protocols)
       ? sourceData.protocols.map(plainProtocol)
@@ -693,14 +703,22 @@ export function toSimulationPayload(project) {
             const resolvedPhysical = resolveEdgePhysicalProperties(edge, physicalConfig)
             const payloadData = omitFields(
               plain.data,
-              new Set(['curvePoints', 'physicalOverrides', 'propagationDelaySeconds']),
+              new Set([
+                'curvePoints',
+                'physicalOverrides',
+                ...RESOLVED_PHYSICAL_EDGE_FIELDS,
+              ]),
             )
             return {
               ...plain,
               data: {
                 ...payloadData,
                 ...(resolvedPhysical
-                  ? { propagationDelaySeconds: resolvedPhysical.propagationDelaySeconds }
+                  ? {
+                      distanceMeters: resolvedPhysical.distanceMeters,
+                      propagationDelaySeconds: resolvedPhysical.propagationDelaySeconds,
+                      refractiveIndex: resolvedPhysical.refractiveIndex,
+                    }
                   : {}),
                 protocols: (payloadData.protocols || [])
                   .map(protocol => cleanProtocol(protocol, edgeExclusions)),

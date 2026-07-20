@@ -295,6 +295,10 @@ h1 {
   z-index: var(--app-z-popup) !important;
 }
 
+.p-popover {
+  z-index: var(--app-z-popup) !important;
+}
+
 .p-tooltip {
   z-index: var(--app-z-tooltip) !important;
 }

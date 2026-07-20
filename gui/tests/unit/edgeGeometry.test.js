@@ -176,8 +176,8 @@ describe('edge geometry adapter', () => {
 
     automatic.data.physicalOverrides.delaySeconds = 0.25
     const manualValues = resolveEdgePhysicalProperties(automatic)
-    expect(manualValues.distanceMeters).toBeNull()
-    expect(manualValues.refractiveIndex).toBeNull()
+    expect(manualValues.distanceMeters).toBe(1000)
+    expect(manualValues.refractiveIndex).toBe(1.5)
     expect(manualValues.propagationDelaySeconds).toBe(0.25)
     expect(automatic.data.physicalOverrides.distanceMeters).toBe(1000)
     expect(automatic.data.physicalOverrides.refractiveIndex).toBe(1.5)

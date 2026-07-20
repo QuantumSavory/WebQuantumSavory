@@ -1043,7 +1043,7 @@ export class DesignCommandService {
         value !== 'default'
         && (
           !functions.includes(value)
-          || (placement !== 'node' && value.endsWith('(self)'))
+          || (!['node', 'variable'].includes(placement) && value.endsWith('(self)'))
         )
       ) {
         throw new DesignCommandError(
@@ -1381,6 +1381,7 @@ export class DesignCommandService {
       type,
       Object.hasOwn(value, 'value') ? value.value : null,
       `Variable ${value.name || id}`,
+      { placement: 'variable' },
     )
     const variable = new Variable({
       id,
@@ -1421,6 +1422,7 @@ export class DesignCommandService {
         variable.type,
         value.value,
         `Variable ${variable.name}`,
+        { placement: 'variable' },
       )
     }
     context.affectedIds.add(variable.id)
