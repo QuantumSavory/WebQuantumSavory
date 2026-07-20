@@ -228,21 +228,68 @@ async function expectEditorLayersAligned(valueEditor) {
   expect(Math.abs(origins.caret.y - origins.highlightedText.y)).toBeLessThan(0.5)
 }
 
-async function expectCustomFunctionValidationLifecycle(page, valueEditor) {
+async function expectCustomFunctionValidationLifecycle(
+  page,
+  valueEditor,
+  { checkSmallViewport = false } = {},
+) {
   const input = valueEditor.locator('textarea')
   await expect(input).toBeVisible()
   const contextTrigger = valueEditor.getByRole('button', { name: 'Custom function context' })
-  const contextHelp = page.getByTestId('custom-function-context-help')
+  const contextHelp = page.getByRole('dialog', { name: 'Custom function context' })
   await expect(contextHelp).toHaveCount(0)
   await contextTrigger.click()
   await expect(contextHelp).toBeVisible()
+  await expect(
+    contextHelp.getByRole('button', { name: 'Close custom function context' }),
+  ).toBeFocused()
   await expect(contextHelp).toContainText('nodeid("Node name")')
   await expect(contextHelp).toContainText('self')
   await expect(contextHelp).toContainText('node protocol')
   await expect(contextHelp).toContainText('refractive_index')
   await expect(contextHelp).toContainText('Base.length(collection)')
-  await contextTrigger.click()
+  await page.keyboard.press('Escape')
   await expect(contextHelp).toHaveCount(0)
+  await expect(contextTrigger).toBeFocused()
+
+  if (checkSmallViewport) {
+    await page.setViewportSize({ width: 390, height: 420 })
+    const warning = page.getByRole('alertdialog', {
+      name: 'WebQuantumSavory works best on a larger screen',
+    })
+    await warning.getByRole('button', { name: 'Continue anyway' }).click()
+
+    await contextTrigger.scrollIntoViewIfNeeded()
+    await expect(contextTrigger).toBeInViewport()
+    await page.evaluate(() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    }))
+    await contextTrigger.click()
+    await expect(contextHelp).toBeVisible()
+    await expect(contextHelp).toHaveCSS('transform', 'none')
+    const bounds = await contextHelp.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+      }
+    })
+    expect(bounds.left).toBeGreaterThanOrEqual(0)
+    expect(bounds.top).toBeGreaterThanOrEqual(0)
+    expect(bounds.right).toBeLessThanOrEqual(390)
+    expect(bounds.bottom).toBeLessThanOrEqual(420)
+    await expect(contextHelp.locator('.custom-function-context-overlay-content')).toHaveCSS(
+      'overflow-y',
+      'auto',
+    )
+    await contextHelp.getByRole('button', { name: 'Close custom function context' }).click()
+    await expect(contextHelp).toHaveCount(0)
+    await expect(contextTrigger).toBeFocused()
+    await page.setViewportSize({ width: 1920, height: 1080 })
+  }
+
   await expect(valueEditor.getByTestId('code-collapsed-view')).toHaveCount(0)
 
   await input.fill('invalid(')
@@ -359,7 +406,11 @@ test.describe('Code editor lifecycle', () => {
     await expect(valueEditor.locator('textarea')).toHaveCount(0)
 
     await initialValue.click()
-    await expectCustomFunctionValidationLifecycle(page, valueEditor)
+    await expectCustomFunctionValidationLifecycle(
+      page,
+      valueEditor,
+      { checkSmallViewport: true },
+    )
 
     const serializedParameter = await page.evaluate(() => {
       const setupState = document.querySelector('#app')?.__vue_app__?._instance?.setupState

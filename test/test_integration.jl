@@ -932,6 +932,44 @@
       body = String(response.body)
       @test contains(body, "html") || contains(body, "swagger") || contains(body, "api")
       @test contains(body, "\"version\":\"$(platform_info["versions"]["app"])\"")
+
+      options_match = match(r"const options = (\{.*\})", body)
+      @test options_match !== nothing
+      if options_match !== nothing
+        swagger = JSON.parse(only(options_match.captures))["swaggerDoc"]
+        edge_data_schema =
+          swagger["paths"]["/parse_network_graph"]["post"]["requestBody"]["content"][
+            "application/json"
+          ]["schema"]["properties"]["net"]["properties"]["edges"]["items"]["properties"][
+            "data"
+          ]
+        edge_properties = edge_data_schema["properties"]
+        required_edge_data = Set(get(edge_data_schema, "required", Any[]))
+
+        for field in (
+          "distanceMeters",
+          "propagationDelaySeconds",
+          "refractiveIndex",
+        )
+          @test haskey(edge_properties, field)
+          @test edge_properties[field]["type"] == "number"
+          @test !(field in required_edge_data)
+          @test contains(edge_properties[field]["description"], "finite")
+        end
+        @test edge_properties["distanceMeters"]["minimum"] == 0
+        @test edge_properties["distanceMeters"]["nullable"] == true
+        @test contains(edge_properties["distanceMeters"]["description"], "meters")
+        @test contains(edge_properties["distanceMeters"]["description"], "omission or null")
+        @test edge_properties["propagationDelaySeconds"]["minimum"] == 0
+        @test get(edge_properties["propagationDelaySeconds"], "nullable", false) == false
+        @test contains(edge_properties["propagationDelaySeconds"]["description"], "seconds")
+        @test contains(edge_properties["propagationDelaySeconds"]["description"], "defaults to zero")
+        @test edge_properties["refractiveIndex"]["minimum"] == 0
+        @test edge_properties["refractiveIndex"]["exclusiveMinimum"] == true
+        @test edge_properties["refractiveIndex"]["nullable"] == true
+        @test contains(edge_properties["refractiveIndex"]["description"], "dimensionless")
+        @test contains(edge_properties["refractiveIndex"]["description"], "omission or null")
+      end
   end
 
   @testset "Test Code Endpoint" begin

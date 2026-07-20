@@ -1,6 +1,6 @@
 import { mount, shallowMount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import PrimeVue from 'primevue/config'
 import CodeEditorWithSymbols from '../../src/components/panels/CodeEditorWithSymbols.vue'
 import CustomFunctionContextHelp from '../../src/components/panels/CustomFunctionContextHelp.vue'
@@ -23,8 +23,15 @@ describe('custom-function contextual help', () => {
     await trigger.trigger('click')
     await nextTick()
     const popup = document.querySelector('[data-testid="custom-function-context-help"]')
+    const closeButton = popup.querySelector('[aria-label="Close custom function context"]')
 
     expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect(trigger.attributes('aria-controls')).toBe(popup.id)
+    expect(popup.getAttribute('role')).toBe('dialog')
+    expect(popup.getAttribute('aria-modal')).toBe('true')
+    expect(popup.getAttribute('aria-label')).toBe('Custom function context')
+    expect(popup.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.activeElement).toBe(closeButton)
     expect([...popup.querySelectorAll('dt code')].map(keyword => keyword.textContent)).toEqual([
       'nodeid("Node name")',
       'self',
@@ -40,10 +47,13 @@ describe('custom-function contextual help', () => {
     expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.length.recommendation)
     expect(CUSTOM_FUNCTION_CONTEXT_KEYWORDS).toHaveLength(7)
 
-    await trigger.trigger('click')
+    closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await nextTick()
-    expect(trigger.attributes('aria-expanded')).toBe('false')
-    expect(document.querySelector('[data-testid="custom-function-context-help"]')).toBeNull()
+    await vi.waitFor(() => {
+      expect(trigger.attributes('aria-expanded')).toBe('false')
+      expect(document.querySelector('[data-testid="custom-function-context-help"]')).toBeNull()
+    })
+    expect(document.activeElement).toBe(trigger.element)
 
     wrapper.unmount()
   })

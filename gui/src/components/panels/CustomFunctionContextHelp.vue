@@ -1,6 +1,7 @@
 <template>
   <div class="custom-function-context-help">
     <button
+      ref="trigger"
       type="button"
       class="custom-function-context-trigger noborder"
       aria-haspopup="dialog"
@@ -14,17 +15,25 @@
 
     <Popover
       ref="popover"
-      :id="popoverId"
+      :pt="popoverPassThrough"
       @show="popoverVisible = true"
       @hide="popoverVisible = false"
     >
-      <section
-        class="custom-function-context-popup"
-        role="dialog"
-        aria-label="Custom function context"
-        data-testid="custom-function-context-help"
-      >
-        <p class="custom-function-context-heading">Context available to custom functions</p>
+      <section class="custom-function-context-popup">
+        <header class="custom-function-context-header">
+          <h2 class="custom-function-context-heading">
+            Context available to custom functions
+          </h2>
+          <button
+            type="button"
+            class="custom-function-context-close noborder"
+            aria-label="Close custom function context"
+            autofocus
+            @click="closePopover"
+          >
+            <X :size="15" aria-hidden="true" />
+          </button>
+        </header>
         <dl>
           <template v-for="keyword in CUSTOM_FUNCTION_CONTEXT_KEYWORDS" :key="keyword.id">
             <dt><code>{{ keyword.syntax }}</code></dt>
@@ -42,17 +51,35 @@
 
 <script setup>
 import { ref, useId } from 'vue'
-import { CircleHelp } from '@lucide/vue'
+import { CircleHelp, X } from '@lucide/vue'
 import Popover from 'primevue/popover'
 import { CUSTOM_FUNCTION_CONTEXT_KEYWORDS } from '../../utils/customFunctionContext'
 
 const popover = ref(null)
+const trigger = ref(null)
 const popoverVisible = ref(false)
 const popoverId = `custom-function-context-${useId()}`
+const popoverPassThrough = {
+  root: {
+    id: popoverId,
+    'aria-label': 'Custom function context',
+    'data-testid': 'custom-function-context-help',
+    class: 'custom-function-context-overlay',
+  },
+  content: {
+    class: 'custom-function-context-overlay-content',
+  },
+}
 
 function togglePopover(event) {
   popoverVisible.value = !popoverVisible.value
   popover.value.toggle(event)
+}
+
+function closePopover() {
+  popoverVisible.value = false
+  popover.value.hide()
+  trigger.value?.focus()
 }
 </script>
 
@@ -80,17 +107,39 @@ function togglePopover(event) {
 }
 
 .custom-function-context-popup {
-  width: min(38rem, calc(100vw - (2 * var(--app-space-4))));
-  max-height: calc(100vh - (2 * var(--app-space-4)));
-  overflow-y: auto;
   color: var(--app-color-text-muted);
   font-size: 0.78rem;
 }
 
+.custom-function-context-header {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-2);
+  margin-bottom: var(--app-space-1);
+}
+
 .custom-function-context-heading {
-  margin: 0 0 var(--app-space-1);
+  flex: 1;
+  margin: 0;
   color: var(--app-color-text);
+  font-size: inherit;
   font-weight: 600;
+}
+
+.custom-function-context-close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: var(--app-space-1);
+  border-radius: var(--app-radius-control);
+  color: var(--app-color-text-muted);
+}
+
+.custom-function-context-close:hover,
+.custom-function-context-close:focus-visible {
+  background: var(--app-color-surface-hover);
+  color: var(--app-color-primary);
 }
 
 dl {
@@ -108,5 +157,33 @@ dd {
 code {
   color: var(--app-color-text);
   font-size: inherit;
+}
+</style>
+
+<style>
+.custom-function-context-overlay {
+  box-sizing: border-box;
+  inline-size: min(38rem, calc(100vw - (2 * var(--app-space-4))));
+  inline-size: min(38rem, calc(100dvw - (2 * var(--app-space-4))));
+  max-inline-size: calc(100vw - (2 * var(--app-space-4)));
+  max-inline-size: calc(100dvw - (2 * var(--app-space-4)));
+  max-block-size: calc(100vh - (2 * var(--app-space-4)));
+  max-block-size: calc(100dvh - (2 * var(--app-space-4)));
+}
+
+.custom-function-context-overlay-content {
+  box-sizing: border-box;
+  max-inline-size: 100%;
+  max-block-size: calc(100vh - (2 * var(--app-space-4)) - 2px);
+  max-block-size: calc(100dvh - (2 * var(--app-space-4)) - 2px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 900px), (max-height: 600px) {
+  .p-popover.custom-function-context-overlay {
+    margin-block-start: 0;
+    margin-block-end: 0;
+  }
 }
 </style>
