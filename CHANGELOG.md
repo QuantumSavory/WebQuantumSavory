@@ -6,6 +6,9 @@
   `QuantumSavory.org`.
 - Parallelized Buildkite's server-backed checks on isolated ports while retaining
   per-job serialization across overlapping builds.
+- Made generated Julia scripts use concise explicit imports for exporter-owned
+  helpers and constructors while preserving the broad package context available
+  to user-authored symbolic and custom-function source.
 
 ## 1.9.1
 

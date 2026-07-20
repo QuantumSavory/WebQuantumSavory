@@ -36,9 +36,285 @@ const _JULIA_KEYWORDS = Set([
   "else", "elseif", "end", "export", "false", "finally", "for",
   "function", "global", "if", "import", "in", "isa", "let", "local",
   "macro", "missing", "module", "mutable", "nothing", "primitive",
-  "quote", "return", "struct", "true", "try", "type", "using",
+  "outer", "public", "quote", "return", "struct", "true", "try", "type", "using",
   "where", "while",
 ])
+
+struct _ScriptReservedBinding end
+const _SCRIPT_RESERVED_BINDING = _ScriptReservedBinding()
+
+struct _ScriptImportEntry
+  source_module::Module
+  source_name::Symbol
+  local_name::Symbol
+end
+
+struct _ScriptImportRegistry
+  entries::Dict{Tuple{Module,Symbol},_ScriptImportEntry}
+  local_names::Dict{Tuple{Module,Symbol},Symbol}
+end
+
+function _script_import_registry(candidates=_script_import_candidates())
+  # Resolve every local name up front so aliases cannot depend on which
+  # constructor happens to be rendered first for a particular payload.
+  sources = sort!(unique!(collect(candidates)); by=source -> (
+    _script_module_path(first(source)),
+    string(last(source)),
+  ))
+  occupied = Dict{Symbol,Any}()
+  for base_module in (Core, Base)
+    for name in names(base_module)
+      isdefined(base_module, name) || continue
+      binding = getfield(base_module, name)
+      if haskey(occupied, name) && occupied[name] !== binding
+        occupied[name] = _SCRIPT_RESERVED_BINDING
+      else
+        occupied[name] = binding
+      end
+    end
+  end
+  for identifier in union(_SCRIPT_RESERVED_IDENTIFIERS, _JULIA_KEYWORDS)
+    occupied[Symbol(identifier)] = _SCRIPT_RESERVED_BINDING
+  end
+
+  candidate_bindings = Dict{Symbol,IdDict{Any,Nothing}}()
+  for (source_module, source_name) in sources
+    isdefined(source_module, source_name) || throw(server_error(
+      "Generated script import candidate references an unknown binding",
+      Dict{String,Any}(
+        "module" => _script_module_path(source_module),
+        "binding" => string(source_name),
+      ),
+    ))
+    bindings = get!(candidate_bindings, source_name, IdDict{Any,Nothing}())
+    bindings[getfield(source_module, source_name)] = nothing
+  end
+
+  direct_sources = Tuple{Module,Symbol}[]
+  aliased_sources = Tuple{Module,Symbol}[]
+  for source in sources
+    source_module, source_name = source
+    binding = getfield(source_module, source_name)
+    has_conflicting_candidate = length(candidate_bindings[source_name]) > 1
+    has_occupied_name = haskey(occupied, source_name) &&
+      occupied[source_name] !== binding
+    push!(
+      has_conflicting_candidate || has_occupied_name ? aliased_sources : direct_sources,
+      source,
+    )
+  end
+
+  local_names = Dict{Tuple{Module,Symbol},Symbol}()
+  for source in direct_sources
+    source_module, source_name = source
+    local_names[source] = source_name
+    occupied[source_name] = getfield(source_module, source_name)
+  end
+  for source in aliased_sources
+    source_module, source_name = source
+    binding = getfield(source_module, source_name)
+    local_name = _script_import_alias(occupied, source_module, source_name)
+    local_names[source] = local_name
+    occupied[local_name] = binding
+  end
+
+  return _ScriptImportRegistry(
+    Dict{Tuple{Module,Symbol},_ScriptImportEntry}(),
+    local_names,
+  )
+end
+
+function _script_module_path(source_module::Module)
+  # Gabs is a transitive package, but QuantumSavory intentionally exposes its
+  # basis module. Keep generated scripts on the public direct dependency path.
+  source_module === QuantumSavory.Gabs && return "QuantumSavory.Gabs"
+  return join(string.(Base.fullname(source_module)), ".")
+end
+
+function _script_qualified_reference(source_module::Module, name::Symbol)
+  return "$(_script_module_path(source_module)).$(name)"
+end
+
+function _script_import_alias(
+  occupied::Dict{Symbol,Any},
+  source_module::Module,
+  source_name::Symbol,
+)
+  source_text = string(source_name)
+  is_macro = startswith(source_text, "@")
+  bare_name = is_macro ? source_text[2:end] : source_text
+  Base.isidentifier(bare_name) || throw(server_error(
+    "Generated script import has an unsupported binding name",
+    Dict{String,Any}("binding" => source_text),
+  ))
+
+  module_parts = [
+    replace(part, r"[^A-Za-z0-9_]" => "_")
+    for part in split(_script_module_path(source_module), '.')
+  ]
+  prefix = join(module_parts, "_") * "_" * bare_name
+  candidate = Symbol((is_macro ? "@" : "") * prefix)
+  haskey(occupied, candidate) || return candidate
+
+  suffix = 2
+  while true
+    candidate = Symbol((is_macro ? "@" : "") * prefix * "_$(suffix)")
+    haskey(occupied, candidate) || return candidate
+    suffix += 1
+  end
+end
+
+function _script_import_reference!(
+  registry::_ScriptImportRegistry,
+  source_module::Module,
+  source_name::Symbol,
+)
+  key = (source_module, source_name)
+  entry = get(registry.entries, key, nothing)
+  entry === nothing || return string(entry.local_name)
+  local_name = get(registry.local_names, key, nothing)
+  local_name === nothing && throw(server_error(
+    "Generated script import was not declared in the candidate registry",
+    Dict{String,Any}(
+      "module" => _script_module_path(source_module),
+      "binding" => string(source_name),
+    ),
+  ))
+
+  entry = _ScriptImportEntry(source_module, source_name, local_name)
+  registry.entries[key] = entry
+  return string(local_name)
+end
+
+function _script_reference(
+  registry::Union{Nothing,_ScriptImportRegistry},
+  source_module::Module,
+  source_name::Symbol,
+)
+  registry === nothing && return _script_qualified_reference(source_module, source_name)
+  return _script_import_reference!(registry, source_module, source_name)
+end
+
+function _script_reference(
+  registry::Union{Nothing,_ScriptImportRegistry},
+  source_module::Module,
+  binding,
+)
+  _, source_name = _script_binding_source(source_module, binding)
+  return _script_reference(registry, source_module, source_name)
+end
+
+function _script_reference(registry::Union{Nothing,_ScriptImportRegistry}, binding)
+  source_module, source_name = _script_binding_source(binding)
+  return _script_reference(registry, source_module, source_name)
+end
+
+function _script_import_lines(registry::_ScriptImportRegistry)
+  entries = sort!(collect(values(registry.entries)); by=entry -> (
+    _script_module_path(entry.source_module),
+    string(entry.source_name),
+    string(entry.local_name),
+  ))
+  grouped = Dict{String,Vector{String}}()
+  for entry in entries
+    module_path = _script_module_path(entry.source_module)
+    reference = string(entry.source_name) * (
+      entry.local_name == entry.source_name ? "" : " as $(entry.local_name)"
+    )
+    push!(get!(grouped, module_path, String[]), reference)
+  end
+  return [
+    "using $module_path: $(join(grouped[module_path], ", "))"
+    for module_path in sort!(collect(keys(grouped)))
+  ]
+end
+
+const _SCRIPT_STATIC_IMPORT_SOURCES = (
+  (QuantumSavory, :Register),
+  (QuantumSavory, :RegisterNet),
+  (QuantumSavory, :get_time_tracker),
+  (QuantumSavory, :registernetplot_axis),
+  (QuantumSavory, :express),
+  (Graphs, :SimpleGraph),
+  (Graphs, :add_edge!),
+  (ConcurrentSim, :run),
+  (ConcurrentSim, Symbol("@process")),
+  (CairoMakie, :activate!),
+  (CairoMakie, :Figure),
+  (CairoMakie, :record),
+  (LinearAlgebra, :tr),
+)
+
+function _script_binding_source(source_module::Module, binding)
+  source_name = nameof(binding)
+  getfield(source_module, source_name) === binding || throw(server_error(
+    "Generated script import module does not expose the resolved binding",
+    Dict{String,Any}(
+      "module" => _script_module_path(source_module),
+      "binding" => string(binding),
+    ),
+  ))
+  return source_module, source_name
+end
+
+_script_binding_source(binding) = _script_binding_source(parentmodule(binding), binding)
+
+function _script_import_candidates()
+  candidates = Set{Tuple{Module,Symbol}}(_SCRIPT_STATIC_IMPORT_SOURCES)
+  push!(candidates, _script_binding_source(QuantumSavory.Wildcard))
+
+  for spec in values(_REPRESENTATION_SPECS)
+    push!(candidates, _script_binding_source(
+      spec.script.constructor.source_module,
+      spec.script.constructor.binding,
+    ))
+    for argument in spec.script.arguments
+      push!(candidates, _script_binding_source(
+        argument.source_module,
+        argument.binding,
+      ))
+    end
+  end
+  for entry in QuantumSavory.ProtocolZoo.available_protocol_types()
+    push!(candidates, _script_binding_source(entry.type))
+  end
+  for entry in QuantumSavory.available_background_types()
+    push!(candidates, _script_binding_source(entry.type))
+  end
+  for entry in QuantumSavory.available_slot_types()
+    push!(candidates, _script_binding_source(entry.type))
+  end
+  for entry in values(STATES_ZOO_TYPE_REGISTRY)
+    push!(candidates, _script_binding_source(entry.type))
+  end
+  for definition in _tag_catalog_snapshot().named
+    push!(candidates, _script_binding_source(definition.type))
+  end
+
+  return sort!(collect(candidates); by=source -> (
+    _script_module_path(first(source)),
+    string(last(source)),
+  ))
+end
+
+function _script_static_references!(registry::_ScriptImportRegistry)
+  return (
+    register=_script_reference(registry, QuantumSavory, :Register),
+    register_net=_script_reference(registry, QuantumSavory, :RegisterNet),
+    get_time_tracker=_script_reference(registry, QuantumSavory, :get_time_tracker),
+    registernetplot_axis=_script_reference(
+      registry,
+      QuantumSavory,
+      :registernetplot_axis,
+    ),
+    simple_graph=_script_reference(registry, Graphs, :SimpleGraph),
+    add_edge=_script_reference(registry, Graphs, :add_edge!),
+    run=_script_reference(registry, ConcurrentSim, :run),
+    activate=_script_reference(registry, CairoMakie, :activate!),
+    figure=_script_reference(registry, CairoMakie, :Figure),
+    record=_script_reference(registry, CairoMakie, :record),
+  )
+end
 
 """Return a single-line representation suitable for generated comments."""
 function _script_comment(value)
@@ -170,7 +446,12 @@ function _script_validate_deferred_lambda(value, context::String)
   return nothing
 end
 
-function _script_states_zoo_expression(recipe, context::String; return_trace::Bool=false)
+function _script_states_zoo_expression(
+  recipe,
+  context::String;
+  return_trace::Bool=false,
+  imports::Union{Nothing,_ScriptImportRegistry}=nothing,
+)
   # Constructing the allowlisted symbolic value validates exact keys, ranges,
   # and the constructor without evaluating user-provided Julia source.
   construct_states_zoo_recipe(recipe)
@@ -181,20 +462,26 @@ function _script_states_zoo_expression(recipe, context::String; return_trace::Bo
     _script_literal(recipe["parameters"][string(name)], "$context parameter '$(name)'")
     for name in parameter_names
   ]
-  constructor = string(entry.type)
+  constructor = _script_reference(imports, entry.type)
   expression = "$constructor(" * join(arguments, ", ") * ")"
   entry.weighted || return expression
+  express = _script_reference(imports, QuantumSavory, :express)
+  trace = _script_reference(imports, LinearAlgebra, :tr)
   result = return_trace ? "(state / trace, trace)" : "state / trace"
   return "(let\n" *
     "    state = $expression\n" *
-    "    trace = abs(QuantumSavory.express(LinearAlgebra.tr(state)))\n" *
+    "    trace = abs($express($trace(state)))\n" *
     "    $result\n" *
     "end)"
 end
 
-function _script_symbolic_expression(value, context::String)
+function _script_symbolic_expression(
+  value,
+  context::String;
+  imports::Union{Nothing,_ScriptImportRegistry}=nothing,
+)
   if _states_zoo_object_like(value) && get(value, "kind", nothing) == "states_zoo"
-    return _script_states_zoo_expression(value, context)
+    return _script_states_zoo_expression(value, context; imports)
   elseif value isa AbstractString
     return _script_raw_expression(value, context)
   end
@@ -204,9 +491,15 @@ function _script_symbolic_expression(value, context::String)
   ))
 end
 
-function _script_regular_expression(raw_type, value, context::String)
+function _script_regular_expression(
+  raw_type,
+  value,
+  context::String;
+  imports::Union{Nothing,_ScriptImportRegistry}=nothing,
+)
   if any(type_name in ("Wildcard", "QuantumSavory.Wildcard") for type_name in _script_declared_types(raw_type))
-    return "QuantumSavory.Wildcard()"
+    wildcard = _script_reference(imports, QuantumSavory.Wildcard)
+    return "$wildcard()"
   end
   declared_type = _script_declared_type(raw_type)
   converted, converted_value = _convert_parameter_value(declared_type, value)
@@ -224,14 +517,20 @@ function _script_regular_expression(raw_type, value, context::String)
   ))
 end
 
-function _script_value_expression(raw_type, value, context::String; node_index=nothing)
+function _script_value_expression(
+  raw_type,
+  value,
+  context::String;
+  node_index=nothing,
+  imports::Union{Nothing,_ScriptImportRegistry}=nothing,
+)
   special_type = _script_special_type(raw_type)
   if special_type in ("Function", "Lambda")
     return _script_function_expression(value, special_type, node_index, context)
   elseif special_type == "Symbolic"
-    return _script_symbolic_expression(value, context)
+    return _script_symbolic_expression(value, context; imports)
   end
-  return _script_regular_expression(raw_type, value, context)
+  return _script_regular_expression(raw_type, value, context; imports)
 end
 
 function _script_weighted_states_zoo_recipe(variable::Variable)
@@ -332,7 +631,11 @@ function _script_simulation_config(payload)
   return Float64(duration), Float64(time_step)
 end
 
-function _script_noise_expression(noise_definition, context::String)
+function _script_noise_expression(
+  noise_definition,
+  context::String;
+  imports::Union{Nothing,_ScriptImportRegistry}=nothing,
+)
   noise_definition === nothing && return "nothing"
   if noise_definition isa AbstractString
     String(noise_definition) == "default" && return "nothing"
@@ -361,14 +664,24 @@ function _script_noise_expression(noise_definition, context::String)
     haskey(metadata, name) || throw(validation_error("$context has unknown parameter '$name'"))
     value = get(parameter, "value", nothing)
     value === nothing && continue
-    expression = _script_regular_expression(metadata[name], value, "$context parameter '$name'")
+    expression = _script_regular_expression(
+      metadata[name],
+      value,
+      "$context parameter '$name'";
+      imports,
+    )
     push!(keywords, "$name = $expression")
   end
-  constructor = string(noise_type)
+  constructor = _script_reference(imports, noise_type)
   return isempty(keywords) ? "$constructor()" : "$constructor(; " * join(keywords, ", ") * ")"
 end
 
-function _script_variable_bindings(payload, lines::Vector{String}, used::Set{String})
+function _script_variable_bindings(
+  payload,
+  lines::Vector{String},
+  used::Set{String};
+  imports::Union{Nothing,_ScriptImportRegistry}=nothing,
+)
   variables = _parse_variables(payload)
   bindings = Dict{String,NamedTuple}()
   raw_variables = get(payload, "variables", Any[])
@@ -438,6 +751,7 @@ function _script_variable_bindings(payload, lines::Vector{String}, used::Set{Str
         variable.value,
         "Variable '$(_script_comment(variable.name))'";
         return_trace=true,
+        imports,
       )
       push!(
         lines,
@@ -472,9 +786,15 @@ function _script_variable_bindings(payload, lines::Vector{String}, used::Set{Str
     end
 
     expression = if binding.fresh_wildcard
-      "(() -> QuantumSavory.Wildcard())"
+      wildcard = _script_reference(imports, QuantumSavory.Wildcard)
+      "(() -> $wildcard())"
     else
-      _script_value_expression(variable.type, variable.value, "Variable '$(_script_comment(variable.name))'")
+      _script_value_expression(
+        variable.type,
+        variable.value,
+        "Variable '$(_script_comment(variable.name))'";
+        imports,
+      )
     end
     expression === nothing && throw(validation_error("Variable '$(_script_comment(variable.name))' cannot use a constructor default here"))
     push!(
@@ -491,6 +811,7 @@ function _script_protocol_parameter_expression(
   context::String;
   node_index=nothing,
   declared_type=nothing,
+  imports::Union{Nothing,_ScriptImportRegistry}=nothing,
 )
   name = _required_nonempty_string(parameter, "name", "$context parameter")
   value = get(parameter, "value", nothing)
@@ -509,7 +830,7 @@ function _script_protocol_parameter_expression(
       nullable=named_tag_semantics.nullable,
       context="$context parameter '$name'",
     )
-    return name, tag_type === nothing ? "nothing" : _qualified_tag_type_id(tag_type)
+    return name, tag_type === nothing ? "nothing" : _script_reference(imports, tag_type)
   end
 
   reference = _parse_variable_reference(value; context="$context parameter '$name'")
@@ -524,6 +845,7 @@ function _script_protocol_parameter_expression(
         binding.variable.value,
         "Variable '$(_script_comment(binding.variable.name))' assigned to $context parameter '$name'";
         node_index=node_index,
+        imports,
       )
       expression === nothing && throw(validation_error(
         "Variable '$(_script_comment(binding.variable.name))' cannot use a constructor default here",
@@ -538,7 +860,13 @@ function _script_protocol_parameter_expression(
     get(parameter, "type", nothing),
     value,
   )
-  expression = _script_value_expression(handling_type, value, "$context parameter '$name'"; node_index=node_index)
+  expression = _script_value_expression(
+    handling_type,
+    value,
+    "$context parameter '$name'";
+    node_index=node_index,
+    imports,
+  )
   return name, expression
 end
 
@@ -552,6 +880,7 @@ function _script_protocol!(
   node_index=nothing,
   node_a=nothing,
   node_b=nothing,
+  imports::Union{Nothing,_ScriptImportRegistry}=nothing,
 )
   _is_object_like(protocol_definition) || throw(validation_error("$context must be an object"))
   raw_type = _required_nonempty_string(protocol_definition, "type", context)
@@ -590,6 +919,7 @@ function _script_protocol!(
       context;
       node_index=node_index,
       declared_type=declared_parameter_types[constructor_name],
+      imports,
     )
     expression === nothing && continue
     keyword = get(PROTOCOL_KEYWORD_MAPPINGS, name, name)
@@ -603,10 +933,11 @@ function _script_protocol!(
     used,
     "protocol_instance_$(length(protocol_entries) + 1)",
   )
-  constructor = string(protocol_type)
+  constructor = _script_reference(imports, protocol_type)
   push!(lines, "# $(_script_comment(context)); GUI protocol ID: $(_script_comment(protocol_id))")
   push!(lines, "$binding = $constructor(; " * join(keywords, ", ") * ")")
-  push!(lines, "@process $binding()")
+  process = _script_reference(imports, ConcurrentSim, Symbol("@process"))
+  push!(lines, "$process $binding()")
   push!(lines, "")
   push!(protocol_entries, protocol_id => binding)
   return nothing
@@ -632,6 +963,11 @@ function generate_julia_script(payload)
   default_representations = representation_config(data)
   filename = _script_filename(data["name"])
   output_stem = first(filename, length(filename) - 3)
+  imports = _script_import_registry()
+  references = _script_static_references!(imports)
+  render_reference = (source_module, binding) ->
+    _script_reference(imports, source_module, binding)
+  import_marker = "# __WEBQUANTUMSAVORY_GENERATED_IMPORTS__"
 
   lines = String[
     "# This file was generated by WebQuantumSavory as pedagogical onboarding.",
@@ -642,6 +978,7 @@ function generate_julia_script(payload)
     "# In a Julia environment, install the dependencies once with:",
     "# import Pkg; Pkg.add([\"QuantumSavory\", \"Graphs\", \"ConcurrentSim\", \"ResumableFunctions\", \"CairoMakie\"])",
     "",
+    "# Broad imports preserve the evaluation context for user-authored expressions.",
     "using QuantumSavory",
     "using QuantumSavory.ProtocolZoo",
     "using QuantumSavory.StatesZoo",
@@ -651,8 +988,10 @@ function generate_julia_script(payload)
     "using CairoMakie",
     "using LinearAlgebra",
     "import InteractiveUtils, REPL",
+    "# Explicit imports keep exporter-generated source concise and auditable.",
+    import_marker,
     "",
-    "CairoMakie.activate!()",
+    "$(references.activate)()",
     "",
     "# -----------------------------------------------------------------------------",
     "# Simulation settings",
@@ -668,14 +1007,14 @@ function generate_julia_script(payload)
   ]
 
   used = copy(_SCRIPT_RESERVED_IDENTIFIERS)
-  variable_bindings = _script_variable_bindings(data, lines, used)
+  variable_bindings = _script_variable_bindings(data, lines, used; imports)
 
   append!(lines, [
     "",
     "# -----------------------------------------------------------------------------",
     "# Registers",
     "# -----------------------------------------------------------------------------",
-    "registers = QuantumSavory.Register[]",
+    "registers = $(references.register)[]",
   ])
   for (node_index, node) in enumerate(nodes)
     node_data = node["data"]
@@ -697,14 +1036,15 @@ function generate_julia_script(payload)
       slot_type_name = _required_nonempty_string(slot, "type", "Node $node_index slot $slot_index")
       slot_type = _resolve_type_from_string(slot_type_name, :slot)
       slot_type === nothing && throw(validation_error("Node $node_index slot $slot_index has unknown type '$slot_type_name'"))
-      push!(trait_expressions, "$(string(slot_type))()")
+      push!(trait_expressions, "$(_script_reference(imports, slot_type))()")
       push!(
         representation_expressions,
-        script_representation(default_representations, slot_type),
+        script_representation(default_representations, slot_type, render_reference),
       )
       push!(background_expressions, _script_noise_expression(
         get(slot, "backgroundNoise", nothing),
-        "Node $node_index slot $slot_index background noise",
+        "Node $node_index slot $slot_index background noise";
+        imports,
       ))
     end
     traits = isempty(trait_expressions) ? "Any[]" : "[" * join(trait_expressions, ", ") * "]"
@@ -717,7 +1057,10 @@ function generate_julia_script(payload)
     push!(lines, "traits = $traits")
     push!(lines, "representations = $representations")
     push!(lines, "backgrounds = $backgrounds")
-    push!(lines, "push!(registers, QuantumSavory.Register(traits, representations, backgrounds))")
+    push!(
+      lines,
+      "push!(registers, $(references.register)(traits, representations, backgrounds))",
+    )
   end
 
   append!(lines, [
@@ -742,7 +1085,7 @@ function generate_julia_script(payload)
     "# -----------------------------------------------------------------------------",
     "# Register network and simulation clock",
     "# -----------------------------------------------------------------------------",
-    "graph = Graphs.SimpleGraph(length(registers))",
+    "graph = $(references.simple_graph)(length(registers))",
   ])
   id_to_index = Dict(String(node["id"]) => index for (index, node) in enumerate(nodes))
   for edge in edges
@@ -750,7 +1093,7 @@ function generate_julia_script(payload)
     source = get(id_to_index, String(edge["source"]), nothing)
     target = get(id_to_index, String(edge["target"]), nothing)
     (source !== nothing && target !== nothing) || throw(validation_error("Edge references an unknown node"))
-    push!(lines, "Graphs.add_edge!(graph, $source, $target)")
+    push!(lines, "$(references.add_edge)(graph, $source, $target)")
   end
   push!(lines, "propagation_delays = Dict{Tuple{Int,Int},Float64}(")
   for edge in edges
@@ -765,10 +1108,10 @@ function generate_julia_script(payload)
     "link_delay(src, dst) = propagation_delays[minmax(src, dst)]",
   ])
   append!(lines, [
-    "network = QuantumSavory.RegisterNet(graph, registers; " *
+    "network = $(references.register_net)(graph, registers; " *
       "names = $(_script_literal(_register_names(nodes), "register names")), " *
       "classical_delay = link_delay, quantum_delay = link_delay)",
-    "sim = QuantumSavory.get_time_tracker(network)",
+    "sim = $(references.get_time_tracker)(network)",
     "",
     "# -----------------------------------------------------------------------------",
     "# Protocol construction and initialization",
@@ -786,6 +1129,7 @@ function generate_julia_script(payload)
         lines, protocol, variable_bindings, used, protocol_entries,
         "Node $node_index protocol $protocol_index";
         node_index=node_index,
+        imports,
       )
     end
   end
@@ -802,6 +1146,7 @@ function generate_julia_script(payload)
         "Edge $edge_index protocol $protocol_index";
         node_a=source,
         node_b=target,
+        imports,
       )
     end
   end
@@ -810,7 +1155,8 @@ function generate_julia_script(payload)
   for (protocol_index, protocol) in enumerate(floating_protocols)
     _script_protocol!(
       lines, protocol, variable_bindings, used, protocol_entries,
-      "Floating protocol $protocol_index",
+      "Floating protocol $protocol_index";
+      imports,
     )
   end
 
@@ -832,19 +1178,19 @@ function generate_julia_script(payload)
     "# -----------------------------------------------------------------------------",
     "# Choose only one execution recipe. Comment this line before enabling either",
     "# optional recipe below; a ConcurrentSim simulation cannot be rewound.",
-    "ConcurrentSim.run(sim, simulation_duration)",
+    "$(references.run)(sim, simulation_duration)",
     "",
     "# -----------------------------------------------------------------------------",
     "# Optional: animate the network while the simulation executes",
     "# Remove the #= and =# delimiters, and comment out the fixed run above.",
     "# -----------------------------------------------------------------------------",
     "#=",
-    "figure = CairoMakie.Figure(size = (700, 500))",
-    "_, network_axis, _, network_observable = QuantumSavory.registernetplot_axis(figure[1, 1], network)",
+    "figure = $(references.figure)(size = (700, 500))",
+    "_, network_axis, _, network_observable = $(references.registernetplot_axis)(figure[1, 1], network)",
     "frame_times = collect(0:animation_step:simulation_duration)",
     "last(frame_times) < simulation_duration && push!(frame_times, simulation_duration)",
-    "CairoMakie.record(figure, animation_filename, frame_times; framerate = 10) do time",
-    "    ConcurrentSim.run(sim, time)",
+    "$(references.record)(figure, animation_filename, frame_times; framerate = 10) do time",
+    "    $(references.run)(sim, time)",
     "    notify(network_observable)",
     "    network_axis.title = \"t=\$(round(time; digits = 3))\"",
     "end",
@@ -855,7 +1201,7 @@ function generate_julia_script(payload)
     "# Remove the #= and =# delimiters, and comment out the fixed run above.",
     "# -----------------------------------------------------------------------------",
     "#=",
-    "ConcurrentSim.run(sim, simulation_duration)",
+    "$(references.run)(sim, simulation_duration)",
     "mkpath(protocol_output_directory)",
     "for (index, (protocol_id, protocol)) in enumerate(protocols)",
     "    safe_id = replace(protocol_id, r\"[^A-Za-z0-9._-]+\" => \"-\")",
@@ -872,6 +1218,12 @@ function generate_julia_script(payload)
     "=#",
     "",
   ])
+
+  import_index = findfirst(==(import_marker), lines)
+  import_index === nothing && throw(server_error(
+    "Generated script import marker is missing",
+  ))
+  splice!(lines, import_index:import_index, _script_import_lines(imports))
 
   script = join(lines, "\n")
   try
