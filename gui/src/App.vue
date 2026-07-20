@@ -456,6 +456,25 @@ designCommands = new DesignCommandService({
       message: response?.error || 'The code value is invalid.',
     }
   },
+  validateNumericExpressionValue: async (
+    type,
+    source,
+    { placement, context } = {},
+  ) => {
+    if (!api.isUnsafeCodeEvaluationEnabled()) {
+      return {
+        valid: false,
+        message: 'Server-side Julia evaluation is disabled.',
+      }
+    }
+    const response = await api.validateNumericExpression(source, type, placement, { context })
+    return {
+      valid: response?.success === true,
+      value: response?.results?.value,
+      deferred: response?.results?.deferred === true,
+      message: response?.error?.message || response?.error || 'The numeric expression is invalid.',
+    }
+  },
   previewState: (stateType, parameters) => api.fetchStatesZooPreview(stateType, parameters),
   markDirty: () => markProjectDirtyRef.value(),
   generators: {
@@ -1469,6 +1488,7 @@ onUnmounted(() => {
                 v-if="selectedType === 'node' && selectedItem"
                 :key="selectedItem && selectedItem.id"
                 :node="selectedItem" 
+                :projectData="projectData"
                 :nodeIndex="selectedNodeIndex"
                 :justCreated="justCreatedNode"
                 :editingLocked="isNetworkEditingDisabled"
@@ -1549,6 +1569,7 @@ onUnmounted(() => {
                 :protocols="projectData.net.protocols"
                 :editingLocked="isNetworkEditingDisabled"
                 :variables="projectData.variables"
+                :projectData="projectData"
                 v-model:collapsed="panelCollapsedStates.floatingProtocolsPanel"
                 @design-operations="executeGuiDesignOperations"
               />

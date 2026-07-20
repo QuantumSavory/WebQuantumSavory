@@ -462,11 +462,108 @@ function _script_function_expression(
   )
 end
 
+function _script_numeric_expression(
+  value,
+  target_type::String,
+  node_index,
+  context::String;
+  edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
+  minimum=nothing,
+  maximum=nothing,
+)
+  expression = _parse_numeric_expression(value; context)
+  expression === nothing && throw(validation_error(
+    "$context must use the numeric-expression tagged representation",
+  ))
+  parsed = try
+    _parse_complete_source(expression.source)
+  catch error
+    throw(validation_error(
+      "$context is not valid Julia syntax",
+      Dict{String,Any}("parse_error" => sprint(showerror, error)),
+    ))
+  end
+  allowed_bindings = Set((:nodeid,))
+  node_index === nothing || push!(allowed_bindings, :self)
+  edge_context === nothing || union!(
+    allowed_bindings,
+    (:length, :delay, :refractive_index, :node_a, :node_b),
+  )
+  unavailable = setdiff(
+    _free_numeric_context_bindings(parsed),
+    allowed_bindings,
+  )
+  isempty(unavailable) || throw(validation_error(
+    "$context uses unavailable assignment binding '$(first(sort!(collect(unavailable))))'",
+  ))
+
+  indented = replace(expression.source, "\n" => "\n        ")
+  # A same-named local initializer (`nodeid = nodeid`) resolves its right-hand
+  # side as the new local in Julia's hard scope. Capture the generated script's
+  # global resolver explicitly before exposing the lexical expression binding.
+  context_bindings =
+    "    nodeid = Base.getproperty(@__MODULE__, :nodeid)\n"
+  node_index === nothing || (context_bindings *= "    self = $node_index\n")
+  if edge_context !== nothing
+    context_bindings *=
+      "    length = $(_script_literal(edge_context.distance_meters, "edge length"))\n" *
+      "    delay = $(_script_literal(edge_context.delay_seconds, "edge delay"))\n" *
+      "    refractive_index = $(_script_literal(edge_context.refractive_index, "edge refractive index"))\n" *
+      "    node_a = $(edge_context.node_a)\n" *
+      "    node_b = $(edge_context.node_b)\n"
+  end
+
+  target_constructor = target_type == "Float64" ? "Base.Float64" : "Base.Int64"
+  checks =
+    "    expression_value isa Base.Real && !(expression_value isa Base.Bool) || " *
+    "Base.throw(Base.ArgumentError(\"Numeric expression must evaluate to a real number\"))\n" *
+    "    cast_value = $target_constructor(expression_value)\n"
+  if target_type == "Float64"
+    checks *=
+      "    Base.isfinite(cast_value) || Base.throw(Base.ArgumentError(" *
+      "\"Numeric expression must evaluate to a finite Float64\"))\n"
+  end
+  if minimum !== nothing
+    checks *=
+      "    cast_value >= $(_script_literal(minimum, "$context minimum")) || " *
+      "Base.throw(Base.ArgumentError(\"Numeric expression result is below its minimum\"))\n"
+  end
+  if maximum !== nothing
+    checks *=
+      "    cast_value <= $(_script_literal(maximum, "$context maximum")) || " *
+      "Base.throw(Base.ArgumentError(\"Numeric expression result is above its maximum\"))\n"
+  end
+
+  return "(let\n" * context_bindings *
+    "    expression_value = let\n" *
+    "        $indented\n" *
+    "    end\n" *
+    checks *
+    "    cast_value\n" *
+    "end)"
+end
+
 function _script_validate_deferred_lambda(value, context::String)
   # `node_index = nothing` would reject node-only `self` before a deferred
   # Lambda has an assignment; validate in a representative node context, then
   # discard this expression and rebuild it with the actual assignment context.
   _script_function_expression(value, "Lambda", 1, context)
+  return nothing
+end
+
+function _script_validate_deferred_numeric_expression(value, context::String)
+  expression = _parse_numeric_expression(value; context)
+  expression === nothing && throw(validation_error(
+    "$context must use the numeric-expression tagged representation",
+  ))
+  try
+    _parse_complete_source(expression.source)
+  catch error
+    throw(validation_error(
+      "$context is not valid Julia syntax",
+      Dict{String,Any}("parse_error" => sprint(showerror, error)),
+    ))
+  end
   return nothing
 end
 
@@ -529,6 +626,15 @@ function _script_regular_expression(
   converted, converted_value = _convert_parameter_value(declared_type, value)
   converted && return _script_literal(converted_value, context)
 
+  # Scalar numeric Julia source is represented only by the explicit tagged
+  # contract. Untagged strings remain literals and must parse as such.
+  declared_types = _script_declared_types(raw_type)
+  if any(type_name -> type_name in NUMERIC_EXPRESSION_TARGETS, declared_types)
+    throw(validation_error(
+      "$context is not a valid numeric literal for declared type '$declared_type'",
+    ))
+  end
+
   # The normal parser's final fallback interprets complex values as Julia. The
   # exporter preserves that local-script capability but only parses the source;
   # it never evaluates it in the web-server process.
@@ -548,7 +654,25 @@ function _script_value_expression(
   node_index=nothing,
   edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
   imports::Union{Nothing,_ScriptImportRegistry}=nothing,
+  constructor_metadata=nothing,
 )
+  numeric_expression = _parse_numeric_expression(value; context)
+  if numeric_expression !== nothing
+    target_type = _numeric_expression_target(raw_type)
+    target_type === nothing && throw(validation_error(
+      "$context does not authoritatively accept a Float64 or Int64 expression",
+    ))
+    return _script_numeric_expression(
+      value,
+      target_type,
+      node_index,
+      context;
+      edge_context,
+      minimum=_constructor_numeric_bound(constructor_metadata, :min),
+      maximum=_constructor_numeric_bound(constructor_metadata, :max),
+    )
+  end
+
   special_type = _script_special_type(raw_type)
   if special_type in ("Function", "Lambda")
     return _script_function_expression(
@@ -735,6 +859,10 @@ function _script_variable_bindings(
   for item in ordered_variables
     variable = item.variable
     special_type = _script_special_type(variable.type)
+    numeric_expression = _parse_numeric_expression(
+      variable.value;
+      context="Variable '$(_script_comment(variable.name))'",
+    )
     binding = _script_identifier(
       "variable_$(variable.name)",
       used,
@@ -748,7 +876,9 @@ function _script_variable_bindings(
     self_dependent = special_type in ("Function", "Lambda") && any(
       first(pair) == strip(string(variable.value)) for pair in SELF_COMPARISON_OPERATORS
     )
-    per_assignment = special_type == "Lambda" || self_dependent
+    per_assignment = numeric_expression !== nothing ||
+      special_type == "Lambda" ||
+      self_dependent
     fresh_wildcard = variable.type in ("Wildcard", "QuantumSavory.Wildcard")
     bindings[variable.id] = (
       name=binding,
@@ -802,7 +932,16 @@ function _script_variable_bindings(
     end
 
     if binding.per_assignment
-      if _script_special_type(variable.type) == "Lambda"
+      numeric_expression = _parse_numeric_expression(
+        variable.value;
+        context="Variable '$(_script_comment(variable.name))'",
+      )
+      if numeric_expression !== nothing
+        _script_validate_deferred_numeric_expression(
+          variable.value,
+          "Variable '$(_script_comment(variable.name))'",
+        )
+      elseif _script_special_type(variable.type) == "Lambda"
         _script_validate_deferred_lambda(
           variable.value,
           "Variable '$(_script_comment(variable.name))'",
@@ -843,6 +982,7 @@ function _script_protocol_parameter_expression(
   node_index=nothing,
   edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
   declared_type=nothing,
+  constructor_metadata=nothing,
   imports::Union{Nothing,_ScriptImportRegistry}=nothing,
 )
   name = _required_nonempty_string(parameter, "name", "$context parameter")
@@ -872,12 +1012,26 @@ function _script_protocol_parameter_expression(
     binding.uses_default && return name, nothing
     binding.fresh_wildcard && return name, "$(binding.name)()"
     if binding.per_assignment
+      numeric_expression = _parse_numeric_expression(
+        binding.variable.value;
+        context="Variable '$(_script_comment(binding.variable.name))'",
+      )
+      if numeric_expression !== nothing
+        target_type = _numeric_expression_target_for_parameter(
+          declared_type,
+          binding.variable.type,
+        )
+        target_type == binding.variable.type || throw(validation_error(
+          "Variable '$(_script_comment(binding.variable.name))' numeric expression is incompatible with $context parameter '$name'",
+        ))
+      end
       expression = _script_value_expression(
         binding.variable.type,
         binding.variable.value,
         "Variable '$(_script_comment(binding.variable.name))' assigned to $context parameter '$name'";
         node_index=node_index,
         edge_context=edge_context,
+        constructor_metadata,
         imports,
       )
       expression === nothing && throw(validation_error(
@@ -899,6 +1053,7 @@ function _script_protocol_parameter_expression(
     "$context parameter '$name'";
     node_index=node_index,
     edge_context=edge_context,
+    constructor_metadata,
     imports,
   )
   return name, expression
@@ -922,6 +1077,8 @@ function _script_protocol!(
   protocol_type = _resolve_type_from_string(raw_type, :protocol)
   protocol_type === nothing && throw(validation_error("$context has unknown type '$raw_type'"))
   declared_parameter_types = _protocol_constructor_parameter_types(protocol_type)
+  constructor_parameter_metadata =
+    _protocol_constructor_parameter_metadata(protocol_type)
   parameters = get(protocol_definition, "parameters", Any[])
   parameters isa AbstractVector || throw(validation_error("$context parameters must be an array"))
 
@@ -955,6 +1112,11 @@ function _script_protocol!(
       node_index=node_index,
       edge_context=edge_context,
       declared_type=declared_parameter_types[constructor_name],
+      constructor_metadata=get(
+        constructor_parameter_metadata,
+        constructor_name,
+        nothing,
+      ),
       imports,
     )
     expression === nothing && continue

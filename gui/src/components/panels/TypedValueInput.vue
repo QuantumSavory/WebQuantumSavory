@@ -1,17 +1,30 @@
 <template>
+  <NumericExpressionInput
+    v-if="isNumericExpressionOptionId(type)"
+    :parameter="parameter"
+    :target-type="numericExpressionTargetType(type)"
+    :placement="category"
+    :context="numericExpressionContext"
+    :template="template"
+    :disabled="disabled"
+    :minimum="numericMinimum"
+    :maximum="numericMaximum"
+    :aria-describedby="ariaDescribedby"
+    @commit="emit('commit')"
+  />
   <input
-    v-if="parameterTypeIsNumber(type)"
+    v-else-if="parameterTypeIsNumber(type)"
     type="number"
     v-model="parameter.value"
-    :min="parameter.min"
-    :max="parameter.max"
+    :min="numericMinimum ?? parameter.min"
+    :max="numericMaximum ?? parameter.max"
     :step="numberInputStep"
     :placeholder="placeholder"
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :aria-invalid="numericValueInvalid"
     :disabled="disabled"
-    @change="emit('commit')"
+    @change="commitNumericLiteral"
   />
   <Checkbox
     v-else-if="type === 'Bool'"
@@ -57,9 +70,9 @@
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :disabled="disabled"
-    @change="emit('commit')"
+    @change="commitPredefinedFunction"
   >
-    <option value="default">Default</option>
+    <option value="" disabled>Select a function</option>
     <option v-for="func in selectableFunctions" :key="func" :value="func">{{ func }}</option>
   </select>
   <span v-else-if="type === 'default'">Use protocol default</span>
@@ -73,7 +86,7 @@
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :disabled="disabled"
-    @change="emit('commit')"
+    @change="commitTextLiteral"
   />
 </template>
 
@@ -84,12 +97,15 @@ import { Check } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
 import { markdownCodeBlock } from '../../utils/markdown.js'
 import {
+  isNumericExpressionOptionId,
   isCodeType,
   isSymbolicType,
   isWildcardType,
+  numericExpressionTargetType,
   parameterTypeIsNumber,
   parseNumericParameterValue
 } from '../../utils/parameterTypes'
+import NumericExpressionInput from './NumericExpressionInput.vue'
 
 const CodeEditorWithSymbols = defineAsyncComponent(() => import('./CodeEditorWithSymbols.vue'))
 
@@ -121,6 +137,22 @@ const props = defineProps({
   ariaDescribedby: {
     type: String,
     default: undefined
+  },
+  numericExpressionContext: {
+    type: Object,
+    default: undefined
+  },
+  template: {
+    type: Boolean,
+    default: false
+  },
+  numericMinimum: {
+    type: Number,
+    default: undefined
+  },
+  numericMaximum: {
+    type: Number,
+    default: undefined
   }
 })
 const emit = defineEmits(['commit'])
@@ -139,7 +171,11 @@ const codeDraftDirty = ref(false)
 const numericValueInvalid = computed(() => !parseNumericParameterValue(
   props.type,
   props.parameter.value,
-  props.parameter,
+  {
+    ...props.parameter,
+    min: props.numericMinimum ?? props.parameter.min,
+    max: props.numericMaximum ?? props.parameter.max,
+  },
 ).valid)
 const codeDraftInvalid = computed(() => (
   Boolean(props.parameter.error) || codeDraftDirty.value
@@ -185,6 +221,30 @@ function onCodeEditorValueChanged(value) {
 
 function openCodeEditor() {
   if (!props.disabled && isCodeType(props.type)) codeEditorOpen.value = true
+}
+
+function commitNumericLiteral() {
+  const parsed = parseNumericParameterValue(props.type, props.parameter.value, {
+    ...props.parameter,
+    min: props.numericMinimum ?? props.parameter.min,
+    max: props.numericMaximum ?? props.parameter.max,
+  })
+  if (parsed.valid && !parsed.empty) emit('commit')
+}
+
+function commitPredefinedFunction() {
+  if (typeof props.parameter.value === 'string' && props.parameter.value.trim()) {
+    emit('commit')
+  }
+}
+
+function commitTextLiteral() {
+  if (
+    (typeof props.parameter.value === 'string' && props.parameter.value.trim())
+    || (Array.isArray(props.parameter.value) && props.parameter.value.length)
+  ) {
+    emit('commit')
+  }
 }
 
 async function validateCode() {

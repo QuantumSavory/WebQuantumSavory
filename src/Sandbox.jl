@@ -6,8 +6,21 @@ using QuantumSavory
 using QuantumSavory.ProtocolZoo
 using ResumableFunctions
 using ConcurrentSim
-using ..WebQuantumSavory: _EdgeFunctionContext, _evaluate_function_source,
-                          _function_context_expression, require_unsafe_code_evaluation
+using ..WebQuantumSavory: NUMERIC_EXPRESSION_PLACEMENTS,
+                          NUMERIC_EXPRESSION_TARGETS,
+                          _ALL_NUMERIC_CONTEXT_BINDINGS,
+                          _EdgeFunctionContext,
+                          _cast_numeric_expression_result,
+                          _evaluate_complete_source,
+                          _evaluate_function_source,
+                          _free_numeric_context_bindings,
+                          _function_context_expression,
+                          _node_name_to_index,
+                          _nodeid_resolver,
+                          _numeric_expression_result_string,
+                          _parse_complete_source,
+                          _source_context_expression,
+                          require_unsafe_code_evaluation
 
 import Base: Meta
 
@@ -149,6 +162,90 @@ function test_code(code_string::String; placement::Union{Nothing,String}=nothing
 
     catch e
         return (false, nothing, e)
+    end
+end
+
+function _numeric_placement_bindings(placement::String)
+    placement == "node" && return Set((:nodeid, :self))
+    placement == "edge" && return Set((
+        :nodeid,
+        :length,
+        :delay,
+        :refractive_index,
+        :node_a,
+        :node_b,
+    ))
+    placement == "floating" && return Set((:nodeid,))
+    placement == "variable" && return copy(_ALL_NUMERIC_CONTEXT_BINDINGS)
+    return Set{Symbol}()
+end
+
+"""
+Validate or evaluate one typed Julia numeric expression.
+
+Template protocol validation omits `context` and is always deferred. Variable
+validation also omits context, but evaluates context-free source immediately;
+free references to the supported assignment bindings are syntax-checked and
+reported as deferred. Concrete node, edge, and floating contexts evaluate in a
+fresh module with the same lexical bindings used by runtime construction.
+"""
+function test_numeric_expression(
+    expression::AbstractString,
+    target_type::AbstractString,
+    placement::AbstractString;
+    context=nothing,
+)
+    require_unsafe_code_evaluation()
+
+    try
+        expression = String(expression)
+        target_type = String(target_type)
+        placement = String(placement)
+        target_type in NUMERIC_EXPRESSION_TARGETS || throw(ArgumentError(
+            "Numeric expression target type must be 'Float64' or 'Int64'",
+        ))
+        placement in NUMERIC_EXPRESSION_PLACEMENTS || throw(ArgumentError(
+            "Numeric expression placement must be 'node', 'edge', 'floating', or 'variable'",
+        ))
+
+        parsed = _parse_complete_source(expression)
+        references = _free_numeric_context_bindings(parsed)
+        unavailable = setdiff(references, _numeric_placement_bindings(placement))
+        isempty(unavailable) || throw(UndefVarError(first(sort!(collect(unavailable)))))
+
+        deferred = context === nothing && (
+            placement != "variable" || !isempty(references)
+        )
+        results = Dict{Symbol,Any}(
+            :deferred => deferred,
+            :target_type => target_type,
+        )
+        deferred && return true, results, nothing
+
+        transform = identity
+        if context !== nothing
+            node_name_to_index = _node_name_to_index(context.node_names)
+            nodeid = _nodeid_resolver(node_name_to_index)
+            self_node_index = placement == "node" ? context.self : nothing
+            edge_context = placement == "edge" ? context.edge_context : nothing
+            transform = parsed_source -> _source_context_expression(
+                parsed_source,
+                nodeid,
+                self_node_index,
+                edge_context,
+            )
+        end
+
+        value = _evaluate_complete_source(
+            expression;
+            evaluation_module=Module(),
+            transform,
+        )
+        cast_value = _cast_numeric_expression_result(value, target_type)
+        results[:value] = _numeric_expression_result_string(cast_value)
+        return true, results, nothing
+    catch error
+        return false, nothing, error
     end
 end
 

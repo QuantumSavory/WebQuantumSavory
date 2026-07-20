@@ -427,6 +427,7 @@ test.describe('States Zoo variables', () => {
       id: traceId,
       name: 'heralded_pair_tr',
       type: 'Float64',
+      selectedType: 'Float64',
       value: 0.125,
       statesZooTraceSourceId: stateId,
     })
@@ -632,6 +633,7 @@ test.describe('States Zoo variables', () => {
       id: variableId,
       name: 'saved_state',
       type: 'Symbolic',
+      selectedType: 'Symbolic',
       value: {
         kind: 'states_zoo',
         state_type: 'DepolarizedBellPair',

@@ -208,9 +208,12 @@ describe('protocol constructor helpers', () => {
     expect(source.settings.nested.value).toBe(1)
   })
 
-  it('uses runtime defaults and deeply seeds configured template values without carrying an ID', () => {
+  it('omits runtime metadata defaults and deeply seeds configured template values without an ID', () => {
     const fallback = createProtocolFromDefinition(ENTANGLER_DEFINITION)
-    expect(parametersByName(fallback).success_prob.value).toBe(0.001)
+    expect(parametersByName(fallback).success_prob).toMatchObject({
+      selectedType: 'default',
+      value: null
+    })
 
     const template = protocol('template-protocol', ENTANGLER_TYPE, [
       {
@@ -228,11 +231,13 @@ describe('protocol constructor helpers', () => {
       value: 0.5,
       extra: { nested: true }
     })
-    expect(parametersByName(seeded).settings.value).toEqual({ nested: { value: 'metadata' } })
+    expect(parametersByName(seeded).settings).toMatchObject({
+      selectedType: 'default',
+      value: null
+    })
     expect(parametersByName(seeded).legacy.value).toBe('retained')
 
     parametersByName(seeded).success_prob.extra.nested = false
-    parametersByName(seeded).settings.value.nested.value = 'changed'
     expect(template.parameters[0].extra.nested).toBe(true)
     expect(ENTANGLER_DEFINITION.parameters[3].defaultValue.nested.value).toBe('metadata')
   })
@@ -509,7 +514,7 @@ describe('repeater-chain protocol automation', () => {
     expect(parametersByName(automation.swapper.protocol).settings.value.nested.count).toBe(2)
   })
 
-  it('uses metadata defaults when no configured constructor is supplied', () => {
+  it('omits metadata defaults when no configured constructor is supplied', () => {
     const { net } = makeNetwork()
     const result = generateRepeaterChain(net, baseOptions({
       repeaterCount: 1,
@@ -522,8 +527,14 @@ describe('repeater-chain protocol automation', () => {
 
     const entangler = protocolsNamed(result.chainEdges[0].data.protocols, 'EntanglerProt')[0]
     const swapper = protocolsNamed(result.generatedNodes[0].data.protocols, 'SwapperProt')[0]
-    expect(parametersByName(entangler).success_prob.value).toBe(0.001)
-    expect(parametersByName(swapper).rounds.value).toBe(-1)
+    expect(parametersByName(entangler).success_prob).toMatchObject({
+      selectedType: 'default',
+      value: null
+    })
+    expect(parametersByName(swapper).rounds).toMatchObject({
+      selectedType: 'default',
+      value: null
+    })
   })
 
   it.each([
@@ -562,8 +573,8 @@ describe('repeater-chain protocol automation', () => {
       if (strategy === SWAPPER_PREDICATE_STRATEGIES.TEMPLATE) {
         expect(parameters.nodeL.value).toBe('template-low')
         expect(parameters.nodeH.value).toBe('template-high')
-        expect(parameters.nodeL.selectedType).toBeUndefined()
-        expect(parameters.nodeH.selectedType).toBeUndefined()
+        expect(parameters.nodeL.selectedType).toBe('Function')
+        expect(parameters.nodeH.selectedType).toBe('Function')
       } else {
         const expectedSources = buildSwapperPredicateSources({
           strategy,

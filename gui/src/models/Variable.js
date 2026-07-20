@@ -2,6 +2,7 @@ import { generateUUid } from '../utils/Utils'
 
 export const VARIABLE_REFERENCE_KIND = 'variable'
 export const STATES_ZOO_VALUE_KIND = 'states_zoo'
+export const NUMERIC_EXPRESSION_VALUE_KIND = 'numeric_expression'
 
 export default class Variable {
   constructor({
@@ -9,12 +10,14 @@ export default class Variable {
     name = '',
     type = 'Float64',
     value = null,
+    selectedType = value == null ? 'default' : type,
     statesZooTraceSourceId = null
   } = {}) {
     this.id = id
     this.name = name
     this.type = type
     this.value = value
+    this.selectedType = selectedType
     if (typeof statesZooTraceSourceId === 'string' && statesZooTraceSourceId) {
       this.statesZooTraceSourceId = statesZooTraceSourceId
     }
@@ -25,7 +28,8 @@ export default class Variable {
       id: this.id,
       name: this.name,
       type: this.type,
-      value: this.value
+      value: this.value,
+      selectedType: this.selectedType
     }
     if (typeof this.statesZooTraceSourceId === 'string' && this.statesZooTraceSourceId) {
       serialized.statesZooTraceSourceId = this.statesZooTraceSourceId
@@ -53,6 +57,28 @@ export function isVariableReference(value) {
     && typeof value === 'object'
     && value.kind === VARIABLE_REFERENCE_KIND
     && typeof value.id === 'string'
+}
+
+/**
+ * Return whether a value is the complete, durable numeric-expression tag.
+ *
+ * This intentionally rejects extra keys. Evaluation results and assignment
+ * context are transient UI state and must never cross a project or simulator
+ * codec boundary.
+ */
+export function isNumericExpressionValue(value) {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || value.kind !== NUMERIC_EXPRESSION_VALUE_KIND
+    || typeof value.source !== 'string'
+    || !value.source.trim()
+  ) {
+    return false
+  }
+  const keys = Object.keys(value).sort()
+  return keys.length === 2 && keys[0] === 'kind' && keys[1] === 'source'
 }
 
 export function isStatesZooValue(value) {

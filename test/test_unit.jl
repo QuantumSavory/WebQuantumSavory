@@ -3037,6 +3037,11 @@
       # Direct code, symbolic, and lambda entry points enforce the policy before
       # entering their tuple-return/error-wrapping catches.
       test_disabled(() -> WebQuantumSavory.Sandbox.test_code("x -> x + 1"))
+      test_disabled(() -> WebQuantumSavory.Sandbox.test_numeric_expression(
+        "1 / 2",
+        "Float64",
+        "variable",
+      ))
       test_disabled(() -> WebQuantumSavory.Sandbox.evaluate_symbolic_expression("Z₁"))
       test_disabled(() -> WebQuantumSavory.create_lambda("x -> x + 1"))
       test_disabled(() -> WebQuantumSavory.create_symbolic("Z₁"))
@@ -4403,5 +4408,392 @@
       haskey(WebQuantumSavory.STATE, blocked_name) &&
         WebQuantumSavory.destroy_simulation(blocked_name)
     end
+  end
+
+  @testset "Typed Numeric Expressions" begin
+    expression(source) = Dict(
+      "kind" => "numeric_expression",
+      "source" => source,
+    )
+
+    parsed_expression = WebQuantumSavory._parse_numeric_expression(
+      expression("delay / 2"),
+    )
+    @test parsed_expression isa WebQuantumSavory.NumericExpression
+    @test parsed_expression.source == "delay / 2"
+    @test WebQuantumSavory._parse_numeric_expression(0.5) === nothing
+    @test WebQuantumSavory._parse_numeric_expression(
+      Dict("kind" => "literal", "source" => "1"),
+    ) === nothing
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory._parse_numeric_expression(
+      merge(expression("1"), Dict("value" => 1)),
+    )
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory._parse_numeric_expression(
+      Dict("kind" => "numeric_expression", "source" => 1),
+    )
+
+    function free_bindings(source)
+      WebQuantumSavory._free_numeric_context_bindings(
+        WebQuantumSavory._parse_complete_source(source),
+      )
+    end
+    @test free_bindings("delay / 2 + node_a") == Set((:delay, :node_a))
+    @test isempty(free_bindings("Base.length([1, 2])"))
+    @test isempty(free_bindings("let delay = 4; delay / 2; end"))
+    @test isempty(free_bindings("delay(x) = x + 1\ndelay(2)"))
+    @test free_bindings("x -> x + delay") == Set((:delay,))
+    @test isempty(free_bindings(":(delay + self)"))
+    @test free_bindings("# delay\nself") == Set((:self,))
+
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "x = 1 // 2\nx + π / π",
+        "Float64",
+        "floating",
+      )
+      @test success
+      @test error === nothing
+      @test results == Dict(
+        :deferred => true,
+        :target_type => "Float64",
+      )
+
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "x = 1 // 2\nx + π / π",
+        "Float64",
+        "variable",
+      )
+      @test success
+      @test error === nothing
+      @test results[:deferred] == false
+      @test parse(Float64, results[:value]) == 1.5
+
+      for source in (
+        "delay / 2",
+        "self + nodeid(\"Bob\")",
+        "length + refractive_index + node_a + node_b",
+      )
+        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+          source,
+          "Float64",
+          "variable",
+        )
+        @test success
+        @test error === nothing
+        @test results[:deferred] == true
+        @test !haskey(results, :value)
+      end
+
+      edge_context = (
+        node_names=["Alice", "Bob"],
+        edge_context=WebQuantumSavory._EdgeFunctionContext(
+          100.0,
+          5.0e-7,
+          1.5,
+          1,
+          2,
+        ),
+      )
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "delay / 2",
+        "Float64",
+        "edge";
+        context=edge_context,
+      )
+      @test success
+      @test error === nothing
+      @test results == Dict(
+        :deferred => false,
+        :target_type => "Float64",
+        :value => "2.5e-7",
+      )
+
+      duplicate_context = (
+        node_names=["Alice", "Alice"],
+        self=1,
+      )
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "nodeid(\"Alice\") + self",
+        "Int64",
+        "node";
+        context=duplicate_context,
+      )
+      @test success
+      @test results[:value] == "3"
+      @test error === nothing
+
+      virtual_context = (
+        node_names=["Alice", "Bob"],
+        edge_context=WebQuantumSavory._EdgeFunctionContext(
+          nothing,
+          nothing,
+          nothing,
+          1,
+          2,
+        ),
+      )
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "isnothing(delay) ? node_b - node_a : 99",
+        "Int64",
+        "edge";
+        context=virtual_context,
+      )
+      @test success
+      @test results[:value] == "1"
+      @test error === nothing
+
+      for (source, target, expected_error) in (
+        ("1 / 2", "Int64", InexactError),
+        ("big(typemax(Int64)) + 1", "Int64", InexactError),
+        ("Inf", "Float64", ArgumentError),
+        ("true", "Int64", ArgumentError),
+        ("\"not numeric\"", "Float64", ArgumentError),
+        ("invalid(", "Float64", Base.Meta.ParseError),
+      )
+        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+          source,
+          target,
+          "variable",
+        )
+        @test !success
+        @test results === nothing
+        @test error isa expected_error
+      end
+
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "delay / 2",
+        "Float64",
+        "node";
+        context=(node_names=["Alice"], self=1),
+      )
+      @test !success
+      @test results === nothing
+      @test error isa UndefVarError
+
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "Base.length([1, 2])",
+        "Int64",
+        "floating";
+        context=(node_names=["Alice"],),
+      )
+      @test success
+      @test results[:value] == "2"
+      @test error === nothing
+
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "length([1, 2])",
+        "Int64",
+        "floating";
+        context=(node_names=["Alice"],),
+      )
+      @test !success
+      @test results === nothing
+      @test error isa UndefVarError
+    end
+
+    concrete_edge_request = WebQuantumSavory._parse_numeric_expression_test_request(Dict(
+      "expression" => "delay / 2",
+      "target_type" => "Float64",
+      "placement" => "edge",
+      "context" => Dict(
+        "node_names" => ["Alice", "Bob"],
+        "length" => 100.0,
+        "delay" => 5.0e-7,
+        "refractive_index" => 1.5,
+        "node_a" => 1,
+        "node_b" => 2,
+      ),
+    ))
+    @test concrete_edge_request.context.edge_context.delay_seconds == 5.0e-7
+    @test WebQuantumSavory._parse_numeric_expression_test_request(Dict(
+      "expression" => "self",
+      "target_type" => "Int64",
+      "placement" => "node",
+    )).context === nothing
+    for malformed in (
+      Dict(
+        "expression" => "1",
+        "target_type" => "Float64",
+        "placement" => "variable",
+        "context" => Dict(),
+      ),
+      Dict(
+        "expression" => "1",
+        "target_type" => "Number",
+        "placement" => "floating",
+      ),
+      Dict(
+        "expression" => "1",
+        "target_type" => "Float64",
+        "placement" => "floating",
+        "extra" => true,
+      ),
+      Dict(
+        "expression" => "1",
+        "target_type" => "Float64",
+        "placement" => "edge",
+        "context" => Dict(
+          "node_names" => ["Alice", "Bob"],
+          "length" => nothing,
+          "delay" => 1.0,
+          "refractive_index" => nothing,
+          "node_a" => 1,
+          "node_b" => 2,
+        ),
+      ),
+    )
+      @test_throws WebQuantumSavory.APIError WebQuantumSavory._parse_numeric_expression_test_request(
+        malformed,
+      )
+    end
+
+    invalid_variable_payload = deepcopy(test_payload)
+    invalid_variable_payload["variables"] = [Dict(
+      "id" => "invalid-expression",
+      "name" => "invalid expression",
+      "type" => "String",
+      "value" => expression("1"),
+    )]
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory.validate_payload(
+      invalid_variable_payload,
+    )
+
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      kwargs = Dict{Symbol,Any}()
+      @test WebQuantumSavory._handle_typed_parameter!(
+        kwargs,
+        :bounded,
+        Float64,
+        expression("0.75"),
+        Dict{Symbol,Any}();
+        constructor_metadata=(min=0.0, max=1.0),
+      )
+      @test kwargs[:bounded] == 0.75
+      @test_throws WebQuantumSavory.APIError WebQuantumSavory._handle_typed_parameter!(
+        Dict{Symbol,Any}(),
+        :bounded,
+        Float64,
+        expression("2"),
+        Dict{Symbol,Any}();
+        constructor_metadata=(min=0.0, max=1.0),
+      )
+    end
+
+    bounded_script_expression = WebQuantumSavory._script_value_expression(
+      Float64,
+      expression("1 / 2"),
+      "Bounded numeric";
+      constructor_metadata=(min=0.0, max=1.0),
+    )
+    @test occursin("Base.Float64(expression_value)", bounded_script_expression)
+    @test occursin("cast_value >= 0.0", bounded_script_expression)
+    @test occursin("cast_value <= 1.0", bounded_script_expression)
+    @test Meta.parse(bounded_script_expression) isa Expr
+
+    runtime_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    runtime_payload["name"] = "numeric_expression_runtime"
+    runtime_payload["net"]["edges"][1]["data"]["distanceMeters"] = 100.0
+    runtime_payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = 0.2
+    runtime_payload["net"]["edges"][1]["data"]["refractiveIndex"] = 1.5
+    runtime_payload["variables"] = [Dict(
+      "id" => "per-assignment-expression",
+      "name" => "per assignment expression",
+      "type" => "Float64",
+      "value" => expression("delay / 4"),
+    )]
+    protocol_definition = runtime_payload["net"]["edges"][1]["data"]["protocols"][1]
+    parameter_by_name = Dict(
+      parameter["name"] => parameter for parameter in protocol_definition["parameters"]
+    )
+    parameter_by_name["success_prob"]["value"] = Dict(
+      "kind" => "variable",
+      "id" => "per-assignment-expression",
+    )
+    parameter_by_name["attempt_time"]["value"] =
+      expression("(length + nodeid(\"Cambridge\") - 2) / 1000")
+
+    try
+      validation = WebQuantumSavory.validate_payload(runtime_payload)
+      state = WebQuantumSavory.parse_network_graph(validation)
+      WebQuantumSavory.prepare_simulation(state, runtime_payload["name"])
+      protocol = state.protocol_mapping[protocol_definition["id"]]
+      @test protocol.success_prob == 0.05
+      @test protocol.attempt_time == 0.1
+
+      variables = WebQuantumSavory._parse_variables(runtime_payload)
+      assignment_context = Dict{Symbol,Any}(
+        :sim => state.simulation,
+        :net => state.network,
+        :nodeA => 1,
+        :nodeB => 2,
+        WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY =>
+          WebQuantumSavory._node_name_to_index(validation["graph_info"]["nodes"]),
+        WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY =>
+          WebQuantumSavory._EdgeFunctionContext(100.0, 0.2, 1.5, 1, 2),
+      )
+      first_assignment = WebQuantumSavory._instantiate_protocol(
+        protocol_definition,
+        assignment_context;
+        variables,
+      )
+      assignment_context[WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY] =
+        WebQuantumSavory._EdgeFunctionContext(100.0, 0.4, 1.5, 1, 2)
+      second_assignment = WebQuantumSavory._instantiate_protocol(
+        protocol_definition,
+        assignment_context;
+        variables,
+      )
+      @test first_assignment.success_prob == 0.05
+      @test second_assignment.success_prob == 0.1
+
+      script = WebQuantumSavory.generate_julia_script(runtime_payload)
+      @test occursin("delay / 4", script)
+      @test occursin("nodeid(\"Cambridge\")", script)
+      @test count(
+        ==("    nodeid = Base.getproperty(@__MODULE__, :nodeid)"),
+        eachline(IOBuffer(script)),
+      ) >= 2
+      @test !occursin("variable_per_assignment_expression =", script)
+
+      paused_script = replace(
+        script,
+        "\nrun(sim, simulation_duration)\n" =>
+          "\n# run(sim, simulation_duration)  # paused by the numeric-expression test\n";
+        count=1,
+      )
+      generated_module = Module(gensym(:NumericExpressionExport))
+      Core.eval(generated_module, :(using Base))
+      Base.include_string(
+        generated_module,
+        paused_script,
+        "numeric-expression-export.jl",
+      )
+      exported_protocol = only(
+        entry.second
+        for entry in Core.eval(generated_module, :protocols)
+        if entry.first == protocol_definition["id"]
+      )
+      @test exported_protocol.success_prob == protocol.success_prob
+      @test exported_protocol.attempt_time == protocol.attempt_time
+    finally
+      haskey(WebQuantumSavory.STATE, runtime_payload["name"]) &&
+        WebQuantumSavory.destroy_simulation(runtime_payload["name"])
+    end
+
+    nonexecuting_payload = deepcopy(runtime_payload)
+    nonexecuting_payload["name"] = "numeric_expression_nonexecuting_export"
+    empty!(nonexecuting_payload["variables"])
+    parameter_by_name = Dict(
+      parameter["name"] => parameter
+      for parameter in
+        nonexecuting_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
+    )
+    parameter_by_name["success_prob"]["value"] =
+      expression("error(\"export must not execute source\")")
+    parameter_by_name["attempt_time"]["value"] = nothing
+    script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+      WebQuantumSavory.generate_julia_script(nonexecuting_payload)
+    end
+    @test occursin("export must not execute source", script)
   end
 end

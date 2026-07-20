@@ -1,3 +1,8 @@
+import {
+  buildParameterInputOptions,
+  inferParameterInputOption,
+} from './parameterTypes.js'
+
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -66,8 +71,26 @@ function parameterFromDefinition(parameter) {
   return {
     name,
     type: deepClone(parameter.type),
-    value: deepClone(parameter.defaultValue)
+    selectedType: 'default',
+    value: null
   }
+}
+
+function normalizeSeededParameter(parameter, definition) {
+  const normalized = deepClone(parameter)
+  const options = buildParameterInputOptions(definition.type, definition)
+  if (normalized.value == null || normalized.value === '' || normalized.value === 'default') {
+    normalized.selectedType = 'default'
+    normalized.value = null
+    return normalized
+  }
+  const selected = options.find(option => option.id === normalized.selectedType)
+  if (!selected || selected.inputKind === 'default') {
+    const candidate = { ...normalized }
+    delete candidate.selectedType
+    normalized.selectedType = inferParameterInputOption(options, candidate).id
+  }
+  return normalized
 }
 
 /**
@@ -97,11 +120,17 @@ export function seedProtocolConstructor(definition, templateProtocol = null) {
 
   const source = deepClone(templateProtocol)
   const sourceParameters = Array.isArray(source.parameters) ? source.parameters : []
+  const definitionsByName = new Map(
+    definition.parameters.map(parameter => [parameter?.field, parameter]),
+  )
   const sourceByName = new Map(sourceParameters.map(parameter => [parameter?.name, parameter]))
   const metadataNames = new Set(fallback.parameters.map(parameter => parameter.name))
   const parameters = fallback.parameters.map(parameter => (
     sourceByName.has(parameter.name)
-      ? deepClone(sourceByName.get(parameter.name))
+      ? normalizeSeededParameter(
+          sourceByName.get(parameter.name),
+          definitionsByName.get(parameter.name),
+        )
       : parameter
   ))
 

@@ -24,6 +24,16 @@ async function mockConfiguration(page) {
     contentType: 'application/json',
     json: { background_types: [] },
   }))
+  await page.route('**/states_zoo_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { states_zoo_types: [] },
+  }))
+  await page.route('**/slot_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { slot_types: ['Qubit', 'Qumode'] },
+  }))
   await page.route('**/protocol_types', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -99,7 +109,7 @@ function parameterRow(editor, name) {
 
 async function expectIconCentered(button) {
   const buttonBox = await button.boundingBox()
-  const iconBox = await button.locator('.lucide').boundingBox()
+  const iconBox = await button.locator('svg').boundingBox()
   if (!buttonBox || !iconBox) throw new Error('Expected the button and icon to be visible')
 
   expect(Math.abs(iconBox.x + iconBox.width / 2 - (buttonBox.x + buttonBox.width / 2)))
@@ -224,17 +234,29 @@ test.describe('Global protocol variables', () => {
       id: variableId,
       name: 'retry_rounds',
       type: 'Int64',
+      selectedType: 'Int64',
       value: 7,
     }
-    const expectedParameter = {
+    const expectedFullParameter = {
+      name: 'rounds',
+      type: 'Int64',
+      selectedType: 'Int64',
+      value: { kind: 'variable', id: variableId },
+    }
+    const expectedMinimizedParameter = {
       name: 'rounds',
       type: 'Int64',
       value: { kind: 'variable', id: variableId },
     }
     expect(serialized.fullVariable).toEqual(expectedVariable)
-    expect(serialized.minimizedVariable).toEqual(expectedVariable)
-    expect(serialized.fullParameter).toEqual(expectedParameter)
-    expect(serialized.minimizedParameter).toEqual(expectedParameter)
+    expect(serialized.minimizedVariable).toEqual({
+      id: variableId,
+      name: 'retry_rounds',
+      type: 'Int64',
+      value: 7,
+    })
+    expect(serialized.fullParameter).toEqual(expectedFullParameter)
+    expect(serialized.minimizedParameter).toEqual(expectedMinimizedParameter)
 
     await setSimulationPhase(page, 'parsed')
     await expect(addVariableButton).toBeDisabled()
@@ -258,9 +280,12 @@ test.describe('Global protocol variables', () => {
       setupState.projectData.net.edges[0].data.protocols[0].parameters[0].type = 'UnsupportedType'
     })
     const unknownTypeIndicator = roundsRow.locator('.unknown-type-indicator')
-    await expect(unknownTypeIndicator).toBeVisible()
-    await expect(unknownTypeIndicator).toHaveCSS('position', 'static')
-    await expect(unknownTypeIndicator).toHaveCSS('top', 'auto')
+    await expect(unknownTypeIndicator).toHaveCount(0)
+    await expect(roundsRow.getByTestId('parameter-option-selector').locator('option')).toHaveText([
+      'Default',
+      'Int64',
+      'Int64 Expression',
+    ])
   })
 
   test('filters the picker, explains availability, and preserves incompatible assignments', async ({ page }) => {
@@ -314,6 +339,7 @@ test.describe('Global protocol variables', () => {
       const variable = setupState?.projectData?.variables?.find(({ id }) => id === 'variable_rounds')
       if (!variable) throw new Error('Assigned variable is unavailable')
       variable.type = 'String'
+      variable.selectedType = 'String'
     })
 
     await expect(variableSelector).toHaveValue('variable_rounds')
@@ -365,11 +391,13 @@ test.describe('Global protocol variables', () => {
     await expect(typeSelect.locator('option')).toHaveText([
       'Default',
       'Int64',
+      'Int64 Expression',
       'Float64',
+      'Float64 Expression',
       'Bool',
       'String',
-      'Predefined function',
-      'Custom function',
+      'Predefined Function',
+      'Custom Function',
       'Symbolic',
       'QuantumSavory.Wildcard',
       'Vector{Int64}',
@@ -394,7 +422,7 @@ test.describe('Global protocol variables', () => {
     await expect(variableRow.locator('.variable-value-input')).toHaveText('Wildcard')
 
     await typeSelect.selectOption('default')
-    await expect(variableRow.locator('.variable-value-input')).toHaveText('Use protocol default')
+    await expect(variableRow.locator('.variable-value-input')).toBeEmpty()
 
     await typeSelect.selectOption('Vector{Int64}')
     await expect(variableRow.locator('.variable-value-input input[type="text"]')).toBeVisible()

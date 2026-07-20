@@ -1,5 +1,5 @@
 """Find a parser exception embedded in Julia's `:error`/`:incomplete` AST."""
-function _function_source_parse_error(parsed)
+function _complete_source_parse_error(parsed)
     parsed isa Expr || return nothing
     if parsed.head in (:error, :incomplete)
         exception = findfirst(argument -> argument isa Exception, parsed.args)
@@ -7,16 +7,16 @@ function _function_source_parse_error(parsed)
     end
 
     for argument in parsed.args
-        exception = _function_source_parse_error(argument)
+        exception = _complete_source_parse_error(argument)
         exception === nothing || return exception
     end
     return nothing
 end
 
-"""Parse all expressions in a custom-function source as one scoped block."""
-function _parse_function_source(source::AbstractString)
+"""Parse every statement in Julia source and return one scoped expression."""
+function _parse_complete_source(source::AbstractString)
     parsed = Meta.parseall(String(source))
-    parse_error = _function_source_parse_error(parsed)
+    parse_error = _complete_source_parse_error(parsed)
     parse_error === nothing || throw(parse_error)
 
     if !(parsed isa Expr && parsed.head === :toplevel)
@@ -38,6 +38,24 @@ function _parse_function_source(source::AbstractString)
     return Expr(:block, scoped_statements...)
 end
 
+const _function_source_parse_error = _complete_source_parse_error
+const _parse_function_source = _parse_complete_source
+
+"""
+Evaluate complete Julia source in a fresh-module-compatible scope.
+
+`transform` may wrap the parsed block in assignment-specific lexical context.
+Callers remain responsible for enforcing their result contract.
+"""
+function _evaluate_complete_source(
+    source::AbstractString;
+    evaluation_module::Module=Module(),
+    transform::Function=identity,
+)
+    parsed = _parse_complete_source(source)
+    return Base.eval(evaluation_module, transform(parsed))
+end
+
 """
 Evaluate custom-function source and require the resulting value to satisfy the
 `Function` contract used by QuantumSavory protocol parameters.
@@ -50,8 +68,11 @@ function _evaluate_function_source(
     evaluation_module::Module=Module(),
     transform::Function=identity,
 )
-    parsed = _parse_function_source(source)
-    value = Base.eval(evaluation_module, transform(parsed))
+    value = _evaluate_complete_source(
+        source;
+        evaluation_module,
+        transform,
+    )
 
     if !(value isa Function)
         throw(ArgumentError(
@@ -82,6 +103,40 @@ end
 """A reference from a protocol parameter to a global [`Variable`](@ref)."""
 struct VariableReference
     id::String
+end
+
+"""A persisted Julia numeric expression with an authoritative base numeric type."""
+struct NumericExpression
+    source::String
+end
+
+const NUMERIC_EXPRESSION_KIND = "numeric_expression"
+const NUMERIC_EXPRESSION_TARGETS = ("Float64", "Int64")
+const NUMERIC_EXPRESSION_PLACEMENTS = ("node", "edge", "floating", "variable")
+
+"""Parse the exact persisted numeric-expression tag, if present."""
+function _parse_numeric_expression(value; context::String="Value")
+    _is_object_like(value) || return nothing
+    get(value, "kind", nothing) == NUMERIC_EXPRESSION_KIND || return nothing
+
+    fields = Set(string(key) for key in keys(value))
+    expected = Set(("kind", "source"))
+    fields == expected || throw(validation_error(
+        "$context numeric expression must contain exactly 'kind' and 'source'",
+        Dict{String,Any}(
+            "expected_fields" => sort!(collect(expected)),
+            "received_fields" => sort!(collect(fields)),
+        ),
+    ))
+
+    source = get(value, "source", nothing)
+    source isa AbstractString || throw(validation_error(
+        "$context numeric expression field 'source' must be a string",
+    ))
+    isempty(strip(source)) && throw(validation_error(
+        "$context numeric expression field 'source' must not be blank",
+    ))
+    return NumericExpression(String(source))
 end
 
 """
@@ -129,10 +184,177 @@ struct _EdgeFunctionContext
     node_b::Int
 end
 
+const _ALL_NUMERIC_CONTEXT_BINDINGS = Set((
+    :nodeid,
+    :self,
+    :length,
+    :delay,
+    :refractive_index,
+    :node_a,
+    :node_b,
+))
+
+"""Return identifiers introduced by one binding pattern."""
+function _source_binding_names(pattern)
+    if pattern isa Symbol
+        return Set((pattern,))
+    elseif !(pattern isa Expr)
+        return Set{Symbol}()
+    elseif pattern.head in (:(::), :kw, :...)
+        return _source_binding_names(first(pattern.args))
+    elseif pattern.head in (:tuple, :parameters, :vect)
+        names = Set{Symbol}()
+        foreach(argument -> union!(names, _source_binding_names(argument)), pattern.args)
+        return names
+    elseif pattern.head === :call
+        return _source_binding_names(first(pattern.args))
+    elseif pattern.head === :where
+        return _source_binding_names(first(pattern.args))
+    end
+    return Set{Symbol}()
+end
+
+function _source_function_signature(signature)
+    unwrapped = signature
+    while unwrapped isa Expr && unwrapped.head in (:(::), :where)
+        unwrapped = first(unwrapped.args)
+    end
+    if unwrapped isa Symbol
+        return Set((unwrapped,)), Set{Symbol}()
+    elseif unwrapped isa Expr && unwrapped.head === :call
+        name = _source_binding_names(first(unwrapped.args))
+        arguments = Set{Symbol}()
+        for argument in unwrapped.args[2:end]
+            union!(arguments, _source_binding_names(argument))
+        end
+        return name, arguments
+    end
+    return Set{Symbol}(), Set{Symbol}()
+end
+
+"""
+Collect supported context identifiers that are free in parsed Julia source.
+
+The traversal follows the lexical constructs used by numeric inputs and avoids
+qualified property names, quoted syntax, comments, arguments, and ordinary
+local shadowing. It intentionally treats unqualified `length` as contextual;
+users can spell the collection function as `Base.length`.
+"""
+function _free_numeric_context_bindings(parsed)
+    references = Set{Symbol}()
+
+    function visit(expression, bound::Set{Symbol})
+        if expression isa Symbol
+            expression in _ALL_NUMERIC_CONTEXT_BINDINGS &&
+                !(expression in bound) &&
+                push!(references, expression)
+            return
+        elseif expression isa QuoteNode || expression isa LineNumberNode ||
+               !(expression isa Expr)
+            return
+        end
+
+        head = expression.head
+        head in (:quote, :inert) && return
+
+        if head in (:block, :toplevel)
+            block_bound = copy(bound)
+            for statement in expression.args
+                if statement isa Expr && statement.head === :(=)
+                    lhs, rhs = statement.args
+                    if lhs isa Expr && lhs.head === :call
+                        function_names, arguments = _source_function_signature(lhs)
+                        union!(block_bound, function_names)
+                        visit(rhs, union(block_bound, arguments))
+                    else
+                        visit(rhs, block_bound)
+                        union!(block_bound, _source_binding_names(lhs))
+                    end
+                elseif statement isa Expr && statement.head === :function
+                    signature, body = statement.args
+                    function_names, arguments = _source_function_signature(signature)
+                    union!(block_bound, function_names)
+                    visit(body, union(block_bound, arguments))
+                elseif statement isa Expr && statement.head in (:local, :global, :const)
+                    for declaration in statement.args
+                        if declaration isa Expr && declaration.head === :(=)
+                            visit(last(declaration.args), block_bound)
+                        end
+                        union!(block_bound, _source_binding_names(declaration))
+                    end
+                else
+                    visit(statement, block_bound)
+                end
+            end
+            return
+        elseif head === :let
+            let_bound = copy(bound)
+            for binding in expression.args[1:end-1]
+                if binding isa Expr && binding.head === :(=)
+                    visit(last(binding.args), let_bound)
+                    union!(let_bound, _source_binding_names(first(binding.args)))
+                else
+                    union!(let_bound, _source_binding_names(binding))
+                end
+            end
+            visit(last(expression.args), let_bound)
+            return
+        elseif head === :function
+            signature, body = expression.args
+            function_names, arguments = _source_function_signature(signature)
+            visit(body, union(bound, function_names, arguments))
+            return
+        elseif head === :->
+            arguments, body = expression.args
+            visit(body, union(bound, _source_binding_names(arguments)))
+            return
+        elseif head === :(=)
+            lhs, rhs = expression.args
+            if lhs isa Expr && lhs.head === :call
+                function_names, arguments = _source_function_signature(lhs)
+                visit(rhs, union(bound, function_names, arguments))
+            else
+                visit(rhs, bound)
+            end
+            return
+        elseif head in (:for, :generator)
+            loop_bound = copy(bound)
+            iterator = first(expression.args)
+            iterator_specs = iterator isa Expr && iterator.head === :block ?
+                iterator.args : (iterator,)
+            for specification in iterator_specs
+                if specification isa Expr && specification.head in (:(=), :in)
+                    visit(last(specification.args), loop_bound)
+                    union!(loop_bound, _source_binding_names(first(specification.args)))
+                else
+                    visit(specification, loop_bound)
+                end
+            end
+            foreach(argument -> visit(argument, loop_bound), expression.args[2:end])
+            return
+        elseif head === :comprehension
+            foreach(argument -> visit(argument, bound), expression.args)
+            return
+        elseif head === :.
+            isempty(expression.args) || visit(first(expression.args), bound)
+            return
+        elseif head === :macrocall
+            foreach(argument -> visit(argument, bound), expression.args[3:end])
+            return
+        end
+
+        foreach(argument -> visit(argument, bound), expression.args)
+    end
+
+    visit(parsed, Set{Symbol}())
+    return references
+end
+
 """Build the shared one-based node-name lookup from validated node order."""
 function _node_name_to_index(nodes)::Dict{String,Int}
     return Dict{String,Int}(
-        string(node["name"]) => index for (index, node) in enumerate(nodes)
+        (node isa AbstractString ? String(node) : string(node["name"])) => index
+        for (index, node) in enumerate(nodes)
     )
 end
 
@@ -145,14 +367,18 @@ function _nodeid_resolver(node_name_to_index::Dict{String,Int})
     return nodeid
 end
 
-"""Wrap parsed function code around the supplied lexical context bindings."""
-function _function_context_expression(
+"""Wrap parsed Julia source around the supplied lexical context bindings."""
+function _source_context_expression(
     parsed,
-    nodeid::Function,
+    nodeid::Union{Nothing,Function},
     self_node_index::Union{Nothing,Int},
     edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
 )
-    if edge_context === nothing && self_node_index === nothing
+    if nodeid === nothing && edge_context === nothing && self_node_index === nothing
+        return parsed
+    elseif nodeid === nothing
+        throw(ArgumentError("Numeric-expression context values require a nodeid resolver"))
+    elseif edge_context === nothing && self_node_index === nothing
         return :(let nodeid = $(QuoteNode(nodeid))
             $parsed
         end)
@@ -184,6 +410,8 @@ function _function_context_expression(
     end)
 end
 
+const _function_context_expression = _source_context_expression
+
 """Wrap parsed function code in its supported lexical runtime context."""
 function _contextual_function_expression(
     parsed,
@@ -191,13 +419,101 @@ function _contextual_function_expression(
     self_node_index::Union{Nothing,Int},
     edge_context::Union{Nothing,_EdgeFunctionContext},
 )
-    return _function_context_expression(
+    return _source_context_expression(
         parsed,
         _nodeid_resolver(node_name_to_index),
         self_node_index,
         edge_context,
     )
 end
+
+"""Return the one authoritative numeric target represented by a Julia type."""
+function _numeric_expression_target(raw_type)
+    members = try
+        Base.uniontypes(raw_type)
+    catch
+        Any[raw_type]
+    end
+    targets = unique(filter(
+        target -> target in NUMERIC_EXPRESSION_TARGETS,
+        string.(members),
+    ))
+    return length(targets) == 1 ? only(targets) : nothing
+end
+
+function _cast_numeric_expression_result(
+    value,
+    target_type::AbstractString;
+    minimum=nothing,
+    maximum=nothing,
+)
+    target = String(target_type)
+    target in NUMERIC_EXPRESSION_TARGETS || throw(ArgumentError(
+        "Numeric expression target type must be 'Float64' or 'Int64'",
+    ))
+    value isa Real && !(value isa Bool) || throw(ArgumentError(
+        "Numeric expression must evaluate to a real number; got $(typeof(value))",
+    ))
+
+    cast_value = target == "Float64" ? Float64(value) : Int64(value)
+    if cast_value isa AbstractFloat && !isfinite(cast_value)
+        throw(ArgumentError("Numeric expression must evaluate to a finite Float64"))
+    end
+    if minimum !== nothing && cast_value < minimum
+        throw(ArgumentError("Numeric expression result must be at least $minimum"))
+    end
+    if maximum !== nothing && cast_value > maximum
+        throw(ArgumentError("Numeric expression result must be at most $maximum"))
+    end
+    return cast_value
+end
+
+"""Evaluate and cast numeric source in the assignment's fresh lexical context."""
+function _evaluate_numeric_expression_source(
+    source::AbstractString,
+    target_type::AbstractString;
+    node_name_to_index::Union{Nothing,Dict{String,Int}}=nothing,
+    self_node_index::Union{Nothing,Int}=nothing,
+    edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
+    minimum=nothing,
+    maximum=nothing,
+)
+    require_unsafe_code_evaluation()
+    parsed = _parse_complete_source(source)
+    allowed_bindings = node_name_to_index === nothing ?
+        Set{Symbol}() : Set((:nodeid,))
+    self_node_index === nothing || push!(allowed_bindings, :self)
+    edge_context === nothing || union!(
+        allowed_bindings,
+        (:length, :delay, :refractive_index, :node_a, :node_b),
+    )
+    unavailable = setdiff(
+        _free_numeric_context_bindings(parsed),
+        allowed_bindings,
+    )
+    isempty(unavailable) || throw(UndefVarError(first(sort!(collect(unavailable)))))
+
+    transform = if node_name_to_index === nothing
+        identity
+    else
+        parsed -> _source_context_expression(
+            parsed,
+            _nodeid_resolver(node_name_to_index),
+            self_node_index,
+            edge_context,
+        )
+    end
+    value = Base.eval(Module(), transform(parsed))
+    return _cast_numeric_expression_result(
+        value,
+        target_type;
+        minimum,
+        maximum,
+    )
+end
+
+"""Serialize a cast numeric result without JSON number precision loss."""
+_numeric_expression_result_string(value::Union{Float64,Int64}) = repr(value)
 
 """
 Create a Lambda from a string representation in a temporary module.

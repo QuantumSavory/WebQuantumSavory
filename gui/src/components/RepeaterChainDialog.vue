@@ -123,6 +123,7 @@
               :protocol="entanglerProtocol"
               category="edge"
               :variables="variables"
+              template
             />
           </div>
         </div>
@@ -192,6 +193,7 @@
                 category="node"
                 :variables="variables"
                 :controlled-parameters="controlledSwapperParameters"
+                template
               />
             </div>
           </template>
@@ -224,6 +226,7 @@
               :protocol="trackerProtocol"
               category="node"
               :variables="variables"
+              template
               empty-text="This protocol currently has no configurable constructor parameters."
             />
           </div>

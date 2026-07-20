@@ -14,6 +14,8 @@
         :contextInfo="contextInfo"
         :editingLocked="editingLocked"
         :variables="props.variables"
+        :numeric-expression-context="numericExpressionContext"
+        :template="template"
         />
     </div>
     <div class="action-buttons" style="margin-top: 10px;">
@@ -76,6 +78,14 @@ const props = defineProps({
   ownerId: {
     type: String,
     default: ''
+  },
+  numericExpressionContext: {
+    type: Object,
+    default: undefined
+  },
+  template: {
+    type: Boolean,
+    default: false
   }
 })
 

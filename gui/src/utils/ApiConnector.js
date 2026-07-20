@@ -628,6 +628,27 @@ export class ApiConnector {
     return res.json()
   }
 
+  async validateNumericExpression(
+    expression,
+    targetType,
+    placement,
+    { context, signal } = {},
+  ){
+    const body = {
+      expression: String(expression ?? ''),
+      target_type: targetType,
+      placement,
+    }
+    if (context !== undefined) body.context = context
+    const res = await fetch(`${this.baseUrl}/test_numeric_expression`, {
+      headers: this.requestHeaders,
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal,
+    })
+    return readJsonResponse(res, 'Numeric expression validation failed')
+  }
+
   async getBackendLogs( projectName, purge = true, { signal } = {} ){
     try{
       this._loading.value = true

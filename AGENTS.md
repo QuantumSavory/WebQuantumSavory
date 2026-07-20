@@ -67,6 +67,26 @@ The normal lifecycle is:
 - Tag-query custom predicates use the `query` `/test_code` placement, which intentionally injects neither `nodeid` nor `self` so validation matches the runtime query evaluator.
 - Protocol, background, and slot catalogs come from QuantumSavory metadata. Do not duplicate hard-coded catalogs in the API or GUI.
 - Identify protocol fields accepting named tag heads structurally from authoritative `QuantumSavory.constructor_metadata`: the only semantic forms are `Type{<:QuantumSavory.AbstractTag}` and that type unioned with `Nothing`. Preserve the ordinary parameter `type` wire value while advertising `kind: "named_tag_type"` and nullability; never infer this contract from saved/client type strings.
+- Keep the typed-input pipeline explicit:
+  `QuantumSavory.constructor_metadata` → backend Julia-type metadata → frontend
+  input descriptors → minimized base Julia type plus tagged value. The Julia
+  constructor member is authoritative; descriptor IDs such as
+  `expression:Float64` are frontend choices, never Julia types on the wire.
+- Numeric expression values have exactly
+  `{ "kind": "numeric_expression", "source": "<Julia source>" }`. Accept the
+  tag only for authoritative `Float64` and `Int64` constructor members and
+  Variables of those semantic types. Keep schema version 1, map expression
+  descriptor choices back to their base Julia type in minimized payloads, and
+  never serialize preview values, failures, node maps, placement, or physical
+  assignment context.
+- GUI and MCP authoring must validate that same strict tag through the shared
+  browser `DesignCommandService`; do not add an MCP-only expression type,
+  evaluator, or permissive object codec.
+- Fresh protocol parameters use `selectedType: "default"` and `value: null`;
+  constructor `defaultValue` is documentation rather than draft state. Default
+  omits the keyword so Julia applies the constructor default. Conservatively
+  normalize legacy explicit scalars and existing tagged/custom choices without
+  treating legacy numeric strings as expressions.
 - States Zoo types are the exception to dynamic metadata discovery: the API exposes a single explicit registry keyed by stable public IDs. Its current keys are `BarrettKokBellPair`, `BarrettKokBellPairW`, `DepolarizedBellPair`, `GenqoMultiplexedCascadedBellPairW`, and `GenqoUnheraldedSPDCBellPairW`, which currently cover all five upstream States Zoo types. Each entry explicitly records whether it is weighted, and weighted display names end uniformly in ` (weighted)`. Adding a state requires an intentional registry update; never construct a type supplied directly by a client or broaden the registry implicitly from the `QuantumSavory.StatesZoo` module.
 - A States Zoo variable is an ordinary `Symbolic` variable whose value is a structured recipe: `{ "kind": "states_zoo", "state_type": "<stable-id>", "parameters": { ... } }`. Weighted states also own a generated `Float64` trace companion identified by `statesZooTraceSourceId`. Preserve both through project serialization, minimized API payloads, and protocol-variable resolution while keeping them out of the frontend's ordinary Variables tab; the tagged recipe is data, not Julia source code.
 - Construct tagged States Zoo recipes only through the shared whitelist validator. Require the exact parameter names advertised for that type, finite numeric values, and declared ranges, and do not route these recipes through `Base.eval` or the unsafe-evaluation policy. Resolve weighted recipes to normalized symbolic state objects while retaining the original density matrix's absolute trace as primitive response metadata; existing symbolic strings retain their current evaluation-policy behavior.
@@ -82,6 +102,12 @@ The normal lifecycle is:
 - `Logger.CapturingLogger` preserves Julia's standard log-record `group` field in each structured event. Keep the simulator-group catalog behind `GET /simulation_log_groups` and derive it directly from exported `QuantumSavory.LOG_GROUPS`; never duplicate the upstream group vocabulary in this repository. `ResumableFunctions` may hygienically rename `_group` to `_group_N` before a nested logging macro expands, so keep the narrow Logger-owned recovery limited to reserved `_group`/`_group_<digits>` keys whose values are in that authoritative catalog, while retaining the original keyword in Raw JSON.
 - Do not remove `InteractiveUtils`, `REPL`, or `CairoMakie` from `src/WebQuantumSavory.jl` as apparently unused imports. They activate QuantumSavory metadata and MIME-rendering extensions used by the API.
 - `Sandbox` creates a fresh module but evaluates Julia code with `Base.eval`; this is namespace isolation, not a security boundary. Treat code, lambda, symbolic, and fallback parameter evaluation as unsafe for untrusted input.
+- Numeric expressions share the complete-source parser, fresh-module
+  evaluator, lexical assignment context, and unsafe-evaluation policy with
+  Custom Functions. Validation casts through the authoritative `Float64` or
+  `Int64` target, rejects non-finite floats and inexact/overflowing integers,
+  and then applies field ranges. Do not silently replace an invalid expression
+  with a constructor default.
 - `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` is the sole unsafe-evaluation override and accepts only `true` or `false`. Without it, evaluation is enabled only in `dev` and `test`; production and unknown environments deny it.
 
 ## API changes
@@ -94,6 +120,12 @@ The normal lifecycle is:
 - Route every exporter-owned helper, macro, type, and constructor through the centralized script-import registry. Collect candidates from resolved Julia bindings before rendering, retain public `QuantumSavory` reexports for transitive implementation types, group and sort explicit imports by source module, and assign collision aliases independently of discovery or rendering order. Preserve the broad `using` statements for user-authored symbolic and custom-function source; fresh-module tests must execute both that raw context and representative root, nested, and unexported generated bindings.
 - Generated scripts add only physical edges to their graph, hardcode the validated physical delay lookup, and pass one callable to both channel-delay keywords. They still construct permitted protocols attached to virtual edges.
 - Preserve runtime/export parity for custom-function context without adding stored-project fields. Generated scripts define the deterministic node-name map and `nodeid` helper after register construction, bind node-only `self` and edge-only physical/endpoint values lexically around custom functions, and instantiate context-dependent Lambda variables at each protocol assignment; never introduce shared mutable context state.
+- Preserve runtime/export parity for numeric expressions with the same lexical
+  `nodeid`, node-only `self`, and edge-only physical/endpoint bindings. Direct
+  and Variable-backed expressions are evaluated with the concrete assignment,
+  and each expression Variable is evaluated independently per assignment.
+  Export must parse source but never evaluate it in the WebQuantumSavory
+  server.
 - Exported scripts are standalone QuantumSavory onboarding material, not WebQuantumSavory runtime clients. Keep the fixed-duration path executable by default and the animation and protocol-PNG examples clearly separated so a script does not accidentally advance one simulation through multiple recipes.
 - Export weighted States Zoo variables and their owned trace companions with one tuple-returning `let` block: construct the raw state once, compute its absolute trace once, and bind the normalized state and trace together. Never embed the companion's cached GUI value in the generated Julia.
 - Keep serialized responses free of live QuantumSavory objects. Return stable IDs, primitive metadata, and explicitly rendered HTML/PNG data only where the existing endpoints require it.

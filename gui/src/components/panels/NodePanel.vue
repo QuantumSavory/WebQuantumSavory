@@ -174,6 +174,7 @@
           :editingLocked="editingLocked"
           :variables="props.variables"
           :owner-id="props.node.id"
+          :numeric-expression-context="numericExpressionContext"
           @design-operations="(...args) => emit('design-operations', ...args)"
         />
       </section>
@@ -200,6 +201,7 @@ import {
 } from '@lucide/vue'
 import LucideMenuIcon from '../LucideMenuIcon.vue'
 import { SIMULATION_EDITING_LOCK_MESSAGE, useUiServices } from '../../composables/uiServices'
+import { buildNumericExpressionContext } from '../../utils/numericExpressionContext.js'
 
 // Props: node (Node instance), justCreated (bool: true if node was just created and selected)
 const props = defineProps({
@@ -226,8 +228,16 @@ const props = defineProps({
   collapsed: {
     type: Boolean,
     default: false
+  },
+  projectData: {
+    type: Object,
+    required: true
   }
 })
+
+const numericExpressionContext = computed(() => (
+  buildNumericExpressionContext(props.projectData, 'node', props.node)
+))
 
 const emit = defineEmits([
   'delete',

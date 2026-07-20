@@ -59,6 +59,7 @@
           :variables="props.variables"
           :isVirtualEdge="props.edge.isLogic"
           :owner-id="props.edge.id"
+          :numeric-expression-context="numericExpressionContext"
           @design-operations="(...args) => emit('designOperations', ...args)"
         />
       </section>
@@ -78,6 +79,7 @@ import PhysicalEdgeControls from './PhysicalEdgeControls.vue'
 import Menu from 'primevue/menu'
 import { EllipsisVertical, Trash2 } from '@lucide/vue'
 import LucideMenuIcon from '../LucideMenuIcon.vue'
+import { buildNumericExpressionContext } from '../../utils/numericExpressionContext.js'
 
 const props = defineProps({
   edge:             { type: Object, required: true }, 
@@ -94,6 +96,10 @@ const emit = defineEmits([
   'update:collapsed',
   'designOperations',
 ])
+
+const numericExpressionContext = computed(() => (
+  buildNumericExpressionContext(props.projectData, 'edge', props.edge)
+))
 
 const optionsMenuElement = ref(null)
 const mainMenuItems = computed(() => {

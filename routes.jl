@@ -1966,6 +1966,137 @@ end
 ########################################################
 
 @swagger """
+/test_numeric_expression:
+  post:
+    summary: Validate or evaluate a typed Julia numeric expression
+    description: |
+      Parses complete Julia source and casts its final value to Float64 or
+      Int64. Concrete node, edge, and floating requests evaluate with the
+      supplied lexical assignment context. Omit context for template
+      validation; template results are always deferred. Variable requests must
+      omit context and are deferred only when supported assignment bindings are
+      referenced. This endpoint executes trusted Julia code in the server
+      process and is available only when unsafe evaluation is enabled.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expression, target_type, placement]
+            properties:
+              expression:
+                type: string
+                example: "delay / 2"
+              target_type:
+                type: string
+                enum: [Float64, Int64]
+              placement:
+                type: string
+                enum: [node, edge, floating, variable]
+              context:
+                description: Strict placement-specific concrete context; omit for templates and variables.
+                oneOf:
+                  - type: object
+                    title: Floating protocol context
+                    additionalProperties: false
+                    required: [node_names]
+                    properties:
+                      node_names:
+                        type: array
+                        items:
+                          type: string
+                  - type: object
+                    title: Node protocol context
+                    additionalProperties: false
+                    required: [node_names, self]
+                    properties:
+                      node_names:
+                        type: array
+                        items:
+                          type: string
+                      self:
+                        type: integer
+                        minimum: 1
+                  - type: object
+                    title: Edge protocol context
+                    additionalProperties: false
+                    required: [node_names, length, delay, refractive_index, node_a, node_b]
+                    properties:
+                      node_names:
+                        type: array
+                        items:
+                          type: string
+                      length:
+                        type: number
+                        nullable: true
+                        minimum: 0
+                      delay:
+                        type: number
+                        nullable: true
+                        minimum: 0
+                      refractive_index:
+                        type: number
+                        nullable: true
+                        minimum: 0
+                        exclusiveMinimum: true
+                      node_a:
+                        type: integer
+                        minimum: 1
+                      node_b:
+                        type: integer
+                        minimum: 1
+    responses:
+      '200':
+        description: Evaluated/deferred result or an EVALUATION_FAILED envelope
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                results:
+                  type: object
+                  required: [deferred, target_type]
+                  properties:
+                    deferred:
+                      type: boolean
+                    target_type:
+                      type: string
+                      enum: [Float64, Int64]
+                    value:
+                      type: string
+                      description: Precision-safe cast result; absent when deferred.
+                error_code:
+                  type: string
+                  enum: [EVALUATION_FAILED]
+      '400':
+        description: Malformed request DTO
+      '403':
+        description: Unsafe Julia code evaluation is disabled
+"""
+route("/test_numeric_expression", method="POST") do
+  payload = extract_payload(Genie.Requests.jsonpayload(), Genie.Requests.rawpayload())
+  request = _parse_numeric_expression_test_request(payload)
+
+  success, results, error = Sandbox.test_numeric_expression(
+    request.expression,
+    request.target_type,
+    request.placement;
+    context=request.context,
+  )
+  if success
+    json(Dict(:success => true, :results => results))
+  else
+    json(evaluation_failure_response(error))
+  end
+end
+
+########################################################
+
+@swagger """
 /test_symbolic_expression:
   post:
     summary: Evaluate a symbolic expression and return its LaTeX form

@@ -79,6 +79,16 @@ async function setEvaluationCapability(page, enabled) {
     contentType: 'application/json',
     json: { background_types: [] },
   }))
+  await page.route('**/states_zoo_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { states_zoo_types: [] },
+  }))
+  await page.route('**/slot_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { slot_types: ['Qubit', 'Qumode'] },
+  }))
   await page.route('**/protocol_types', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -118,7 +128,7 @@ test.describe('Unsafe evaluation capability', () => {
 
     const editor = page.locator('#edgePanel .code-editor-with-symbols').first()
     await expect(editor).toBeVisible()
-    await editor.getByTestId('code-collapsed-view').click()
+    await expect(editor.locator('textarea')).toBeVisible()
     await expect(editor.getByTestId('evaluation-disabled-notice')).toHaveCount(0)
     await expect(editor.locator('.validate-button')).toBeEnabled()
   })
@@ -129,7 +139,7 @@ test.describe('Unsafe evaluation capability', () => {
     const functionTypeSelector = await openEntanglerEditor(page, 'Evaluation Disabled')
 
     const editor = page.locator('#edgePanel .code-editor-with-symbols').first()
-    await editor.getByTestId('code-collapsed-view').click()
+    await expect(editor.locator('textarea')).toBeVisible()
     await expect(editor.getByTestId('evaluation-disabled-notice')).toContainText(
       'Server-side Julia evaluation is disabled',
     )

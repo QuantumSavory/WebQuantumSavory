@@ -327,19 +327,19 @@ test.describe('Code editor lifecycle', () => {
     await loadApp(page)
   })
 
-  test('starts compact in a protocol, stays open on failure, and collapses on success', async ({ page }) => {
+  test('hides a default protocol expression, then opens its explicit editor until valid', async ({ page }) => {
     const protocolEditor = await createProjectWithSymbolicProtocol(page)
+    const optionSelector = protocolEditor.getByRole('combobox', {
+      name: 'Input option for observable',
+    })
+    await expect(optionSelector).toHaveValue('default')
+    await expect(protocolEditor.locator('.code-editor-with-symbols')).toHaveCount(0)
+    await optionSelector.selectOption('Symbolic')
+
     const valueEditor = protocolEditor.locator('.code-editor-with-symbols')
-    const initialValue = valueEditor.getByTestId('symbolic-collapsed-view')
-
-    await expect(initialValue).toBeVisible()
-    await expect(initialValue).toHaveText('default')
-    await expect(initialValue).toHaveAttribute('aria-label', 'Enter symbolic expression')
-    await expect(valueEditor.locator('textarea')).toHaveCount(0)
-
-    await initialValue.click()
     const input = valueEditor.locator('textarea')
     await expect(input).toBeVisible()
+    await expect(input).toHaveValue('')
     await expect(valueEditor.getByTestId('custom-function-context-help')).toHaveCount(0)
     await input.fill('invalid(')
     await expectEditorLayersAligned(valueEditor)
@@ -395,17 +395,9 @@ test.describe('Code editor lifecycle', () => {
     await expect(valueEditor.locator('textarea')).toHaveValue('valid_variable_expression')
   })
 
-  test('starts compact for a protocol custom function, stays open on failure, and renders source after success', async ({ page }) => {
+  test('opens an empty protocol custom function and renders source after success', async ({ page }) => {
     const protocolEditor = await createProjectWithCustomFunctionProtocol(page)
     const valueEditor = protocolEditor.locator('.code-editor-with-symbols')
-    const initialValue = valueEditor.getByTestId('code-collapsed-view')
-
-    await expect(initialValue).toBeVisible()
-    await expect(initialValue).toHaveText('default')
-    await expect(initialValue).toHaveAttribute('aria-label', 'Enter custom function')
-    await expect(valueEditor.locator('textarea')).toHaveCount(0)
-
-    await initialValue.click()
     await expectCustomFunctionValidationLifecycle(
       page,
       valueEditor,
@@ -452,7 +444,10 @@ test.describe('Code editor lifecycle', () => {
       type: 'Lambda',
       value: VALID_FUNCTION_SOURCE,
     }
-    expect(serializedVariables.full).toEqual(expectedVariable)
+    expect(serializedVariables.full).toEqual({
+      ...expectedVariable,
+      selectedType: 'Lambda',
+    })
     expect(serializedVariables.minimized).toEqual(expectedVariable)
   })
 })

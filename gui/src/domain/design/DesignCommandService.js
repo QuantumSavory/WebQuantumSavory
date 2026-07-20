@@ -21,20 +21,25 @@ import {
 } from '../../utils/edgeGeometry.js'
 import { isMapPosition } from '../../utils/mapCoordinates.js'
 import {
-  VARIABLE_PARAMETER_TYPES,
+  buildParameterInputOptions,
+  buildVariableInputOptions,
+  inferParameterInputOption,
   isCodeType,
+  isNumericExpressionOptionId,
+  isNumericExpressionValue,
   isSymbolicType,
   isWildcardType,
+  numericExpressionTargetType,
+  parameterInputOptionForVariable,
   parameterTypeIsNumber,
   parameterTypeSupportsVariableType,
   parseNumericParameterValue,
-  parseJuliaType,
-  resetValueForType,
 } from '../../utils/parameterTypes.js'
 import {
   createProtocolFromDefinition,
   deepClone,
 } from '../../utils/protocolConstructors.js'
+import { buildNumericExpressionContext } from '../../utils/numericExpressionContext.js'
 import {
   QUBIT_REPRESENTATION_OPTIONS,
   QUMODE_REPRESENTATION_OPTIONS,
@@ -357,6 +362,7 @@ export class DesignCommandService {
     statesCatalog = () => [],
     knownFunctions = () => [],
     validateCodeValue = async () => ({ valid: true }),
+    validateNumericExpressionValue = async () => ({ valid: true }),
     previewState = async () => ({ trace: 1 }),
     generators = {},
     markDirty = () => {},
@@ -374,6 +380,7 @@ export class DesignCommandService {
     this.statesCatalog = statesCatalog
     this.knownFunctions = knownFunctions
     this.validateCodeValue = validateCodeValue
+    this.validateNumericExpressionValue = validateNumericExpressionValue
     this.previewState = previewState
     this.generators = generators
     this.markDirty = markDirty
@@ -921,61 +928,106 @@ export class DesignCommandService {
     return normalized
   }
 
-  effectiveParameterType(declaredType, parameter = {}) {
-    const parsed = parseJuliaType(declaredType)
-    const choices = Array.isArray(parsed) ? parsed : [parsed]
+  effectiveParameterDescriptor(declaredType, parameter = {}, metadata = {}) {
+    const choices = buildParameterInputOptions(declaredType, metadata)
+    const value = parameter.value
+    // Intrinsic legacy values remain authoritative even when an older snapshot
+    // carried a contradictory selectedType.
+    if (value === 'nothing') {
+      return choices.find(option => option.id === 'Nothing') || choices[0]
+    }
+    if (value === 'Wildcard') {
+      return choices.find(option => isWildcardType(option.id)) || choices[0]
+    }
     if (Object.hasOwn(parameter, 'selectedType')) {
       const selectedType = requireString(parameter.selectedType, 'Selected parameter type')
-      if (!choices.includes(selectedType)) {
+      const selected = choices.find(option => option.id === selectedType)
+      if (!selected) {
         throw new DesignCommandError(
           'VALIDATION_FAILED',
-          `Selected parameter type must be one of: ${choices.join(', ')}.`,
+          `Selected parameter type must be one of: ${choices.map(option => option.id).join(', ')}.`,
         )
       }
-      return selectedType
+      if (!selected.enabled) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Selected parameter type is unsupported: ${selectedType}.`,
+        )
+      }
+      return selected
     }
 
-    const value = parameter.value
-    if (value == null || value === '') return choices.includes('default') ? 'default' : choices[0]
-    if (value === 'Wildcard') {
-      return choices.find(isWildcardType) || choices[0]
-    }
-    if (value === 'nothing') return choices.includes('Nothing') ? 'Nothing' : choices[0]
-    if (typeof value === 'boolean' && choices.includes('Bool')) return 'Bool'
-    if (typeof value === 'number') {
-      if (Number.isInteger(value)) {
-        const integerType = choices.find(type => ['Int', 'Int64'].includes(type))
-        if (integerType) return integerType
-      }
-      return choices.find(type => parameterTypeIsNumber(type)) || choices[0]
-    }
-    if (Array.isArray(value)) {
-      return choices.find(type => String(type).startsWith('Vector{')) || choices[0]
-    }
-    if (typeof value === 'string') {
-      const functions = this.knownFunctions()
-      if (choices.includes('Function') && (
-        value === 'default' || functions.includes(value)
-      )) {
-        return 'Function'
-      }
-      if (choices.includes('String')) return 'String'
-      if (choices.includes('Lambda')) return 'Lambda'
-      const symbolic = choices.find(isSymbolicType)
-      if (symbolic) return symbolic
-    }
-    return choices.find(type => type !== 'default') || choices[0]
+    return inferParameterInputOption(choices, parameter)
   }
 
   async requireTypedValue(
-    type,
+    typeOrDescriptor,
     value,
     label,
-    { placement = 'node', parameter = {} } = {},
+    { placement = 'node', parameter = {}, numericExpressionContext } = {},
   ) {
+    const option = record(typeOrDescriptor)
+      ? typeOrDescriptor
+      : {
+          id: typeOrDescriptor,
+          inputKind: typeOrDescriptor === 'default' ? 'default' : null,
+          wireType: typeOrDescriptor,
+        }
+    const type = option.wireType ?? option.id
     if (type === 'default') {
       if (value == null || value === '') return null
       throw new DesignCommandError('VALIDATION_FAILED', `${label} must use its default value.`)
+    }
+    if (option.inputKind === 'default') {
+      if (value == null || value === '') return null
+      throw new DesignCommandError('VALIDATION_FAILED', `${label} must use its default value.`)
+    }
+    if (option.inputKind === 'numeric-expression') {
+      if (
+        !isNumericExpressionOptionId(option.id)
+        || numericExpressionTargetType(option.id) !== type
+        || !isNumericExpressionValue(value)
+      ) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `${label} must be an exact ${type} numeric-expression value.`,
+        )
+      }
+      let validation
+      try {
+        validation = await this.validateNumericExpressionValue(type, value.source, {
+          placement,
+          parameter,
+          context: numericExpressionContext,
+        })
+      } catch (error) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          error?.message || `${label} could not be validated.`,
+        )
+      }
+      if (validation?.valid !== true) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          validation?.message || `${label} contains an invalid numeric expression.`,
+        )
+      }
+      if (validation.deferred !== true && validation.value != null) {
+        const evaluated = Number(validation.value)
+        const minimum = parameter.min == null ? null : Number(parameter.min)
+        const maximum = parameter.max == null ? null : Number(parameter.max)
+        if (
+          !Number.isFinite(evaluated)
+          || (Number.isFinite(minimum) && evaluated < minimum)
+          || (Number.isFinite(maximum) && evaluated > maximum)
+        ) {
+          throw new DesignCommandError(
+            'VALIDATION_FAILED',
+            `${label} evaluates outside its allowed numeric range.`,
+          )
+        }
+      }
+      return deepClone(value)
     }
     if (type === 'Any') return deepClone(value)
     if (parameter.kind === 'named_tag_type' || type === 'Type{<:AbstractTag}') {
@@ -987,10 +1039,12 @@ export class DesignCommandService {
         `${label} must be a named tag type${parameter.nullable ? ' or nothing' : ''}.`,
       )
     }
-    if (value == null) return null
+    if (value == null) {
+      throw new DesignCommandError('VALIDATION_FAILED', `${label} requires an explicit value.`)
+    }
     if (type === 'String') {
-      if (typeof value !== 'string') {
-        throw new DesignCommandError('VALIDATION_FAILED', `${label} must be a string.`)
+      if (typeof value !== 'string' || !value.trim()) {
+        throw new DesignCommandError('VALIDATION_FAILED', `${label} must be a nonempty string.`)
       }
       return value
     }
@@ -1040,11 +1094,8 @@ export class DesignCommandService {
       }
       const functions = this.knownFunctions()
       if (
-        value !== 'default'
-        && (
-          !functions.includes(value)
-          || (!['node', 'variable'].includes(placement) && value.endsWith('(self)'))
-        )
+        !functions.includes(value)
+        || (!['node', 'variable'].includes(placement) && value.endsWith('(self)'))
       ) {
         throw new DesignCommandError(
           'VALIDATION_FAILED',
@@ -1144,9 +1195,10 @@ export class DesignCommandService {
           `Background noise parameter metadata does not match the catalog: ${field}`,
         )
       }
-      const effectiveType = this.effectiveParameterType(
+      const effectiveType = this.effectiveParameterDescriptor(
         parameterDefinition.type,
         suppliedParameter,
+        parameterDefinition,
       )
       const value = await this.requireTypedValue(
         effectiveType,
@@ -1206,6 +1258,8 @@ export class DesignCommandService {
         definition,
         value.parameters,
         operation.placement,
+        null,
+        operation.owner_id,
       ),
     }
     collection.push(new FloatingProtocol({ id, ...constructor }))
@@ -1259,6 +1313,7 @@ export class DesignCommandService {
         value.parameters,
         operation.placement,
         preservedParameterTypes,
+        operation.owner_id,
       )
     }
     context.affectedIds.add(protocol.id)
@@ -1270,6 +1325,7 @@ export class DesignCommandService {
     supplied,
     placement,
     preservedTypes = null,
+    ownerId = null,
   ) {
     const defaults = createProtocolFromDefinition(definition).parameters
     if (supplied === undefined) return defaults
@@ -1313,36 +1369,95 @@ export class DesignCommandService {
       }
       const parameterDefinition = definitions.get(parameter.name)
       let normalizedValue
+      let normalizedSelectedType
       if (isVariableReference(suppliedParameter.value)) {
         const variable = byId(project.variables, suppliedParameter.value.id, 'Variable')
         const declaredType = parameterDefinition.type
-        if (!parameterTypeSupportsVariableType(declaredType, variable.type)) {
+        const assignmentType = variable.selectedType === 'default'
+          ? 'default'
+          : variable.type
+        if (!parameterTypeSupportsVariableType(declaredType, assignmentType)) {
           throw new DesignCommandError(
             'VALIDATION_FAILED',
             `Variable ${variable.name} is incompatible with parameter ${parameter.name}.`,
           )
         }
-        normalizedValue = deepClone(suppliedParameter.value)
-      } else {
-        const effectiveType = parameterDefinition.kind === 'named_tag_type'
-          ? 'named_tag_type'
-          : this.effectiveParameterType(
+        const requestedOption = Object.hasOwn(suppliedParameter, 'selectedType')
+          ? this.effectiveParameterDescriptor(
               parameterDefinition.type,
               suppliedParameter,
+              parameterDefinition,
             )
+          : parameterInputOptionForVariable(
+              parameterDefinition.type,
+              parameterDefinition,
+              variable,
+            )
+        const requestedOptionMatches = requestedOption && (
+          (
+            isNumericExpressionOptionId(variable.selectedType)
+            && requestedOption.id === variable.selectedType
+          )
+          || (
+            !isNumericExpressionOptionId(variable.selectedType)
+            && parameterTypeSupportsVariableType(
+              requestedOption.wireType || 'default',
+              assignmentType,
+            )
+          )
+          || (requestedOption.id === 'Lambda' && variable.type === 'Function')
+        )
+        if (!requestedOptionMatches) {
+          throw new DesignCommandError(
+            'VALIDATION_FAILED',
+            `Selected input option is incompatible with variable ${variable.name}.`,
+          )
+        }
+        normalizedSelectedType = requestedOption.id
+        if (
+          requestedOption.inputKind === 'numeric-expression'
+          && isNumericExpressionValue(variable.value)
+        ) {
+          await this.requireTypedValue(
+            requestedOption,
+            variable.value,
+            `Variable ${variable.name} for protocol parameter ${parameter.name}`,
+            {
+              placement,
+              parameter: parameterDefinition,
+              numericExpressionContext: buildNumericExpressionContext(
+                project,
+                placement,
+                ownerId,
+              ),
+            },
+          )
+        }
+        normalizedValue = deepClone(suppliedParameter.value)
+      } else {
+        const effectiveType = this.effectiveParameterDescriptor(
+          parameterDefinition.type,
+          suppliedParameter,
+          parameterDefinition,
+        )
         normalizedValue = await this.requireTypedValue(
           effectiveType,
           suppliedParameter.value,
           `Protocol parameter ${parameter.name}`,
-          { placement, parameter: parameterDefinition },
+          {
+            placement,
+            parameter: parameterDefinition,
+            numericExpressionContext: effectiveType.inputKind === 'numeric-expression'
+              ? buildNumericExpressionContext(project, placement, ownerId)
+              : undefined,
+          },
         )
+        normalizedSelectedType = effectiveType.id
       }
       normalizedParameters.push({
         ...canonicalParameter,
         value: normalizedValue,
-        ...(Object.hasOwn(suppliedParameter, 'selectedType')
-          ? { selectedType: suppliedParameter.selectedType }
-          : {}),
+        selectedType: normalizedSelectedType,
         ...(typeof suppliedParameter.latex === 'string'
           ? { latex: suppliedParameter.latex }
           : {}),
@@ -1367,18 +1482,59 @@ export class DesignCommandService {
     return normalized
   }
 
+  effectiveVariableDescriptor(value = {}) {
+    const options = buildVariableInputOptions()
+    let option
+    if (Object.hasOwn(value, 'selectedType')) {
+      const selectedType = requireString(value.selectedType, 'Selected variable type')
+      option = options.find(candidate => candidate.id === selectedType)
+      if (!option || !option.enabled) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Selected variable type must be one of: ${
+            options.filter(candidate => candidate.enabled).map(candidate => candidate.id).join(', ')
+          }.`,
+        )
+      }
+    } else if (isNumericExpressionValue(value.value)) {
+      option = options.find(candidate => (
+        candidate.inputKind === 'numeric-expression'
+        && candidate.wireType === value.type
+      ))
+    } else if (value.value == null || value.value === '' || value.value === 'default') {
+      option = options[0]
+    } else {
+      option = options.find(candidate => candidate.id === value.type)
+        || inferParameterInputOption(options, value)
+    }
+    if (!option) {
+      throw new DesignCommandError('VALIDATION_FAILED', 'Variable input type is unsupported.')
+    }
+
+    const semanticType = option.wireType || 'default'
+    if (
+      Object.hasOwn(value, 'type')
+      && value.type !== semanticType
+      && (Object.hasOwn(value, 'selectedType') || option.inputKind !== 'default')
+    ) {
+      throw new DesignCommandError(
+        'VALIDATION_FAILED',
+        `Variable semantic type ${value.type} does not match ${option.id} (${semanticType}).`,
+      )
+    }
+    return option
+  }
+
   async createVariable(project, operation, context) {
     const value = operation.value || operation
     const id = this.assignId('variable', operation, context)
     if (project.variables.some(variable => variable.id === id)) {
       throw new DesignCommandError('VALIDATION_FAILED', `Variable ID already exists: ${id}`)
     }
-    const type = value.type || 'Float64'
-    if (!VARIABLE_PARAMETER_TYPES.includes(type)) {
-      throw new DesignCommandError('VALIDATION_FAILED', `Unknown variable type: ${type}`)
-    }
+    const option = this.effectiveVariableDescriptor(value)
+    const type = option.wireType || 'default'
     const variableValue = await this.requireTypedValue(
-      type,
+      option,
       Object.hasOwn(value, 'value') ? value.value : null,
       `Variable ${value.name || id}`,
       { placement: 'variable' },
@@ -1389,6 +1545,7 @@ export class DesignCommandService {
       type,
       value: variableValue,
     })
+    variable.selectedType = option.id
     project.variables.push(variable)
   }
 
@@ -1407,20 +1564,27 @@ export class DesignCommandService {
     if (Object.hasOwn(value, 'name')) {
       variable.name = this.ensureUniqueVariableName(project, value.name, variable.id)
     }
-    if (Object.hasOwn(value, 'type') && value.type !== variable.type) {
-      if (!VARIABLE_PARAMETER_TYPES.includes(value.type)) {
-        throw new DesignCommandError(
-          'VALIDATION_FAILED',
-          `Unknown variable type: ${value.type}`,
-        )
+    if (
+      Object.hasOwn(value, 'type')
+      || Object.hasOwn(value, 'selectedType')
+      || Object.hasOwn(value, 'value')
+    ) {
+      const changingOption = Object.hasOwn(value, 'type') || Object.hasOwn(value, 'selectedType')
+      const selectedType = value.selectedType
+        ?? (Object.hasOwn(value, 'type') ? value.type : variable.selectedType || variable.type)
+      const proposed = {
+        type: value.type ?? variable.type,
+        selectedType,
+        value: Object.hasOwn(value, 'value')
+          ? value.value
+          : (changingOption ? null : variable.value),
       }
-      variable.type = requireString(value.type, 'Variable type')
-      resetValueForType(variable, variable.type)
-    }
-    if (Object.hasOwn(value, 'value')) {
+      const option = this.effectiveVariableDescriptor(proposed)
+      variable.type = option.wireType || 'default'
+      variable.selectedType = option.id
       variable.value = await this.requireTypedValue(
-        variable.type,
-        value.value,
+        option,
+        proposed.value,
         `Variable ${variable.name}`,
         { placement: 'variable' },
       )

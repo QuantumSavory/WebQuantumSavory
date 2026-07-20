@@ -90,6 +90,34 @@ describe('ApiConnector project namespaces', () => {
     })
   })
 
+  it('sends exact concrete and template numeric-expression validation DTOs', async () => {
+    const connector = new ApiConnector('http://api.test')
+    const context = {
+      node_names: ['Alice', 'Bob'],
+      length: 100,
+      delay: 5e-7,
+      refractive_index: 1.5,
+      node_a: 1,
+      node_b: 2,
+    }
+
+    await connector.validateNumericExpression('delay / 2', 'Float64', 'edge', { context })
+    await connector.validateNumericExpression('delay / 2', 'Float64', 'edge')
+
+    expect(fetch.mock.calls[0][0]).toBe('http://api.test/test_numeric_expression')
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      expression: 'delay / 2',
+      target_type: 'Float64',
+      placement: 'edge',
+      context,
+    })
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+      expression: 'delay / 2',
+      target_type: 'Float64',
+      placement: 'edge',
+    })
+  })
+
   it('preserves expanded platform metadata while adding legacy client aliases', async () => {
     const response = {
       versions: {

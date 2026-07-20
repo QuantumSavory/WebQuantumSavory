@@ -52,14 +52,20 @@
         <label class="variable-field variable-type-field">
           <span>Type</span>
           <select
-            :value="draftFor(variable).type"
+            :value="draftFor(variable).selectedType"
             class="variable-type-select"
-            :aria-label="`Type for ${variable.name || variable.id}`"
+            data-testid="variable-option-selector"
+            :aria-label="`Input option for variable ${variable.name || variable.id}`"
             :disabled="disabled"
-            @change="onTypeChanged(variable, $event.target.value)"
+            @change="onOptionChanged(variable, $event.target.value)"
           >
-            <option v-for="type in variableTypes" :key="type" :value="type">
-              {{ getTypeOptionLabel(type) }}
+            <option
+              v-for="option in variableInputOptions"
+              :key="option.id"
+              :value="option.id"
+              :disabled="!option.enabled"
+            >
+              {{ option.label }}
             </option>
           </select>
         </label>
@@ -68,13 +74,14 @@
           <span>Value</span>
           <div class="variable-value-input">
             <TypedValueInput
+              v-if="draftFor(variable).selectedType !== 'default'"
               :parameter="draftFor(variable)"
-              :type="draftFor(variable).type"
+              :type="draftFor(variable).selectedType"
               :disabled="disabled"
               category="variable"
               placeholder="value"
               initially-open
-              @commit="commitVariable(variable, { value: draftFor(variable).value })"
+              @commit="commitDraftValue(variable)"
             />
           </div>
         </div>
@@ -103,8 +110,11 @@ import {
   isVariableReferenced
 } from '../../models/Variable'
 import {
-  VARIABLE_PARAMETER_TYPES,
-  getTypeOptionLabel,
+  buildVariableInputOptions,
+  inferParameterInputOption,
+  isNumericExpressionValue,
+  isWildcardType,
+  parseNumericParameterValue,
   resetValueForType
 } from '../../utils/parameterTypes'
 import TypedValueInput from './TypedValueInput.vue'
@@ -126,7 +136,7 @@ const props = defineProps({
 const emit = defineEmits(['designOperations'])
 const drafts = reactive({})
 
-const variableTypes = VARIABLE_PARAMETER_TYPES
+const variableInputOptions = buildVariableInputOptions()
 const ordinaryVariables = computed(() => props.variables.filter(variable => (
   !isStatesZooVariable(variable) && !isStatesZooTraceVariable(variable)
 )))
@@ -148,7 +158,8 @@ function addVariable() {
     kind: 'variables.create',
     value: {
       name: nextVariableName(),
-      type: 'Float64',
+      type: 'default',
+      selectedType: 'default',
       value: null,
     },
   }])
@@ -162,12 +173,22 @@ function deleteVariable(variable) {
   }])
 }
 
-function onTypeChanged(variable, type) {
+function optionById(id) {
+  return variableInputOptions.find(option => option.id === id)
+    || variableInputOptions[0]
+}
+
+function onOptionChanged(variable, selectedType) {
   if (props.disabled) return
   const draft = draftFor(variable)
-  draft.type = type
-  resetValueForType(draft, type)
-  commitVariable(variable, { type })
+  const option = optionById(selectedType)
+  draft.selectedType = option.id
+  draft.type = option.wireType || 'default'
+  draft._inputDirty = true
+  resetValueForType(draft, option.id)
+  if (['default', 'boolean', 'intrinsic'].includes(option.inputKind)) {
+    commitDraftValue(variable)
+  }
 }
 
 function draftFor(variable) {
@@ -175,9 +196,27 @@ function draftFor(variable) {
     id: variable.id,
     name: variable.name,
     type: variable.type,
+    selectedType: initialSelectedType(variable),
     value: cloneValue(variable.value),
+    _inputDirty: false,
   }
   return drafts[variable.id]
+}
+
+function initialSelectedType(variable) {
+  if (isNumericExpressionValue(variable.value)) {
+    const expression = variableInputOptions.find(option => (
+      option.inputKind === 'numeric-expression' && option.wireType === variable.type
+    ))
+    if (expression) return expression.id
+  }
+  if (variable.value == null || variable.value === '' || variable.value === 'default') {
+    return 'default'
+  }
+  const selected = variableInputOptions.find(option => option.id === variable.selectedType)
+  if (selected) return selected.id
+  const semantic = variableInputOptions.find(option => option.id === variable.type)
+  return semantic?.id || inferParameterInputOption(variableInputOptions, variable).id
 }
 
 function cloneValue(value) {
@@ -216,6 +255,43 @@ function commitVariable(variable, value) {
   }])
 }
 
+function draftValueIsComplete(draft) {
+  const option = optionById(draft.selectedType)
+  if (option.inputKind === 'default') return draft.value == null
+  if (option.inputKind === 'boolean') return typeof draft.value === 'boolean'
+  if (option.inputKind === 'intrinsic') {
+    return option.id === 'Nothing'
+      ? draft.value === 'nothing'
+      : isWildcardType(option.id) && draft.value === 'Wildcard'
+  }
+  if (option.inputKind === 'numeric-expression') {
+    return isNumericExpressionValue(draft.value)
+  }
+  if (option.inputKind === 'number') {
+    const parsed = parseNumericParameterValue(option.wireType, draft.value, draft)
+    return parsed.valid && !parsed.empty
+  }
+  if (option.inputKind === 'predefined-function') {
+    return typeof draft.value === 'string' && draft.value.trim().length > 0
+  }
+  if (option.inputKind === 'code' || option.inputKind === 'text') {
+    if (Array.isArray(draft.value)) return draft.value.length > 0
+    return typeof draft.value === 'string' && draft.value.trim().length > 0
+  }
+  return false
+}
+
+function commitDraftValue(variable) {
+  const draft = draftFor(variable)
+  if (!draftValueIsComplete(draft)) return
+  draft._inputDirty = false
+  commitVariable(variable, {
+    type: draft.type,
+    selectedType: draft.selectedType,
+    value: draft.value,
+  })
+}
+
 watch(
   () => props.variables.map(variable => ({
     id: variable.id,
@@ -230,12 +306,18 @@ watch(
     })
     variables.forEach(variable => {
       const currentDraft = drafts[variable.id]
+      if (currentDraft?._inputDirty) {
+        currentDraft.name = variable.name
+        return
+      }
       const preserveCodePresentation = currentDraft
         && currentDraft.type === variable.type
         && valuesEqual(currentDraft.value, variable.value)
       drafts[variable.id] = {
         ...variable,
+        selectedType: initialSelectedType(variable),
         value: cloneValue(variable.value),
+        _inputDirty: false,
         ...(preserveCodePresentation && Object.hasOwn(currentDraft, 'latex')
           ? { latex: currentDraft.latex }
           : {}),

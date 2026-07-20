@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import Edge from '../../src/models/Edge'
 import FloatingProtocol from '../../src/models/FloatingProtocol'
 import Node from '../../src/models/Node'
-import Variable from '../../src/models/Variable'
+import Variable, { VariableReference } from '../../src/models/Variable'
 import {
   DUPLICATE_PHYSICAL_EDGE_REASON,
   DesignCommandError,
@@ -11,7 +11,11 @@ import {
   operationsForTool,
 } from '../../src/domain/design/DesignCommandService'
 import { INVALID_EDGE_GEOMETRY_REASON } from '../../src/utils/edgeGeometry'
-import { createEmptyProject, encodeDesignDocument } from '../../src/utils/projectCodec'
+import {
+  createEmptyProject,
+  encodeDesignDocument,
+  toSimulationPayload,
+} from '../../src/utils/projectCodec'
 
 function serviceFor(project, options = {}) {
   let nextId = 0
@@ -691,6 +695,234 @@ describe('DesignCommandService', () => {
     expect(project.variables).toHaveLength(1)
   })
 
+  it('accepts numeric-expression tags only through matching authoritative descriptors', async () => {
+    const project = createEmptyProject('Numeric expressions')
+    project.net.nodes.push(new Node({
+      id: 'node_a',
+      name: 'Alice',
+      position: [0, 0],
+      data: { slots: [], protocols: [] },
+    }))
+    const validateNumericExpressionValue = vi.fn(async () => ({ valid: true }))
+    const service = serviceFor(project, {
+      protocolCatalog: () => ({
+        node: [{
+          type: 'Example.NumericProtocol',
+          parameters: [{ field: 'timeout', type: 'Float64', min: 0 }],
+        }],
+        edge: [],
+        floating: [],
+      }),
+      validateNumericExpressionValue,
+    })
+    const expression = { kind: 'numeric_expression', source: 'self / 2' }
+
+    await service.execute({
+      operations: [{
+        kind: 'variables.create',
+        id: 'variable_timeout',
+        value: {
+          name: 'timeout',
+          type: 'Float64',
+          selectedType: 'expression:Float64',
+          value: expression,
+        },
+      }, {
+        kind: 'protocols.create',
+        placement: 'node',
+        owner_id: 'node_a',
+        value: {
+          type: 'Example.NumericProtocol',
+          parameters: [{
+            name: 'timeout',
+            selectedType: 'expression:Float64',
+            value: expression,
+          }],
+        },
+      }],
+    })
+
+    expect(project.variables[0]).toMatchObject({
+      type: 'Float64',
+      selectedType: 'expression:Float64',
+      value: expression,
+    })
+    expect(project.net.nodes[0].data.protocols[0].parameters[0]).toMatchObject({
+      type: 'Float64',
+      selectedType: 'expression:Float64',
+      value: expression,
+    })
+    expect(validateNumericExpressionValue).toHaveBeenCalledWith(
+      'Float64',
+      'self / 2',
+      expect.objectContaining({ placement: 'variable' }),
+    )
+
+    await expect(service.execute({
+      operations: [{
+        kind: 'variables.create',
+        value: {
+          name: 'forged',
+          type: 'Int64',
+          selectedType: 'expression:Float64',
+          value: expression,
+        },
+      }],
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+
+    await expect(service.execute({
+      operations: [{
+        kind: 'protocols.create',
+        placement: 'node',
+        owner_id: 'node_a',
+        value: {
+          type: 'Example.NumericProtocol',
+          parameters: [{
+            name: 'timeout',
+            selectedType: 'expression:Float64',
+            value: { ...expression, result: 0.5 },
+          }],
+        },
+      }],
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+  })
+
+  it('commits intrinsic selections into the minimized simulator payload', async () => {
+    const project = createEmptyProject('Intrinsic option')
+    project.net.nodes.push(new Node({
+      id: 'node_a',
+      name: 'Alice',
+      position: [0, 0],
+      data: { slots: [], protocols: [] },
+    }))
+    const service = serviceFor(project, {
+      protocolCatalog: () => ({
+        node: [{
+          type: 'Example.OptionalProtocol',
+          parameters: [{
+            field: 'retry_lock_time',
+            type: ['Nothing', 'Float64'],
+          }],
+        }],
+        edge: [],
+        floating: [],
+      }),
+    })
+
+    await service.execute({
+      operations: [{
+        kind: 'protocols.create',
+        placement: 'node',
+        owner_id: 'node_a',
+        value: {
+          type: 'Example.OptionalProtocol',
+          parameters: [{
+            name: 'retry_lock_time',
+            selectedType: 'Nothing',
+            value: 'nothing',
+          }],
+        },
+      }],
+    })
+
+    expect(toSimulationPayload(project).net.nodes[0].data.protocols[0].parameters)
+      .toEqual([{
+        name: 'retry_lock_time',
+        type: 'Nothing',
+        value: 'nothing',
+      }])
+  })
+
+  it('enforces authoritative bounds for direct and linked evaluated expressions', async () => {
+    const project = createEmptyProject('Expression bounds')
+    project.net.nodes.push(new Node({
+      id: 'node_a',
+      name: 'Alice',
+      position: [0, 0],
+      data: { slots: [], protocols: [] },
+    }))
+    const validateNumericExpressionValue = vi.fn(async (
+      _type,
+      _source,
+      { placement },
+    ) => ({
+      valid: true,
+      deferred: false,
+      value: placement === 'variable' ? '2.0' : '2.0',
+    }))
+    const service = serviceFor(project, {
+      protocolCatalog: () => ({
+        node: [{
+          type: 'Example.BoundedProtocol',
+          parameters: [{
+            field: 'probability',
+            type: 'Float64',
+            min: 0,
+            max: 1,
+          }],
+        }],
+        edge: [],
+        floating: [],
+      }),
+      validateNumericExpressionValue,
+    })
+    const expression = { kind: 'numeric_expression', source: '1 + 1' }
+
+    await expect(service.execute({
+      operations: [{
+        kind: 'protocols.create',
+        placement: 'node',
+        owner_id: 'node_a',
+        value: {
+          type: 'Example.BoundedProtocol',
+          parameters: [{
+            name: 'probability',
+            selectedType: 'expression:Float64',
+            value: expression,
+          }],
+        },
+      }],
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+
+    await service.execute({
+      operations: [{
+        kind: 'variables.create',
+        id: 'variable_probability',
+        value: {
+          name: 'probability',
+          type: 'Float64',
+          selectedType: 'expression:Float64',
+          value: expression,
+        },
+      }],
+    })
+
+    await expect(service.execute({
+      operations: [{
+        kind: 'protocols.create',
+        placement: 'node',
+        owner_id: 'node_a',
+        value: {
+          type: 'Example.BoundedProtocol',
+          parameters: [{
+            name: 'probability',
+            selectedType: 'expression:Float64',
+            value: new VariableReference('variable_probability'),
+          }],
+        },
+      }],
+    })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+
+    expect(validateNumericExpressionValue).toHaveBeenCalledWith(
+      'Float64',
+      '1 + 1',
+      expect.objectContaining({
+        placement: 'node',
+        context: { node_names: ['Alice'], self: 1 },
+      }),
+    )
+  })
+
   it('validates and updates the global quantum representations', async () => {
     const project = createEmptyProject('Representations')
     const service = serviceFor(project)
@@ -717,6 +949,59 @@ describe('DesignCommandService', () => {
         value: { simulationConfig: { qubitRepresentation: 'GabsRepr' } },
       }],
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+  })
+
+  it('links semantic Symbolic Variables through authoritative Julia field types', async () => {
+    const project = createEmptyProject('Symbolic aliases')
+    project.net.nodes.push(new Node({
+      id: 'node_a',
+      name: 'A',
+      position: [0, 0],
+      data: { slots: [], protocols: [] },
+    }))
+    project.variables.push(new Variable({
+      id: 'variable_state',
+      name: 'state',
+      type: 'Symbolic',
+      value: {
+        kind: 'states_zoo',
+        state_type: 'DepolarizedBellPair',
+        parameters: { p: 1 },
+      },
+    }))
+    const symbolicType = 'SymbolicUtils.Symbolic{Real}'
+    const service = serviceFor(project, {
+      protocolCatalog: () => ({
+        node: [{
+          type: 'Example.SymbolicProtocol',
+          parameters: [{ field: 'observable', type: symbolicType }],
+        }],
+        edge: [],
+        floating: [],
+      }),
+    })
+
+    await service.execute({
+      operations: [{
+        kind: 'protocols.create',
+        placement: 'node',
+        owner_id: 'node_a',
+        value: {
+          type: 'Example.SymbolicProtocol',
+          parameters: [{
+            name: 'observable',
+            selectedType: symbolicType,
+            value: new VariableReference('variable_state'),
+          }],
+        },
+      }],
+    })
+
+    expect(project.net.nodes[0].data.protocols[0].parameters[0]).toMatchObject({
+      name: 'observable',
+      selectedType: symbolicType,
+      value: { kind: 'variable', id: 'variable_state' },
+    })
   })
 
   it('validates Lambda variables with deferred node-and-edge context', async () => {

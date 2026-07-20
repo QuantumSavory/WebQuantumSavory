@@ -969,6 +969,33 @@
         @test edge_properties["refractiveIndex"]["nullable"] == true
         @test contains(edge_properties["refractiveIndex"]["description"], "dimensionless")
         @test contains(edge_properties["refractiveIndex"]["description"], "omission or null")
+
+        numeric_operation = swagger["paths"]["/test_numeric_expression"]["post"]
+        numeric_schema = numeric_operation["requestBody"]["content"]["application/json"]["schema"]
+        @test Set(numeric_schema["required"]) ==
+          Set(["expression", "target_type", "placement"])
+        @test numeric_schema["additionalProperties"] == false
+        @test numeric_schema["properties"]["target_type"]["enum"] ==
+          ["Float64", "Int64"]
+        @test numeric_schema["properties"]["placement"]["enum"] ==
+          ["node", "edge", "floating", "variable"]
+        context_schemas = numeric_schema["properties"]["context"]["oneOf"]
+        @test length(context_schemas) == 3
+        @test all(schema -> schema["additionalProperties"] == false, context_schemas)
+        @test Set(context_schemas[1]["required"]) == Set(["node_names"])
+        @test Set(context_schemas[2]["required"]) == Set(["node_names", "self"])
+        @test Set(context_schemas[3]["required"]) == Set([
+          "node_names",
+          "length",
+          "delay",
+          "refractive_index",
+          "node_a",
+          "node_b",
+        ])
+        @test context_schemas[3]["properties"]["length"]["nullable"] == true
+        @test context_schemas[3]["properties"]["delay"]["nullable"] == true
+        @test context_schemas[3]["properties"]["refractive_index"]["nullable"] == true
+        @test haskey(numeric_operation["responses"], "403")
       end
   end
 
@@ -1060,6 +1087,135 @@
         @test startswith(invalid_data["error"], "ParseError:")
         @test occursin("Expected `)` or `,`", invalid_data["error"])
         @test !occursin("Base.Meta.ParseError(", invalid_data["error"])
+      end
+  end
+
+  @testset "Test Numeric Expression Endpoint" begin
+      edge_request = Dict(
+        "expression" => "delay / 2",
+        "target_type" => "Float64",
+        "placement" => "edge",
+        "context" => Dict(
+          "node_names" => ["Alice", "Bob"],
+          "length" => 100.0,
+          "delay" => 5.0e-7,
+          "refractive_index" => 1.5,
+          "node_a" => 1,
+          "node_b" => 2,
+        ),
+      )
+      response = make_request(
+        "POST",
+        "/test_numeric_expression";
+        body=edge_request,
+      )
+      data = parse_response(response)
+      if unsafe_evaluation_enabled
+        @test response.status == 200
+        @test data == Dict(
+          "success" => true,
+          "results" => Dict(
+            "deferred" => false,
+            "target_type" => "Float64",
+            "value" => "2.5e-7",
+          ),
+        )
+
+        template_response = make_request(
+          "POST",
+          "/test_numeric_expression";
+          body=Dict(
+            "expression" => "1 / 2",
+            "target_type" => "Float64",
+            "placement" => "floating",
+          ),
+        )
+        @test template_response.status == 200
+        @test parse_response(template_response)["results"] == Dict(
+          "deferred" => true,
+          "target_type" => "Float64",
+        )
+
+        variable_response = make_request(
+          "POST",
+          "/test_numeric_expression";
+          body=Dict(
+            "expression" => "x = 3\nx // 1",
+            "target_type" => "Int64",
+            "placement" => "variable",
+          ),
+        )
+        @test variable_response.status == 200
+        @test parse_response(variable_response)["results"] == Dict(
+          "deferred" => false,
+          "target_type" => "Int64",
+          "value" => "3",
+        )
+
+        contextual_variable_response = make_request(
+          "POST",
+          "/test_numeric_expression";
+          body=Dict(
+            "expression" => "self + nodeid(\"Alice\")",
+            "target_type" => "Int64",
+            "placement" => "variable",
+          ),
+        )
+        @test contextual_variable_response.status == 200
+        @test parse_response(contextual_variable_response)["results"] == Dict(
+          "deferred" => true,
+          "target_type" => "Int64",
+        )
+
+        for failing_request in (
+          merge(edge_request, Dict("expression" => "1 / 2", "target_type" => "Int64")),
+          merge(edge_request, Dict("expression" => "Inf")),
+          merge(edge_request, Dict("expression" => "invalid(")),
+          merge(edge_request, Dict("expression" => "self")),
+        )
+          failing_response = make_request(
+            "POST",
+            "/test_numeric_expression";
+            body=failing_request,
+          )
+          @test failing_response.status == 200
+          failing_data = parse_response(failing_response)
+          @test failing_data["success"] == false
+          @test failing_data["error_code"] == "EVALUATION_FAILED"
+        end
+      else
+        @test response.status == 403
+        @test data["success"] == false
+        @test data["error_code"] == "UNSAFE_EVALUATION_DISABLED"
+      end
+
+      for malformed_request in (
+        Dict(
+          "target_type" => "Float64",
+          "placement" => "variable",
+        ),
+        Dict(
+          "expression" => "1",
+          "target_type" => "Number",
+          "placement" => "variable",
+        ),
+        Dict(
+          "expression" => "1",
+          "target_type" => "Float64",
+          "placement" => "variable",
+          "context" => Dict(),
+        ),
+        merge(edge_request, Dict("unexpected" => true)),
+      )
+        malformed_response = make_request(
+          "POST",
+          "/test_numeric_expression";
+          body=malformed_request,
+        )
+        @test malformed_response.status == 400
+        malformed_data = parse_response(malformed_response)
+        @test malformed_data["success"] == false
+        @test malformed_data["error_code"] == "VALIDATION_ERROR"
       end
   end
 

@@ -1,6 +1,84 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseNumericParameterValue } from '../../src/utils/parameterTypes'
+import {
+  buildParameterInputOptions,
+  buildVariableInputOptions,
+  isNumericExpressionValue,
+  parseNumericParameterValue,
+} from '../../src/utils/parameterTypes'
+
+describe('parameter input descriptors', () => {
+  it('makes singleton numeric fields Default-first with literal and expression modes', () => {
+    expect(buildParameterInputOptions('Float64')).toEqual([
+      expect.objectContaining({
+        id: 'default',
+        label: 'Default',
+        declaredType: 'Float64',
+        inputKind: 'default',
+        wireType: null,
+        enabled: true,
+      }),
+      expect.objectContaining({
+        id: 'Float64',
+        inputKind: 'number',
+        wireType: 'Float64',
+      }),
+      expect.objectContaining({
+        id: 'expression:Float64',
+        inputKind: 'numeric-expression',
+        wireType: 'Float64',
+      }),
+    ])
+  })
+
+  it('expands Function once and keeps unsupported declared members visible', () => {
+    const options = buildParameterInputOptions(['Function', 'Example.Unsupported'])
+    expect(options.map(option => [option.id, option.label, option.enabled])).toEqual([
+      ['default', 'Default', true],
+      ['Function', 'Predefined Function', true],
+      ['Lambda', 'Custom Function', true],
+      ['Example.Unsupported', 'Example.Unsupported', false],
+    ])
+  })
+
+  it('uses authoritative named-tag metadata instead of parsing Julia type strings', () => {
+    expect(buildParameterInputOptions('Anything', {
+      kind: 'named_tag_type',
+      nullable: true,
+    }).map(option => ({
+      id: option.id,
+      inputKind: option.inputKind,
+      wireType: option.wireType,
+    }))).toEqual([
+      { id: 'default', inputKind: 'default', wireType: null },
+      { id: 'Nothing', inputKind: 'intrinsic', wireType: 'Nothing' },
+      { id: 'DataType', inputKind: 'named-tag', wireType: 'DataType' },
+    ])
+  })
+
+  it('adds expression modes only for authoritative Float64 and Int64 types', () => {
+    expect(buildParameterInputOptions('Int').map(option => option.id))
+      .toEqual(['default', 'Int'])
+    expect(buildVariableInputOptions().map(option => option.id))
+      .toEqual(expect.arrayContaining(['expression:Float64', 'expression:Int64']))
+  })
+
+  it('accepts only the exact durable numeric-expression tag', () => {
+    expect(isNumericExpressionValue({
+      kind: 'numeric_expression',
+      source: 'delay / 2',
+    })).toBe(true)
+    expect(isNumericExpressionValue({
+      kind: 'numeric_expression',
+      source: ' ',
+    })).toBe(false)
+    expect(isNumericExpressionValue({
+      kind: 'numeric_expression',
+      source: '1',
+      result: 1,
+    })).toBe(false)
+  })
+})
 
 describe('numeric parameter parsing', () => {
   it.each([

@@ -14,6 +14,7 @@
         :protocolClass="FloatingProtocol"
         :editingLocked="editingLocked"
         :variables="props.variables"
+        :numeric-expression-context="numericExpressionContext"
         @design-operations="(...args) => emit('designOperations', ...args)"
       />
     </template>
@@ -23,10 +24,11 @@
 
 
 <script setup>
-import { onMounted, computed, ref } from 'vue'
+import { computed, ref } from 'vue'
 import BasePanel from './BasePanel.vue'
 import ProtocolsManager from './ProtocolsManager.vue'
 import FloatingProtocol from '../../models/FloatingProtocol'
+import { buildNumericExpressionContext } from '../../utils/numericExpressionContext.js'
 
 const props = defineProps({
   protocols: {
@@ -44,8 +46,16 @@ const props = defineProps({
   collapsed: {
     type: Boolean,
     default: false
+  },
+  projectData: {
+    type: Object,
+    required: true
   }
 })
+
+const numericExpressionContext = computed(() => (
+  buildNumericExpressionContext(props.projectData, 'floating')
+))
 
 const protocolsManager = ref(null)
 

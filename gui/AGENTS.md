@@ -38,7 +38,29 @@
 - `ApiConnector` prefixes backend simulation names with the persistent eight-character `user_uuid`. Keep that namespacing consistent for every endpoint which addresses a simulation.
 - Development API calls default to `http://localhost:8000`; production builds default to the browser origin. `VITE_API_BASE_URL` overrides both when a separate API host is intentional.
 - Runtime API metadata supplies available background, slot, and protocol types. Protocols are grouped as `node`, `edge`, or `floating`; do not replace this with a frontend-only catalog.
-- A protocol parameter is a named-tag-type field only when its current runtime constructor metadata has `kind: "named_tag_type"`; never infer that semantic from a saved `type` snapshot or parse a Julia type string. Populate these fields from the cached `/tag_types` `named_tags` catalog, persist only fully qualified IDs, honor runtime `nullable`, and keep variable assignment unavailable until variables have an explicit compatible tag-type model. Tag-only fields use the direct named-tag autocomplete with its constructor Default; nullable fields use the shared union selector for Default/Nothing/Tag and mount the tag-only autocomplete without its Default only while Tag is selected.
+- A protocol parameter is a named-tag-type field only when its current runtime constructor metadata has `kind: "named_tag_type"`; never infer that semantic from a saved `type` snapshot or parse a Julia type string. Populate these fields from the cached `/tag_types` `named_tags` catalog, persist only fully qualified IDs, honor runtime `nullable`, and keep variable assignment unavailable until variables have an explicit compatible tag-type model. Nonnullable fields use the outer Default/Tag selector; nullable fields use Default/Nothing/Tag. Mount the named-tag autocomplete without its own Default only while Tag is selected.
+- Build every editable protocol parameter and Variable from explicit input
+  descriptors with `{ id, label, declaredType, inputKind, wireType, enabled }`.
+  The outer selector always begins with Default, including singleton, Function,
+  Symbolic, Bool, intrinsic, and named-tag fields. `selectedType` stores the
+  descriptor ID, while minimized payloads use `wireType`; unsupported
+  descriptors remain visible and disabled.
+- Default clears the value and omits the protocol keyword. A fresh explicit
+  literal, code, or tag mode is empty and may commit only after validation;
+  explicit Bool means `false`, and Nothing/Wildcard are intrinsic. Function
+  exposes Predefined Function and Custom Function directly with no nested
+  Default, and named-tag autocomplete does not own constructor-default state.
+  Switching modes clears both the old value and transient validation state.
+- Persist numeric expressions only as
+  `{ kind: "numeric_expression", source: "<Julia source>" }`, while preserving
+  semantic variable/parameter type `Float64` or `Int64`. Keep preview results,
+  validation errors, abort controllers, node maps, placement, and physical
+  context outside project data. Expression Variable edits are draft-local and
+  commit atomically only after complete validation.
+- Register the same strict tagged-value and descriptor-ID rules at the shared
+  `DesignCommandService` boundary so GUI and MCP edits cannot diverge. MCP
+  transports source data; it does not evaluate expressions or own preview
+  state.
 - Tag definitions, signatures, previews, listings, and query results are runtime-only API metadata. Do not persist them in project JSON or poll them in the background; fetch on Tags & Queries activation, target changes, explicit refresh, and successful mutation, and clear transient targets/results on project changes or simulation reset.
 - Derive protocol-variable compatibility from runtime parameter metadata and keep alias rules centralized in `src/utils/parameterTypes.js`. Opening a variable picker must not create a reference until the user explicitly selects one; keep missing or newly incompatible saved references visible so users can replace or unlink them.
 - In memory, edges reference `Node` instances. Serialized projects use source and target node IDs. A project-schema change must update serialization, deserialization, import validation, demos, backend payload minimization, and relevant tests together.
@@ -85,6 +107,19 @@
 - Keep the custom-function and Symbolic editor lifecycle in the shared typed-value components: protocol parameters start compact, newly selected variables start open, only successful validation collapses to static source or the rendered symbolic result, and clicking that result reopens editing. Failed validation must remain editable, with a warning whose tooltip contains the backend diagnostic; transient open/closed state must not be added to serialized parameters or variables.
 - Keep protocol constructor parameters in the shared constructor form used by both ordinary protocol editors and layout automation. Union selection, Function/Symbolic validation, variable binding, metadata documentation, and contextual `self`/`nodeid` behavior must not be reimplemented in generator dialogs.
 - Keep custom-function contextual-keyword help centralized in `src/utils/customFunctionContext.js` and render its compact, viewport-safe helper popup from the Nodes list and the shared custom-function editor so protocol and Variables-tab Lambdas stay aligned. `nodeid("Node name")` is available for every protocol placement and `self` only for node protocols. Edge protocols also receive `length` (meters), `delay` (seconds), dimensionless `refractive_index`, and one-based source/target `node_a`/`node_b`; virtual-edge physical values are `nothing`, and help must warn that `length` shadows `Base.length`. These are backend-provided lexical bindings, so never serialize contextual values or node-name maps in stored project data.
+- Reuse that context catalog and source lifecycle for numeric expressions.
+  Context-free Variable expressions show a validation result; Variables with
+  supported free assignment bindings are deferred and show “Evaluated when
+  assigned.” Template/layout constructor forms always defer and never display a
+  computed value. Ordinary installed constructors build one concrete preview
+  context from canonical project state and pass it explicitly; invalidate or
+  abort stale previews whenever source, target, placement, node ordering/names,
+  endpoints, or physical-edge values change.
+- Direct numeric expressions show their source and actual cast result. Linked
+  expression Variables show the source and their concrete assignment result
+  below the variable picker. Keep saved source visible when unsafe evaluation
+  is disabled, but disable validation/execution and leave numeric literals
+  available.
 - Build tag/query forms from the `/tag_types` catalog rather than hard-coded tag shapes. Commit the progressive identity combobox only on Enter or an autocomplete choice; treat a leading `:` as a Symbol head, resolve DataType heads only through unique catalog matches, reveal named fields together, and narrow general-field choices by compatible signature prefixes. Allow only last-field backtracking for general tags, require a complete signature before submission, filter DataType signatures by `allowed_data_type_ids`, and keep query Exact, Wildcard, preset Predicate, and policy-gated shared custom Function modes in the same badge flow.
 - Use the shared tag badge sequence for editable constructors and read-only results. Keep the identity badge first, field name/value/type labels together, established type and query-mode colors intact, and every badge documented with a Markdown tooltip; editable badges use white fills with colored borders while read-only badges use soft fills. Keep collapsed results to badges and actions, placing rendered text, string tag/slot IDs, time, message source, and buffer depth behind disclosure when available.
 - In Tags & Queries, Register targets always show a Slot selector whose first choice is All slots; that choice maps to the register wire target, while a concrete slot maps to the slot wire target. Message Buffer remains node-scoped with no slot selector. Hide attachment construction for Register → All slots, show it for a selected slot or Message Buffer, keep queries non-consuming for either register scope, and stack construction above results in both tabs.

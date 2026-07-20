@@ -156,6 +156,8 @@ The state response will show `simulation_paused: true` and `simulation_running: 
 - **`GET /known_functions`** - List of supported Julia functions usable as argument values
 - **`POST /test_code`** - Test Julia code when unsafe evaluation is enabled
 - **`POST /test_symbolic_expression`** - Evaluate a symbolic expression and return LaTeX when unsafe evaluation is enabled
+- **`POST /test_numeric_expression`** - Validate an `Int64` or `Float64` Julia
+  expression for a protocol placement when unsafe evaluation is enabled
 - **`GET /platform_info`** - Versions and server capabilities, including `unsafe_code_evaluation`
 - **`GET /logs/:name`** - Fetch log events for a simulation; supports `purge` query (default `true`). Example: `/logs/my-sim?purge=false`
 - **`GET /status`** - Server health check
@@ -184,13 +186,102 @@ The best way to explore the API is through the interactive Swagger documentation
 - Interactive testing interface
 - Example payloads and responses
 
-### Symbolic Expression Evaluation
+### Protocol Inputs and Numeric Expressions
 
-`POST /test_code`, `POST /test_symbolic_expression`, lambda and symbolic
-protocol parameters, and fallback conversion of complex parameters all execute
-Julia code in the API server process. A fresh module isolates names, but does
-not restrict filesystem, process, network, memory, or CPU access. Do not enable
-these features for untrusted users.
+Protocol constructor inputs follow one metadata-driven pipeline:
+
+```text
+QuantumSavory constructor metadata
+  → backend Julia-type metadata
+  → frontend input descriptors
+  → minimized base Julia type plus tagged value
+```
+
+Every editable constructor parameter begins with a **Default** choice. Default
+stores no value and omits the keyword from simulator and script-export payloads,
+so the QuantumSavory constructor applies its own default. Catalog `defaultValue`
+metadata is help text only; a new project does not copy it into the draft.
+Choosing an explicit literal, function, tag, or expression starts an empty
+editor and requires a valid value before it is committed.
+
+`Float64` and `Int64` parameters and Variables can use a Julia numeric
+expression. The declared type remains `Float64` or `Int64`; project JSON stores
+only the source:
+
+```json
+{
+  "kind": "numeric_expression",
+  "source": "delay / 2"
+}
+```
+
+Context-free Variable expressions are evaluated immediately. A Variable that
+refers to an assignment binding is validated but deferred and shown as
+**Evaluated when assigned**. Protocol template/layout constructors also defer
+numeric evaluation because they do not have a concrete assignment. An
+installed protocol uses its actual context:
+
+- Every placement has `nodeid(name)` over the ordered project node names.
+- Node protocols additionally have one-based `self`.
+- Edge protocols additionally have `length`, `delay`, `refractive_index`,
+  `node_a`, and `node_b`. The three physical values are `null` on virtual
+  edges.
+- Floating protocols have only `nodeid(name)`.
+
+Preview results, validation errors, node-name maps, and physical context are
+transient and are never saved. A linked expression Variable is evaluated
+independently at each protocol assignment. Runtime construction and generated
+scripts use the same lexical bindings and target cast. Script export parses
+numeric source but never executes it on the server.
+
+When unsafe evaluation is enabled, `POST /test_numeric_expression` accepts:
+
+```json
+{
+  "expression": "delay / 2",
+  "target_type": "Float64",
+  "placement": "edge",
+  "context": {
+    "node_names": ["Alice", "Bob"],
+    "length": 100.0,
+    "delay": 5e-7,
+    "refractive_index": 1.5,
+    "node_a": 1,
+    "node_b": 2
+  }
+}
+```
+
+Allowed target types are `Float64` and `Int64`; placements are `node`, `edge`,
+`floating`, and `variable`. Node context adds one-based `self`; floating
+context contains only `node_names`. Successful evaluated results return the
+cast value as a precision-safe string:
+
+```json
+{
+  "success": true,
+  "results": {
+    "deferred": false,
+    "target_type": "Float64",
+    "value": "2.5e-7"
+  }
+}
+```
+
+A deferred success has the same shape without `value`. Malformed request data
+returns HTTP 400, disabled evaluation returns HTTP 403, and parse, evaluation,
+or cast failures use `error_code: "EVALUATION_FAILED"` with production
+redaction.
+
+### Trusted Julia Evaluation
+
+`POST /test_code`, `POST /test_symbolic_expression`,
+`POST /test_numeric_expression`, custom functions, symbolic values, numeric
+expressions, and fallback conversion of complex parameters can execute Julia
+code in the API server process. A fresh module isolates names, but does not
+restrict filesystem, process, network, memory, or CPU access. Treat saved
+expression source as trusted code and do not enable these features for
+untrusted users.
 
 Unsafe evaluation is enabled by default only in Genie's `dev` and `test`
 environments. It is disabled in `prod` and unrecognized environments. Operators
@@ -210,7 +301,9 @@ in another environment.
 
 When enabled, use `POST /test_symbolic_expression` to evaluate a symbolic
 expression in a fresh module with QuantumSavory preloaded and get its LaTeX
-representation.
+representation. Numeric literals remain usable when unsafe evaluation is
+disabled, and saved expression source remains viewable, but validating or
+executing numeric expressions is unavailable.
 
 Example request body:
 
