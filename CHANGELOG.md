@@ -16,6 +16,9 @@
   custom-function context, with the expanded reference moved into a compact helper popup.
 - Rendered the repository changelog in System Information through the shared safe
   Markdown presentation pipeline.
+- Made generated Julia scripts use concise explicit imports for exporter-owned
+  helpers and constructors while preserving the broad package context available
+  to user-authored symbolic and custom-function source.
 
 ## 1.9.1
 

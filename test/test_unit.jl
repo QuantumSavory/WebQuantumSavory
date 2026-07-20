@@ -56,6 +56,16 @@
         ),
       ),
       Dict(
+        "id" => "nested-state-variable",
+        "name" => "nested weighted pair",
+        "type" => "Symbolic",
+        "value" => Dict(
+          "kind" => "states_zoo",
+          "state_type" => "GenqoUnheraldedSPDCBellPairW",
+          "parameters" => Dict("ηᵈ" => 1, "ηᵗ" => 1, "N" => 0.1, "Pᵈ" => 1.0e-6),
+        ),
+      ),
+      Dict(
         "id" => "default-function-variable",
         "name" => "default chooser",
         "type" => "Function",
@@ -83,24 +93,59 @@
     @test Set(keys(WebQuantumSavory.STATE)) == state_names_before
     @test WebQuantumSavory.generate_julia_script_export(payload)["filename"] == "export-demo.jl"
     @test Meta.parseall(script) isa Expr
+    script_lines = split(script, '\n')
+    @test occursin(
+      "Pkg.add([\"QuantumSavory\", \"Graphs\", \"ConcurrentSim\", " *
+      "\"ResumableFunctions\", \"CairoMakie\"])",
+      script,
+    )
+    for broad_import in (
+      "using QuantumSavory",
+      "using QuantumSavory.ProtocolZoo",
+      "using QuantumSavory.StatesZoo",
+      "using Graphs",
+      "using ConcurrentSim",
+      "using ResumableFunctions",
+      "using CairoMakie",
+      "using LinearAlgebra",
+    )
+      @test broad_import in script_lines
+    end
+    for generated_import in (
+      "using CairoMakie: Figure, activate!, record",
+      "using ConcurrentSim: @process, run",
+      "using Graphs: SimpleGraph, add_edge!",
+      "using LinearAlgebra: tr",
+      "using QuantumSavory: CliffordRepr, Qubit, Register, RegisterNet, " *
+      "T2Dephasing, express, get_time_tracker, registernetplot_axis",
+      "using QuantumSavory.ProtocolZoo: EntanglerProt",
+      "using QuantumSavory.StatesZoo: BarrettKokBellPairW, DepolarizedBellPair",
+      "using QuantumSavory.StatesZoo.Genqo: GenqoUnheraldedSPDCBellPairW",
+    )
+      @test generated_import in script_lines
+    end
     @test occursin("# Variables", script)
-    @test occursin("variable_pair_fidelity = QuantumSavory.StatesZoo.DepolarizedBellPair(0.9)", script)
+    @test occursin("variable_pair_fidelity = DepolarizedBellPair(0.9)", script)
     @test occursin("variable_pair_fidelity_2 = 0.8", script)
     @test occursin("variable_weighted_pair, variable_weighted_pair_tr = (let", script)
-    @test occursin("state = QuantumSavory.StatesZoo.BarrettKokBellPairW(1, 1, 0, 1, 1)", script)
-    @test occursin("trace = abs(QuantumSavory.express(LinearAlgebra.tr(state)))", script)
+    @test occursin("state = BarrettKokBellPairW(1, 1, 0, 1, 1)", script)
+    @test occursin("trace = abs(express(tr(state)))", script)
     @test occursin("(state / trace, trace)", script)
+    @test occursin(
+      "state = GenqoUnheraldedSPDCBellPairW(1, 1, 0.1, 1.0e-6)",
+      script,
+    )
     @test !occursin("variable_weighted_pair_tr = 0.123", script)
     @test occursin("success_prob = variable_weighted_pair_tr", script)
     @test occursin("variable_default_chooser = nothing", script)
-    @test occursin("QuantumSavory.T2Dephasing(; t2 = 5.0)", script)
+    @test occursin("T2Dephasing(; t2 = 5.0)", script)
     @test occursin("# Registers", script)
     @test occursin(
-      "representations = [QuantumSavory.CliffordRepr(), QuantumSavory.CliffordRepr()]",
+      "representations = [CliffordRepr(), CliffordRepr()]",
       script,
     )
     @test occursin(
-      "push!(registers, QuantumSavory.Register(traits, representations, backgrounds))\n\n" *
+      "push!(registers, Register(traits, representations, backgrounds))\n\n" *
       "# Resolve GUI node names to their one-based register indices.",
       script,
     )
@@ -117,14 +162,14 @@
     @test occursin("    (1, 2) => 0.125,", script)
     @test occursin("link_delay(src, dst) = propagation_delays[minmax(src, dst)]", script)
     @test occursin(
-      "QuantumSavory.RegisterNet(graph, registers; names = [\"Amherst\", \"Cambridge\"], " *
+      "RegisterNet(graph, registers; names = [\"Amherst\", \"Cambridge\"], " *
       "classical_delay = link_delay, quantum_delay = link_delay)",
       script,
     )
     @test occursin("# Protocol construction and initialization", script)
     @test occursin("nodeA = 1, nodeB = 2", script)
-    @test occursin("ConcurrentSim.run(sim, simulation_duration)", script)
-    @test occursin("CairoMakie.record", script)
+    @test occursin("run(sim, simulation_duration)", script)
+    @test occursin("record(figure, animation_filename", script)
     @test occursin("show(io, MIME\"image/png\"(), protocol)", script)
 
     virtual_payload = deepcopy(payload)
@@ -141,20 +186,49 @@
       "data" => Dict("protocols" => [consumer]),
     ))
     virtual_script = WebQuantumSavory.generate_julia_script(virtual_payload)
-    @test count(==("Graphs.add_edge!(graph, 1, 2)"), eachline(IOBuffer(virtual_script))) == 1
+    @test count(==("add_edge!(graph, 1, 2)"), eachline(IOBuffer(virtual_script))) == 1
     @test occursin("virtual-consumer", virtual_script)
     @test count(==("    (1, 2) => 0.125,"), eachline(IOBuffer(virtual_script))) == 1
 
     mixed_representation_payload = deepcopy(payload)
     mixed_representation_payload["net"]["nodes"][1]["data"]["slots"][1]["type"] = "Qumode"
+    mixed_representation_payload["simulationConfig"]["qubitRepresentation"] =
+      "QuantumOpticsRepr"
     mixed_representation_script =
       WebQuantumSavory.generate_julia_script(mixed_representation_payload)
     @test occursin(
       "representations = [" *
-      "QuantumSavory.GabsRepr(QuantumSavory.Gabs.QuadBlockBasis), " *
-      "QuantumSavory.CliffordRepr()]",
+      "GabsRepr(QuadBlockBasis), QuantumOpticsRepr()]",
       mixed_representation_script,
     )
+    mixed_representation_lines = split(mixed_representation_script, '\n')
+    @test "using QuantumSavory.Gabs: QuadBlockBasis" in mixed_representation_lines
+    @test any(
+      line -> startswith(line, "using QuantumSavory: ") &&
+        occursin("GabsRepr", line) &&
+        occursin("QuantumOpticsRepr", line),
+      mixed_representation_lines,
+    )
+    paused_mixed_representation_script = replace(
+      mixed_representation_script,
+      "\nrun(sim, simulation_duration)\n" =>
+        "\n# run(sim, simulation_duration)  # paused by the exporter test\n";
+      count=1,
+    )
+    mixed_representation_module = Module(gensym(:MixedRepresentationExport))
+    Core.eval(mixed_representation_module, :(using Base))
+    Base.include_string(
+      mixed_representation_module,
+      paused_mixed_representation_script,
+      "mixed-representation-export.jl",
+    )
+    mixed_registers = getfield(mixed_representation_module, :registers)
+    @test mixed_registers[1].reprs[1] isa QuantumSavory.GabsRepr
+    @test mixed_registers[1].reprs[2] isa QuantumSavory.QuantumOpticsRepr
+    @test getfield(mixed_representation_module, :QuadBlockBasis) ===
+      QuantumSavory.Gabs.QuadBlockBasis
+    @test getfield(mixed_representation_module, :QuantumOpticsRepr) ===
+      QuantumSavory.QuantumOpticsRepr
 
     counterpart_id = "QuantumSavory.ProtocolZoo.EntanglementCounterpart"
     tagged_payload = deepcopy(payload)
@@ -175,7 +249,11 @@
       WebQuantumSavory.generate_julia_script(tagged_payload)
     end
     @test tagged_script == WebQuantumSavory.generate_julia_script(tagged_payload)
-    @test occursin("tag = $counterpart_id", tagged_script)
+    @test occursin(
+      "using QuantumSavory.ProtocolZoo: EntanglementCounterpart, EntanglerProt",
+      tagged_script,
+    )
+    @test occursin("tag = EntanglementCounterpart", tagged_script)
     @test occursin("attempt_time = 0.125", tagged_script)
     @test !occursin("attempt_time = \"0.125\"", tagged_script)
     @test !occursin("stale_blank_parameter", tagged_script)
@@ -197,17 +275,19 @@
       WebQuantumSavory.generate_julia_script(symbolic_payload)
     end
     @test occursin(
-      "pairstate = QuantumSavory.StatesZoo.DepolarizedBellPair(0.85)",
+      "pairstate = DepolarizedBellPair(0.85)",
       symbolic_script,
     )
 
     lambda_payload = deepcopy(tagged_payload)
     lambda_parameters = lambda_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
     lambda_by_name = Dict(parameter["name"] => parameter for parameter in lambda_parameters)
+    raw_context_lambda =
+      "slot -> (MessageBuffer; EntanglementConsumer; LinearAlgebra.tr; " *
+      "length == 12500.0 && delay == 0.125 && refractive_index == 1.5 && " *
+      "node_a == 1 && node_b == 2 && Base.length((slot,)) == 1 && slot > 0)"
     lambda_by_name["chooseA"]["type"] = "Lambda"
-    lambda_by_name["chooseA"]["value"] =
-      "slot -> length == 12500.0 && delay == 0.125 && refractive_index == 1.5 && " *
-      "node_a == 1 && node_b == 2 && Base.length((slot,)) == 1 && slot > 0"
+    lambda_by_name["chooseA"]["value"] = raw_context_lambda
     lambda_by_name["chooseB"]["type"] = "Lambda"
     lambda_by_name["chooseB"]["value"] = "slot -> slot > 0"
     lambda_script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
@@ -216,6 +296,7 @@
     @test lambda_script == WebQuantumSavory.generate_julia_script(lambda_payload)
     @test occursin("chooseslotA = (let", lambda_script)
     @test occursin("chooseslotB = (let", lambda_script)
+    @test occursin(raw_context_lambda, lambda_script)
     @test occursin("length = 12500.0", lambda_script)
     @test occursin("delay = 0.125", lambda_script)
     @test occursin("refractive_index = 1.5", lambda_script)
@@ -224,13 +305,30 @@
     @test occursin("Base.length((slot,))", lambda_script)
     @test occursin("slot -> slot > 0", lambda_script)
     @test Meta.parseall(lambda_script) isa Expr
-
-    lambda_module = Module(gensym(:EdgeContextExport))
+    lambda_import_lines = filter(
+      line -> startswith(line, "using ") && occursin(": ", line),
+      split(lambda_script, '\n'),
+    )
+    @test !any(line -> occursin("MessageBuffer", line), lambda_import_lines)
+    @test !any(line -> occursin("EntanglementConsumer", line), lambda_import_lines)
+    paused_lambda_script = replace(
+      lambda_script,
+      "\nrun(sim, simulation_duration)\n" =>
+        "\n# run(sim, simulation_duration)  # paused by the exporter test\n";
+      count=1,
+    )
+    lambda_module = Module(gensym(:LambdaExplicitImportExport))
     Core.eval(lambda_module, :(using Base))
-    Base.include_string(lambda_module, lambda_script, "edge-context-export.jl")
-    lambda_protocols = Dict(getfield(lambda_module, :protocols))
-    lambda_protocol_id = lambda_payload["net"]["edges"][1]["data"]["protocols"][1]["id"]
-    @test lambda_protocols[lambda_protocol_id].chooseslotA(7)
+    Base.include_string(
+      lambda_module,
+      paused_lambda_script,
+      "lambda-explicit-import-export.jl",
+    )
+    lambda_protocol = only(getfield(lambda_module, :protocols)).second
+    @test Base.invokelatest(lambda_protocol.chooseslotA, 7)
+    @test !Base.invokelatest(lambda_protocol.chooseslotA, -1)
+    @test Base.invokelatest(lambda_protocol.chooseslotB, 7)
+    @test lambda_protocol.tag === QuantumSavory.ProtocolZoo.EntanglementCounterpart
 
     # Exported node functions must not gain edge-only values merely because the
     # generated script has physical edges elsewhere.
@@ -339,6 +437,9 @@
     @test abs(LinearAlgebra.tr(QuantumSavory.express(generated_weighted_state))) ≈ 1
     generated_weighted_trace = getfield(generated_module, :variable_weighted_pair_tr)
     @test generated_weighted_trace ≈ 0.5
+    generated_nested_state =
+      getfield(generated_module, :variable_nested_weighted_pair)
+    @test abs(LinearAlgebra.tr(QuantumSavory.express(generated_nested_state))) ≈ 1
     generated_protocols = getfield(generated_module, :protocols)
     @test length(generated_protocols) == 1
     @test generated_protocols[1].second.success_prob ≈ generated_weighted_trace
@@ -689,9 +790,29 @@
       ],
     ))
     wildcard_script = WebQuantumSavory.generate_julia_script(wildcard_payload)
-    @test occursin("variable_any_remote_node = (() -> QuantumSavory.Wildcard())", wildcard_script)
+    @test any(
+      line -> startswith(line, "using QuantumSavory: ") &&
+        occursin("Wildcard", line),
+      split(wildcard_script, '\n'),
+    )
+    @test occursin("variable_any_remote_node = (() -> Wildcard())", wildcard_script)
     @test length(findall("variable_any_remote_node()", wildcard_script)) == 1
-    @test occursin("nodeH = QuantumSavory.Wildcard()", wildcard_script)
+    @test occursin("nodeH = Wildcard()", wildcard_script)
+    paused_wildcard_script = replace(
+      wildcard_script,
+      "\nrun(sim, simulation_duration)\n" =>
+        "\n# run(sim, simulation_duration)  # paused by the exporter test\n";
+      count=1,
+    )
+    wildcard_module = Module(gensym(:WildcardExplicitImportExport))
+    Core.eval(wildcard_module, :(using Base))
+    Base.include_string(
+      wildcard_module,
+      paused_wildcard_script,
+      "wildcard-explicit-import-export.jl",
+    )
+    wildcard_factory = getfield(wildcard_module, :variable_any_remote_node)
+    @test wildcard_factory() isa QuantumSavory.Wildcard
 
     nested_protocol_payload = deepcopy(payload)
     nested_protocol = nested_protocol_payload["net"]["edges"][1]["data"]["protocols"][1]
@@ -699,12 +820,135 @@
     nested_protocol["type"] = "QuantumSavory.ProtocolZoo.QTCP.LinkController"
     nested_protocol["parameters"] = Any[]
     nested_protocol_script = WebQuantumSavory.generate_julia_script(nested_protocol_payload)
+    @test "using QuantumSavory.ProtocolZoo.QTCP: LinkController" in
+      split(nested_protocol_script, '\n')
     @test occursin(
-      "QuantumSavory.ProtocolZoo.QTCP.LinkController(; sim = sim, net = network, nodeA = 1, nodeB = 2)",
+      "LinkController(; sim = sim, net = network, nodeA = 1, nodeB = 2)",
       nested_protocol_script,
     )
-    @test occursin("protocol_instance_show = QuantumSavory.ProtocolZoo.QTCP.LinkController", nested_protocol_script)
+    @test occursin("protocol_instance_show = LinkController", nested_protocol_script)
     @test occursin("show(io, MIME\"image/png\"(), protocol)", nested_protocol_script)
+    paused_nested_protocol_script = replace(
+      nested_protocol_script,
+      "\nrun(sim, simulation_duration)\n" =>
+        "\n# run(sim, simulation_duration)  # paused by the exporter test\n";
+      count=1,
+    )
+    nested_protocol_module = Module(gensym(:NestedProtocolExplicitImportExport))
+    Core.eval(nested_protocol_module, :(using Base))
+    Base.include_string(
+      nested_protocol_module,
+      paused_nested_protocol_script,
+      "nested-protocol-explicit-import-export.jl",
+    )
+    @test only(getfield(nested_protocol_module, :protocols)).second isa
+      QuantumSavory.ProtocolZoo.QTCP.LinkController
+
+    if !isdefined(Main, :WebQuantumSavoryScriptCollisionA)
+      Core.eval(Main, :(
+        module WebQuantumSavoryScriptCollisionA
+          const Shared = Val{:a}
+          const network = :a
+          const var"for" = :keyword
+          macro shared()
+            QuoteNode(:macro_a)
+          end
+        end
+      ))
+    end
+    if !isdefined(Main, :WebQuantumSavoryScriptCollisionB)
+      Core.eval(Main, :(
+        module WebQuantumSavoryScriptCollisionB
+          const Shared = Val{:b}
+          macro shared()
+            QuoteNode(:macro_b)
+          end
+        end
+      ))
+    end
+    collision_a = getfield(Main, :WebQuantumSavoryScriptCollisionA)
+    collision_b = getfield(Main, :WebQuantumSavoryScriptCollisionB)
+    collision_sources = [
+      (collision_a, :Shared),
+      (collision_a, :network),
+      (collision_a, :for),
+      (collision_a, Symbol("@shared")),
+      (collision_b, :Shared),
+      (collision_b, Symbol("@shared")),
+    ]
+    forward_registry =
+      WebQuantumSavory._script_import_registry(collision_sources)
+    forward_references = Dict(
+      source => WebQuantumSavory._script_reference(forward_registry, source...)
+      for source in collision_sources
+    )
+    reverse_registry =
+      WebQuantumSavory._script_import_registry(reverse(collision_sources))
+    reverse_references = Dict(
+      source => WebQuantumSavory._script_reference(reverse_registry, source...)
+      for source in reverse(collision_sources)
+    )
+    @test forward_references == reverse_references
+    @test all(reference != "Shared" for reference in values(forward_references))
+    @test forward_references[(collision_a, :network)] != "network"
+    @test forward_references[(collision_a, :for)] != "for"
+    @test forward_references[(collision_a, Symbol("@shared"))] != "@shared"
+    @test forward_references[(collision_b, Symbol("@shared"))] != "@shared"
+    forward_import_lines =
+      WebQuantumSavory._script_import_lines(forward_registry)
+    reverse_import_lines =
+      WebQuantumSavory._script_import_lines(reverse_registry)
+    @test forward_import_lines == reverse_import_lines
+
+    collision_module = Module(gensym(:CollisionExplicitImportExport))
+    Core.eval(collision_module, :(using Base))
+    collision_values = join(
+      (
+        forward_references[(collision_a, :Shared)],
+        forward_references[(collision_b, :Shared)],
+        forward_references[(collision_a, :network)],
+        forward_references[(collision_a, :for)],
+        forward_references[(collision_a, Symbol("@shared"))] * "()",
+        forward_references[(collision_b, Symbol("@shared"))] * "()",
+      ),
+      ", ",
+    )
+    Base.include_string(
+      collision_module,
+      join(forward_import_lines, "\n") *
+        "\ncollision_values = ($collision_values)\n",
+      "collision-explicit-import-export.jl",
+    )
+    @test getfield(collision_module, :collision_values) ==
+      (Val{:a}, Val{:b}, :a, :keyword, :macro_a, :macro_b)
+
+    catalog_candidates = WebQuantumSavory._script_import_candidates()
+    catalog_registry =
+      WebQuantumSavory._script_import_registry(catalog_candidates)
+    for source in catalog_candidates
+      WebQuantumSavory._script_reference(catalog_registry, source...)
+    end
+    catalog_module = Module(gensym(:CatalogExplicitImportExport))
+    Core.eval(catalog_module, :(using Base))
+    Base.include_string(
+      catalog_module,
+      join((
+        "using QuantumSavory",
+        "using QuantumSavory.ProtocolZoo",
+        "using QuantumSavory.StatesZoo",
+        "using Graphs",
+        "using ConcurrentSim",
+        "using ResumableFunctions",
+        "using CairoMakie",
+        "using LinearAlgebra",
+        WebQuantumSavory._script_import_lines(catalog_registry)...,
+      ), "\n"),
+      "catalog-explicit-import-export.jl",
+    )
+    for entry in values(catalog_registry.entries)
+      @test getfield(catalog_module, entry.local_name) ===
+        getfield(entry.source_module, entry.source_name)
+    end
   end
 
   @testset "Background Types" begin

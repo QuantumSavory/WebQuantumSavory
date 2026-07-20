@@ -5,22 +5,37 @@ const _REPRESENTATION_SPECS = Dict(
   "QuantumOpticsRepr" => (
     traits = (Qubit, Qumode),
     construct = () -> QuantumOpticsRepr(),
-    script = "QuantumSavory.QuantumOpticsRepr()",
+    script = (
+      constructor=(source_module=QuantumSavory, binding=QuantumOpticsRepr),
+      arguments=(),
+    ),
   ),
   "QuantumMCRepr" => (
     traits = (Qubit, Qumode),
     construct = () -> QuantumMCRepr(),
-    script = "QuantumSavory.QuantumMCRepr()",
+    script = (
+      constructor=(source_module=QuantumSavory, binding=QuantumMCRepr),
+      arguments=(),
+    ),
   ),
   "CliffordRepr" => (
     traits = (Qubit,),
     construct = () -> CliffordRepr(),
-    script = "QuantumSavory.CliffordRepr()",
+    script = (
+      constructor=(source_module=QuantumSavory, binding=CliffordRepr),
+      arguments=(),
+    ),
   ),
   "GabsRepr" => (
     traits = (Qumode,),
     construct = () -> GabsRepr(QuantumSavory.Gabs.QuadBlockBasis),
-    script = "QuantumSavory.GabsRepr(QuantumSavory.Gabs.QuadBlockBasis)",
+    script = (
+      constructor=(source_module=QuantumSavory, binding=GabsRepr),
+      arguments=((
+        source_module=QuantumSavory.Gabs,
+        binding=QuantumSavory.Gabs.QuadBlockBasis,
+      ),),
+    ),
   ),
 )
 
@@ -93,7 +108,19 @@ function construct_representation(config, trait)
   return _REPRESENTATION_SPECS[name].construct()
 end
 
-function script_representation(config, trait)
+function script_representation(config, trait, render_reference::Function)
   name = _representation_name(config, trait)
-  return _REPRESENTATION_SPECS[name].script
+  script = _REPRESENTATION_SPECS[name].script
+  constructor = render_reference(
+    script.constructor.source_module,
+    script.constructor.binding,
+  )
+  arguments = join(
+    (
+      render_reference(argument.source_module, argument.binding)
+      for argument in script.arguments
+    ),
+    ", ",
+  )
+  return "$constructor($arguments)"
 end
