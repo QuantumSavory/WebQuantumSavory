@@ -59,6 +59,26 @@ describe('shared MCP contract registry', () => {
     })
   })
 
+  it('advertises partial physical defaults and bounded edge transmission', () => {
+    const design = MCP_TOOLS.find(tool => tool.name === 'design_update')
+    const physicalConfig = design.input_schema.properties.actions.items
+      .properties.value.properties.physicalConfig
+    expect(physicalConfig).toMatchObject({
+      minProperties: 1,
+      properties: {
+        refractiveIndex: { exclusiveMinimum: 0 },
+        lossDbPerKm: { minimum: 0 },
+      },
+    })
+    expect(physicalConfig).not.toHaveProperty('required')
+
+    const topology = MCP_TOOLS.find(tool => tool.name === 'topology_edit')
+    const overrides = topology.input_schema.properties.actions.items
+      .properties.value.properties.data.properties.physicalOverrides.properties
+    expect(overrides.lossDbPerKm).toMatchObject({ minimum: 0 })
+    expect(overrides.transmissivity).toMatchObject({ minimum: 0, maximum: 1 })
+  })
+
   it('maps every specialist action to exactly one registered browser handler', () => {
     const project = createEmptyProject('Specialists')
     const service = new DesignCommandService({ getProject: () => project })

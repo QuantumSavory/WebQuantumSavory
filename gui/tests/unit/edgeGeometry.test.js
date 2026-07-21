@@ -160,12 +160,14 @@ describe('edge geometry adapter', () => {
     }))).not.toThrow()
   })
 
-  it('resolves automatic and manual propagation while retaining dormant overrides', () => {
+  it('resolves independent manual delay and transmissivity while retaining dormant values', () => {
     const automatic = makeEdge({
       physicalOverrides: {
         distanceMeters: 1000,
         refractiveIndex: 1.5,
         delaySeconds: null,
+        lossDbPerKm: null,
+        transmissivity: null,
       },
     })
     const automaticValues = resolveEdgePhysicalProperties(automatic)
@@ -173,14 +175,24 @@ describe('edge geometry adapter', () => {
     expect(automaticValues.refractiveIndex).toBe(1.5)
     expect(automaticValues.propagationDelaySeconds)
       .toBeCloseTo(1500 / SPEED_OF_LIGHT_METERS_PER_SECOND, 15)
+    expect(automaticValues.lossDbPerKm).toBe(0.2)
+    expect(automaticValues.transmissivity).toBeCloseTo(0.954992586, 9)
 
     automatic.data.physicalOverrides.delaySeconds = 0.25
     const manualValues = resolveEdgePhysicalProperties(automatic)
     expect(manualValues.distanceMeters).toBe(1000)
     expect(manualValues.refractiveIndex).toBe(1.5)
     expect(manualValues.propagationDelaySeconds).toBe(0.25)
+    expect(manualValues.transmissivity).toBe(automaticValues.transmissivity)
     expect(automatic.data.physicalOverrides.distanceMeters).toBe(1000)
     expect(automatic.data.physicalOverrides.refractiveIndex).toBe(1.5)
+
+    automatic.data.physicalOverrides.lossDbPerKm = 0.4
+    automatic.data.physicalOverrides.transmissivity = 0.75
+    const manualTransmission = resolveEdgePhysicalProperties(automatic)
+    expect(manualTransmission.manualTransmissivity).toBe(true)
+    expect(manualTransmission.lossDbPerKm).toBe(0.4)
+    expect(manualTransmission.transmissivity).toBe(0.75)
   })
 
   it('keeps virtual edges straight and formats adaptive SI badges', () => {

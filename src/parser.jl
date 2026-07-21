@@ -152,6 +152,7 @@ function _physical_edge_number(
   default=nothing,
   positive::Bool=false,
   nullable::Bool=true,
+  maximum=nothing,
 )
   value = get(edge_data, key, default)
   if value === nothing
@@ -166,8 +167,10 @@ function _physical_edge_number(
   catch
     throw(validation_error("$context $label must be representable as Float64"))
   end
-  if !isfinite(number) || (positive ? number <= 0 : number < 0)
+  if !isfinite(number) || (positive ? number <= 0 : number < 0) ||
+     (maximum !== nothing && number > maximum)
     qualifier = positive ? "positive" : "nonnegative"
+    maximum === nothing || (qualifier *= " and no greater than $maximum")
     throw(validation_error("$context $label must be finite and $qualifier"))
   end
   return number
@@ -175,35 +178,37 @@ end
 
 """Return the validated physical properties carried by a minimized edge.
 
-Legacy payloads predate distance and refractive-index metadata, so those values
-remain unknown while their propagation delay retains the established zero
-default. Route geometry and manual overrides remain frontend storage concerns.
+Legacy payloads predate distance, refractive-index, loss, and transmissivity
+metadata, so those values remain unknown while propagation delay retains the
+established zero default. Route geometry and manual overrides remain frontend
+storage concerns; the backend validates resolved values without recomputing or
+cross-checking frontend formulas.
 """
 function _physical_edge_properties(edge, context::String="Physical edge")
   edge_data = get(edge, "data", Dict{String,Any}())
   _is_object_like(edge_data) || throw(validation_error("$context data must be an object"))
-  return (
-    distance_meters=_physical_edge_number(
+  names = Tuple(descriptor.field for descriptor in EDGE_CONTEXT_DESCRIPTORS)
+  values = map(EDGE_CONTEXT_DESCRIPTORS) do descriptor
+    _physical_edge_number(
       edge_data,
-      "distanceMeters",
-      "distance",
-      context,
-    ),
-    delay_seconds=_physical_edge_number(
-      edge_data,
-      "propagationDelaySeconds",
-      "propagation delay",
+      descriptor.payload_key,
+      descriptor.payload_label,
       context;
-      default=0.0,
-      nullable=false,
-    ),
-    refractive_index=_physical_edge_number(
-      edge_data,
-      "refractiveIndex",
-      "refractive index",
-      context;
-      positive=true,
-    ),
+      default=descriptor.payload_default,
+      positive=descriptor.positive,
+      nullable=descriptor.payload_nullable,
+      maximum=descriptor.maximum,
+    )
+  end
+  return NamedTuple{names}(values)
+end
+
+function _edge_context_from_properties(properties, node_a::Int, node_b::Int)
+  return _EdgeFunctionContext(
+    (getproperty(properties, descriptor.field) for descriptor in
+      EDGE_CONTEXT_DESCRIPTORS)...,
+    node_a,
+    node_b,
   )
 end
 
@@ -214,16 +219,14 @@ _physical_edge_delay(edge, context::String="Physical edge") =
 """Resolve the complete lexical custom-function context for one edge."""
 function _edge_function_context(edge, node_a::Int, node_b::Int)
   if _is_virtual_edge(edge)
-    return _EdgeFunctionContext(nothing, nothing, nothing, node_a, node_b)
+    return _EdgeFunctionContext(
+      (nothing for _ in EDGE_CONTEXT_DESCRIPTORS)...,
+      node_a,
+      node_b,
+    )
   end
   properties = _physical_edge_properties(edge, "Physical edge $(edge["id"])")
-  return _EdgeFunctionContext(
-    properties.distance_meters,
-    properties.delay_seconds,
-    properties.refractive_index,
-    node_a,
-    node_b,
-  )
+  return _edge_context_from_properties(properties, node_a, node_b)
 end
 
 """Build the symmetric per-link delay map used by `RegisterNet`."""
@@ -333,7 +336,12 @@ function _parse_numeric_expression_test_request(payload)
   context_name = "$(uppercasefirst(placement)) numeric expression context"
   fields = placement == "floating" ? ("node_names",) :
     placement == "node" ? ("node_names", "self") :
-    ("node_names", "length", "delay", "refractive_index", "node_a", "node_b")
+    (
+      "node_names",
+      (string(descriptor.binding) for descriptor in EDGE_CONTEXT_DESCRIPTORS)...,
+      (string(descriptor.binding) for descriptor in
+        EDGE_ENDPOINT_CONTEXT_DESCRIPTORS)...,
+    )
   _require_exact_object_fields(
     raw_context,
     fields;
@@ -347,22 +355,33 @@ function _parse_numeric_expression_test_request(payload)
     return (; expression, target_type, placement, context=(; node_names, self))
   end
 
-  node_a = _numeric_context_node_index(raw_context, "node_a", node_names, context_name)
-  node_b = _numeric_context_node_index(raw_context, "node_b", node_names, context_name)
-  distance_meters = _physical_edge_number(raw_context, "length", "field 'length'", context_name)
-  delay_seconds = _physical_edge_number(raw_context, "delay", "field 'delay'", context_name)
-  refractive_index = _physical_edge_number(
-    raw_context, "refractive_index", "field 'refractive_index'", context_name;
-    positive=true,
-  )
-  physical_values = (distance_meters, delay_seconds, refractive_index)
+  endpoints = map(EDGE_ENDPOINT_CONTEXT_DESCRIPTORS) do descriptor
+    _numeric_context_node_index(
+      raw_context,
+      string(descriptor.binding),
+      node_names,
+      context_name,
+    )
+  end
+  physical_values = map(EDGE_CONTEXT_DESCRIPTORS) do descriptor
+    binding = string(descriptor.binding)
+    _physical_edge_number(
+      raw_context,
+      binding,
+      "field '$binding'",
+      context_name;
+      positive=descriptor.positive,
+      maximum=descriptor.maximum,
+    )
+  end
   all(value -> value === nothing, physical_values) ||
     all(value -> value !== nothing, physical_values) ||
     throw(validation_error(
       "$context_name physical fields must either all be numbers or all be null",
     ))
   edge_context = _EdgeFunctionContext(
-    distance_meters, delay_seconds, refractive_index, node_a, node_b,
+    physical_values...,
+    endpoints...,
   )
   return (; expression, target_type, placement, context=(; node_names, edge_context))
 end

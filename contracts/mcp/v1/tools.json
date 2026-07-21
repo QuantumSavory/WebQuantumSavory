@@ -126,9 +126,10 @@
                     },
                     "physicalConfig": {
                       "type": "object",
-                      "required": ["refractiveIndex"],
+                      "minProperties": 1,
                       "properties": {
-                        "refractiveIndex": { "type": "number", "exclusiveMinimum": 0 }
+                        "refractiveIndex": { "type": "number", "exclusiveMinimum": 0 },
+                        "lossDbPerKm": { "type": "number", "minimum": 0 }
                       },
                       "additionalProperties": false
                     }
@@ -247,7 +248,13 @@
                               "type": ["number", "null"],
                               "exclusiveMinimum": 0
                             },
-                            "delaySeconds": { "type": ["number", "null"], "minimum": 0 }
+                            "delaySeconds": { "type": ["number", "null"], "minimum": 0 },
+                            "lossDbPerKm": { "type": ["number", "null"], "minimum": 0 },
+                            "transmissivity": {
+                              "type": ["number", "null"],
+                              "minimum": 0,
+                              "maximum": 1
+                            }
                           },
                           "additionalProperties": false
                         }

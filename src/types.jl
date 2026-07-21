@@ -172,24 +172,93 @@ const NODE_NAME_TO_INDEX_CONTEXT_KEY = :node_name_to_index
 """Protocol-conversion context key containing resolved edge assignment values."""
 const EDGE_FUNCTION_CONTEXT_KEY = :edge_function_context
 
+"""Ordered physical edge bindings shared by validation, evaluation, and export."""
+const EDGE_CONTEXT_DESCRIPTORS = (
+    (
+        binding=:length,
+        field=:distance_meters,
+        payload_key="distanceMeters",
+        payload_label="distance",
+        positive=false,
+        maximum=nothing,
+        payload_default=nothing,
+        payload_nullable=true,
+        representative=1.0,
+        script_label="edge length",
+    ),
+    (
+        binding=:delay,
+        field=:delay_seconds,
+        payload_key="propagationDelaySeconds",
+        payload_label="propagation delay",
+        positive=false,
+        maximum=nothing,
+        payload_default=0.0,
+        payload_nullable=false,
+        representative=2.0,
+        script_label="edge delay",
+    ),
+    (
+        binding=:refractive_index,
+        field=:refractive_index,
+        payload_key="refractiveIndex",
+        payload_label="refractive index",
+        positive=true,
+        maximum=nothing,
+        payload_default=nothing,
+        payload_nullable=true,
+        representative=1.5,
+        script_label="edge refractive index",
+    ),
+    (
+        binding=:loss,
+        field=:loss_db_per_km,
+        payload_key="lossDbPerKm",
+        payload_label="fiber loss",
+        positive=false,
+        maximum=nothing,
+        payload_default=nothing,
+        payload_nullable=true,
+        representative=0.2,
+        script_label="edge fiber loss",
+    ),
+    (
+        binding=:transmissivity,
+        field=:transmissivity,
+        payload_key="transmissivity",
+        payload_label="transmissivity",
+        positive=false,
+        maximum=1.0,
+        payload_default=nothing,
+        payload_nullable=true,
+        representative=0.95,
+        script_label="edge transmissivity",
+    ),
+)
+
+"""Ordered endpoint bindings, intentionally separate from physical values."""
+const EDGE_ENDPOINT_CONTEXT_DESCRIPTORS = (
+    (binding=:node_a, field=:node_a, representative=1),
+    (binding=:node_b, field=:node_b, representative=2),
+)
+
 """Resolved values captured lexically by custom functions assigned to an edge."""
 struct _EdgeFunctionContext
     distance_meters::Union{Nothing,Float64}
     delay_seconds::Union{Nothing,Float64}
     refractive_index::Union{Nothing,Float64}
+    loss_db_per_km::Union{Nothing,Float64}
+    transmissivity::Union{Nothing,Float64}
     node_a::Int
     node_b::Int
 end
 
-const _ALL_NUMERIC_CONTEXT_BINDINGS = Set((
+const _ALL_NUMERIC_CONTEXT_BINDINGS = Set{Symbol}([
     :nodeid,
     :self,
-    :length,
-    :delay,
-    :refractive_index,
-    :node_a,
-    :node_b,
-))
+    (descriptor.binding for descriptor in EDGE_CONTEXT_DESCRIPTORS)...,
+    (descriptor.binding for descriptor in EDGE_ENDPOINT_CONTEXT_DESCRIPTORS)...,
+])
 
 function _lowering_error(expression::Expr)
     detail = isempty(expression.args) ? "Julia lowering failed" : first(expression.args)
@@ -270,6 +339,17 @@ _nodeid_resolver(node_name_to_index::Dict{String,Int}) =
     (name::String) -> node_name_to_index[name]
 
 """Wrap parsed Julia source around the supplied lexical context bindings."""
+function _edge_context_expression(body, edge_context::_EdgeFunctionContext)
+    assignments = [
+        Expr(:(=), descriptor.binding, getfield(edge_context, descriptor.field))
+        for descriptor in (
+            EDGE_CONTEXT_DESCRIPTORS...,
+            EDGE_ENDPOINT_CONTEXT_DESCRIPTORS...,
+        )
+    ]
+    return Expr(:let, Expr(:block, assignments...), body)
+end
+
 function _source_context_expression(
     parsed,
     nodeid::Union{Nothing,Function},
@@ -284,14 +364,7 @@ function _source_context_expression(
 
     body = parsed
     if edge_context !== nothing
-        body = :(let
-            length = $(edge_context.distance_meters)
-            delay = $(edge_context.delay_seconds)
-            refractive_index = $(edge_context.refractive_index)
-            node_a = $(edge_context.node_a)
-            node_b = $(edge_context.node_b)
-            $body
-        end)
+        body = _edge_context_expression(body, edge_context)
     end
     self_node_index === nothing || (body = :(let self = $self_node_index; $body; end))
     return :(let nodeid = $(QuoteNode(nodeid)); $body; end)
@@ -308,7 +381,11 @@ function _representative_source_context(placement::AbstractString)
     representative_nodeid(::String)::Int = 1
     self_node_index = placement in ("node", "variable") ? 1 : nothing
     edge_context = placement in ("edge", "variable") ?
-        _EdgeFunctionContext(1.0, 2.0, 1.5, 1, 2) : nothing
+        _EdgeFunctionContext(
+            (descriptor.representative for descriptor in EDGE_CONTEXT_DESCRIPTORS)...,
+            (descriptor.representative for descriptor in
+                EDGE_ENDPOINT_CONTEXT_DESCRIPTORS)...,
+        ) : nothing
     return (; nodeid=representative_nodeid, self_node_index, edge_context)
 end
 

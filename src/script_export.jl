@@ -410,12 +410,16 @@ function _script_assignment_bindings(node_index, edge_context; capture_nodeid::B
   bindings = capture_nodeid ? "    nodeid = Base.getproperty(@__MODULE__, :nodeid)\n" : ""
   node_index === nothing || (bindings *= "    self = $node_index\n")
   edge_context === nothing && return bindings
-  return bindings *
-    "    length = $(_script_literal(edge_context.distance_meters, "edge length"))\n" *
-    "    delay = $(_script_literal(edge_context.delay_seconds, "edge delay"))\n" *
-    "    refractive_index = $(_script_literal(edge_context.refractive_index, "edge refractive index"))\n" *
-    "    node_a = $(edge_context.node_a)\n" *
-    "    node_b = $(edge_context.node_b)\n"
+  for descriptor in EDGE_CONTEXT_DESCRIPTORS
+    value = getfield(edge_context, descriptor.field)
+    bindings *=
+      "    $(descriptor.binding) = $(_script_literal(value, descriptor.script_label))\n"
+  end
+  for descriptor in EDGE_ENDPOINT_CONTEXT_DESCRIPTORS
+    value = getfield(edge_context, descriptor.field)
+    bindings *= "    $(descriptor.binding) = $value\n"
+  end
+  return bindings
 end
 
 function _script_custom_function_expression(

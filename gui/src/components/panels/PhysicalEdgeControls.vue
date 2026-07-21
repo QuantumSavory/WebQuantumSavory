@@ -1,114 +1,41 @@
 <template>
   <div class="physical-edge-controls">
-    <div class="physical-row">
-      <label for="edge-distance-meters">Distance</label>
-      <template v-if="resolved.manualDelay">
-        <span id="edge-distance-meters" class="na-value">n/a</span>
-      </template>
-      <template v-else>
-        <input
-          id="edge-distance-meters"
-          type="number"
-          min="0"
-          step="any"
-          :value="displayValue('distanceMeters', resolved.distanceMeters)"
-          :disabled="editingLocked"
-          @change="setOverride(
-            'distanceMeters',
-            $event,
-            displayValue('distanceMeters', resolved.distanceMeters),
-          )"
-        >
-        <span class="unit">m</span>
-        <button
-          v-if="hasOverride('distanceMeters')"
-          type="button"
-          class="reset-button"
-          :disabled="editingLocked"
-          title="Reset distance to the route-derived value"
-          aria-label="Reset distance to automatic"
-          @click="resetOverride('distanceMeters')"
-        >
-          <RotateCcw :size="14" aria-hidden="true" />
-        </button>
-      </template>
-    </div>
+    <QuantityField
+      v-for="parameter in edgeParameters"
+      :key="parameter.id"
+      :field-id="parameter.controlId"
+      :parameter="parameter"
+      :value="displayValue(parameter)"
+      :disabled="editingLocked"
+      :unavailable="isDormant(parameter)"
+      :resettable="!isDormant(parameter) && hasOverride(parameter)"
+      :reset-title="resetTitle(parameter)"
+      :reset-label="`Reset ${parameter.label.toLowerCase()} to automatic`"
+      @update:value="setOverride(parameter, $event)"
+      @reset="resetOverride(parameter)"
+    />
 
-    <div class="physical-row">
-      <label for="edge-refractive-index">Refractive index</label>
-      <template v-if="resolved.manualDelay">
-        <span id="edge-refractive-index" class="na-value">n/a</span>
-      </template>
-      <template v-else>
-        <input
-          id="edge-refractive-index"
-          type="number"
-          min="0"
-          step="any"
-          :value="displayValue('refractiveIndex', resolved.refractiveIndex)"
-          :disabled="editingLocked"
-          @change="setOverride(
-            'refractiveIndex',
-            $event,
-            displayValue('refractiveIndex', resolved.refractiveIndex),
-            true,
-          )"
-        >
-        <button
-          v-if="hasOverride('refractiveIndex')"
-          type="button"
-          class="reset-button"
-          :disabled="editingLocked"
-          title="Reset to the project refractive index"
-          aria-label="Reset refractive index to automatic"
-          @click="resetOverride('refractiveIndex')"
-        >
-          <RotateCcw :size="14" aria-hidden="true" />
-        </button>
-      </template>
-    </div>
-
-    <div class="physical-row">
-      <label for="edge-delay-seconds">Propagation delay</label>
-      <input
-        id="edge-delay-seconds"
-        type="number"
-        min="0"
-        step="any"
-        :value="displayValue('delaySeconds', resolved.propagationDelaySeconds)"
-        :disabled="editingLocked"
-        @change="setOverride(
-          'delaySeconds',
-          $event,
-          displayValue('delaySeconds', resolved.propagationDelaySeconds),
-        )"
-      >
-      <span class="unit">s</span>
-      <button
-        v-if="hasOverride('delaySeconds')"
-        type="button"
-        class="reset-button"
-        :disabled="editingLocked"
-        title="Reset delay to automatic propagation"
-        aria-label="Reset propagation delay to automatic"
-        @click="resetOverride('delaySeconds')"
-      >
-        <RotateCcw :size="14" aria-hidden="true" />
-      </button>
-    </div>
-
-    <p v-if="resolved.manualDelay" class="manual-delay-help">
+    <p v-if="resolved.manualDelay" class="quantity-mode-help">
       Manual delay replaces the calculated propagation delay. Distance and refractive-index
       overrides remain saved and return to the controls when delay is reset.
+    </p>
+    <p v-if="resolved.manualTransmissivity" class="quantity-mode-help">
+      Manual transmissivity replaces the calculated fiber transmission. The dormant global or
+      per-edge loss remains saved and returns to the controls when transmissivity is reset.
     </p>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { RotateCcw } from '@lucide/vue'
 
+import QuantityField from '../ui/QuantityField.vue'
 import { resolveEdgePhysicalProperties } from '../../utils/edgeGeometry'
+import {
+  EDGE_PHYSICAL_PARAMETER_DESCRIPTORS,
+  emptyPhysicalOverrides,
+  formatPhysicalInputValue,
+} from '../../utils/physicalParameters.js'
 
 const props = defineProps({
   edge: { type: Object, required: true },
@@ -117,18 +44,16 @@ const props = defineProps({
 })
 const emit = defineEmits(['designOperations'])
 
+const edgeParameters = EDGE_PHYSICAL_PARAMETER_DESCRIPTORS
 const resolved = computed(() => resolveEdgePhysicalProperties(
   props.edge,
   props.physicalConfig,
 ))
 
 function currentOverrides() {
-  return props.edge.data.physicalOverrides
-    ? { ...props.edge.data.physicalOverrides }
-    : {
-    distanceMeters: null,
-    refractiveIndex: null,
-    delaySeconds: null,
+  return {
+    ...emptyPhysicalOverrides(),
+    ...(props.edge.data.physicalOverrides || {}),
   }
 }
 
@@ -140,34 +65,33 @@ function commitOverrides(physicalOverrides) {
   }])
 }
 
-function hasOverride(field) {
-  return props.edge.data.physicalOverrides?.[field] != null
+function hasOverride(parameter) {
+  return props.edge.data.physicalOverrides?.[parameter.overrideField] != null
 }
 
-function displayValue(field, resolvedValue) {
-  const override = props.edge.data.physicalOverrides?.[field]
-  if (override != null) return override
-  return typeof resolvedValue === 'number' && Number.isFinite(resolvedValue)
-    ? Number(resolvedValue.toPrecision(3))
-    : resolvedValue
+function isDormant(parameter) {
+  return parameter.dormantWhen ? resolved.value[parameter.dormantWhen] === true : false
 }
 
-function setOverride(field, event, fallback, positive = false) {
-  const value = Number(event.target.value)
-  const valid = Number.isFinite(value) && (positive ? value > 0 : value >= 0)
-  if (!valid) {
-    event.target.value = fallback
-    return
-  }
+function displayValue(parameter) {
+  const override = props.edge.data.physicalOverrides?.[parameter.overrideField]
+  return override ?? formatPhysicalInputValue(resolved.value[parameter.resolvedField])
+}
+
+function setOverride(parameter, value) {
   const overrides = currentOverrides()
-  overrides[field] = value
+  overrides[parameter.overrideField] = value
   commitOverrides(overrides)
 }
 
-function resetOverride(field) {
+function resetOverride(parameter) {
   const overrides = currentOverrides()
-  overrides[field] = null
+  overrides[parameter.overrideField] = null
   commitOverrides(Object.values(overrides).every(value => value == null) ? null : overrides)
+}
+
+function resetTitle(parameter) {
+  return `Reset ${parameter.label.toLowerCase()} to ${parameter.automaticDescription}`
 }
 </script>
 
@@ -175,49 +99,10 @@ function resetOverride(field) {
 .physical-edge-controls {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--app-space-3);
 }
 
-.physical-row {
-  display: grid;
-  grid-template-columns: minmax(7.5rem, 1fr) minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.78rem;
-}
-
-.physical-row label {
-  font-weight: 600;
-}
-
-.physical-row input {
-  width: 100%;
-  min-width: 0;
-  padding: 4px 6px;
-}
-
-.unit,
-.na-value {
-  color: var(--app-color-text-muted);
-}
-
-.reset-button {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-color: transparent;
-  background: transparent;
-  color: var(--app-color-text-muted);
-}
-
-.reset-button:hover:not(:disabled) {
-  background: var(--app-color-surface-hover);
-}
-
-.manual-delay-help {
+.quantity-mode-help {
   margin: 1px 0 0;
   color: var(--app-color-text-muted);
   font-size: 0.74rem;

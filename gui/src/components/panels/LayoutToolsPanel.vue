@@ -27,20 +27,23 @@
 
     <section class="layout-tools-card defaults-card" aria-labelledby="physical-defaults-title">
       <h3 id="physical-defaults-title" class="card-title">Physical Defaults</h3>
-      <label class="field-label" for="default-refractive-index">
-        Refractive index
-      </label>
-      <input
-        id="default-refractive-index"
-        class="number-input"
-        type="number"
-        min="0"
-        step="any"
-        :value="physicalConfig.refractiveIndex"
-        :disabled="disabled"
-        @change="updateRefractiveIndex"
-      >
-      <p class="field-help">Used for automatic propagation-delay calculations.</p>
+      <div class="physical-default-fields">
+        <div
+          v-for="parameter in globalPhysicalParameters"
+          :key="parameter.id"
+          class="quantity-default"
+        >
+          <QuantityField
+            :field-id="parameter.globalControlId"
+            :parameter="parameter"
+            :value="physicalConfig[parameter.configField] ?? parameter.defaultValue"
+            variant="stacked"
+            :disabled="disabled"
+            @update:value="updatePhysicalDefault(parameter, $event)"
+          />
+          <p class="field-help">{{ parameter.help }}</p>
+        </div>
+      </div>
       <div class="template-node">
         <h4 class="field-label">Template node</h4>
         <p class="field-help">
@@ -138,12 +141,17 @@
 import { ref } from 'vue'
 import { MessageSquarePlus, Network, Star, Waypoints } from '@lucide/vue'
 import SlotsEditor from './SlotsEditor.vue'
+import QuantityField from '../ui/QuantityField.vue'
+import {
+  DEFAULT_PHYSICAL_CONFIG_VALUES,
+  GLOBAL_PHYSICAL_PARAMETER_DESCRIPTORS,
+} from '../../utils/physicalParameters.js'
 
 const props = defineProps({
   disabled: { type: Boolean, default: false },
   physicalConfig: {
     type: Object,
-    default: () => ({ refractiveIndex: 1.468 }),
+    default: () => ({ ...DEFAULT_PHYSICAL_CONFIG_VALUES }),
   },
   curveEditingEnabled: { type: Boolean, default: false },
   showPhysicalBadges: { type: Boolean, default: true },
@@ -154,12 +162,13 @@ const emit = defineEmits([
   'open-repeater-chain-generator',
   'open-star-network-generator',
   'open-graph-network-generator',
-  'update:refractive-index',
   'update:curve-editing-enabled',
   'update:show-physical-badges',
   'add-annotation',
   'design-operations',
 ])
+
+const globalPhysicalParameters = GLOBAL_PHYSICAL_PARAMETER_DESCRIPTORS
 
 const curveModeHelp = {
   label: 'Curve mode',
@@ -210,13 +219,11 @@ function showDefaultHelp() {
   activeHelper.value = null
 }
 
-function updateRefractiveIndex(event) {
-  const value = Number(event.target.value)
-  if (!Number.isFinite(value) || value <= 0) {
-    event.target.value = props.physicalConfig.refractiveIndex
-    return
-  }
-  emit('update:refractive-index', value)
+function updatePhysicalDefault(parameter, value) {
+  emit('design-operations', [{
+    kind: 'design.update',
+    value: { physicalConfig: { [parameter.configField]: value } },
+  }])
 }
 
 function createTemplateSlot(value) {
@@ -348,10 +355,14 @@ kbd {
   margin-bottom: var(--app-space-2);
 }
 
-.number-input {
-  width: 100%;
-  min-height: 30px;
-  padding: 4px 7px;
+.physical-default-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-space-4);
+}
+
+.quantity-default {
+  min-width: 0;
 }
 
 .drawing-card,
@@ -390,8 +401,7 @@ kbd {
   color: var(--app-color-primary);
 }
 
-.helper-button:disabled,
-.number-input:disabled {
+.helper-button:disabled {
   border-color: var(--app-color-border);
   background: var(--app-color-disabled-surface);
   color: var(--app-color-disabled-text);

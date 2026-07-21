@@ -1,4 +1,5 @@
 import { resolveEdgePhysicalProperties } from './edgeGeometry.js'
+import { EDGE_PHYSICAL_PARAMETER_DESCRIPTORS } from './physicalParameters.js'
 
 export function projectNodeNames(projectData) {
   return (projectData?.net?.nodes || []).map(node => String(node?.name ?? ''))
@@ -38,9 +39,10 @@ export function buildNumericExpressionContext(projectData, placement, owner = nu
       : resolveEdgePhysicalProperties(edge, projectData.net.physicalConfig)
     return {
       node_names: nodeNames,
-      length: physical?.distanceMeters ?? null,
-      delay: physical?.propagationDelaySeconds ?? null,
-      refractive_index: physical?.refractiveIndex ?? null,
+      ...Object.fromEntries(EDGE_PHYSICAL_PARAMETER_DESCRIPTORS.map(parameter => [
+        parameter.contextBinding,
+        physical?.[parameter.resolvedField] ?? null,
+      ])),
       node_a: nodeA,
       node_b: nodeB,
     }

@@ -66,7 +66,12 @@ describe('collaborative design codec', () => {
     expect(document).toMatchObject({
       schemaVersion: PROJECT_SCHEMA_VERSION,
       name: 'Canonical',
-      net: { physicalConfig: { refractiveIndex: expect.any(Number) } },
+      net: {
+        physicalConfig: {
+          refractiveIndex: expect.any(Number),
+          lossDbPerKm: 0.2,
+        },
+      },
     })
   })
 })
@@ -203,6 +208,7 @@ describe('createEmptyProject', () => {
         protocols: [],
         physicalConfig: {
           refractiveIndex: 1.468,
+          lossDbPerKm: 0.2,
           nodeTemplate: { slots: [] },
         },
       },
@@ -267,6 +273,7 @@ describe('decodeStoredProject', () => {
     expect(edge.data.physicalOverrides).toBeNull()
     expect(decoded.project.net.physicalConfig).toEqual({
       refractiveIndex: 1.468,
+      lossDbPerKm: 0.2,
       nodeTemplate: { slots: [] },
     })
     expect(decoded.project.net.protocols[0]).toBeInstanceOf(FloatingProtocol)
@@ -315,6 +322,7 @@ describe('decodeStoredProject', () => {
         protocols: [],
         physicalConfig: {
           refractiveIndex: 1.468,
+          lossDbPerKm: 0.2,
           nodeTemplate: { slots: [] },
         },
       },
@@ -440,9 +448,12 @@ describe('decodeStoredProject', () => {
       distanceMeters: 1200,
       refractiveIndex: null,
       delaySeconds: null,
+      lossDbPerKm: null,
+      transmissivity: null,
     })
     expect(project.net.physicalConfig).toEqual({
       refractiveIndex: 1.5,
+      lossDbPerKm: 0.2,
       nodeTemplate: { slots: [] },
     })
 
@@ -465,9 +476,17 @@ describe('decodeStoredProject', () => {
     invalid.net.edges[0].data.curvePoints = []
     invalid.net.edges[0].data.physicalOverrides = { delaySeconds: -1 }
     expect(() => decodeStoredProject(invalid)).toThrow(/nonnegative/)
+    invalid.net.edges[0].data.physicalOverrides = { lossDbPerKm: -0.1 }
+    expect(() => decodeStoredProject(invalid)).toThrow(/nonnegative/)
+    invalid.net.edges[0].data.physicalOverrides = { transmissivity: 1.1 }
+    expect(() => decodeStoredProject(invalid)).toThrow(/0 through 1/)
     invalid.net.edges[0].data.physicalOverrides = null
     invalid.net.edges[0].isLogic = 'true'
     expect(() => decodeStoredProject(invalid)).toThrow(/isLogic must be a boolean/)
+
+    const invalidGlobalLoss = legacyProject()
+    invalidGlobalLoss.net.physicalConfig = { lossDbPerKm: -0.1 }
+    expect(() => decodeStoredProject(invalidGlobalLoss)).toThrow(/nonnegative/)
 
     const polarNode = legacyProject()
     polarNode.net.nodes[0].position = [0, 89]
@@ -494,6 +513,8 @@ describe('encodeStoredProject', () => {
       distanceMeters: 1250,
       propagationDelaySeconds: 0.25,
       refractiveIndex: 1.5,
+      lossDbPerKm: 0.4,
+      transmissivity: 0.75,
     })
 
     const encoded = encodeStoredProject(decoded.project, {
@@ -528,8 +549,11 @@ describe('encodeStoredProject', () => {
     expect(encoded.net.edges[0].data).not.toHaveProperty('distanceMeters')
     expect(encoded.net.edges[0].data).not.toHaveProperty('propagationDelaySeconds')
     expect(encoded.net.edges[0].data).not.toHaveProperty('refractiveIndex')
+    expect(encoded.net.edges[0].data).not.toHaveProperty('lossDbPerKm')
+    expect(encoded.net.edges[0].data).not.toHaveProperty('transmissivity')
     expect(encoded.net.physicalConfig).toEqual({
       refractiveIndex: 1.468,
+      lossDbPerKm: 0.2,
       nodeTemplate: { slots: [] },
     })
     expect(encoded.variables[0].value.kind).toBe('states_zoo')
@@ -829,17 +853,24 @@ describe('backend payload codecs', () => {
     expect(payload.net.edges[0].data.distanceMeters).toBeGreaterThan(0)
     expect(payload.net.edges[0].data.propagationDelaySeconds).toBeGreaterThan(0)
     expect(payload.net.edges[0].data.refractiveIndex).toBe(DEFAULT_PHYSICAL_CONFIG.refractiveIndex)
+    expect(payload.net.edges[0].data.lossDbPerKm).toBe(DEFAULT_PHYSICAL_CONFIG.lossDbPerKm)
+    expect(payload.net.edges[0].data.transmissivity).toBeGreaterThanOrEqual(0)
+    expect(payload.net.edges[0].data.transmissivity).toBeLessThanOrEqual(1)
 
     project.net.edges[0].data.physicalOverrides = {
       distanceMeters: 1250,
       delaySeconds: 0.25,
       refractiveIndex: 1.5,
+      lossDbPerKm: 0.4,
+      transmissivity: 0.75,
     }
     const manualPayloadData = toSimulationPayload(project).net.edges[0].data
     expect(manualPayloadData).toMatchObject({
       distanceMeters: 1250,
       propagationDelaySeconds: 0.25,
       refractiveIndex: 1.5,
+      lossDbPerKm: 0.4,
+      transmissivity: 0.75,
     })
 
     project.net.edges[0].isLogic = true
@@ -847,6 +878,8 @@ describe('backend payload codecs', () => {
     expect(virtualPayloadData).not.toHaveProperty('distanceMeters')
     expect(virtualPayloadData).not.toHaveProperty('propagationDelaySeconds')
     expect(virtualPayloadData).not.toHaveProperty('refractiveIndex')
+    expect(virtualPayloadData).not.toHaveProperty('lossDbPerKm')
+    expect(virtualPayloadData).not.toHaveProperty('transmissivity')
 
     expect(slot.isLocked).toBe(true)
     expect(slot.backgroundNoise.doc).toBe('Editor documentation')

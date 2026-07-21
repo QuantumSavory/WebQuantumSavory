@@ -33,7 +33,7 @@ function projectFixture({ virtual = false } = {}) {
       net: {
         nodes: [alice, bob],
         edges: [edge],
-        physicalConfig: { refractiveIndex: 1.5 },
+        physicalConfig: { refractiveIndex: 1.5, lossDbPerKm: 0.2 },
       },
     },
   }
@@ -60,6 +60,8 @@ describe('numeric expression assignment context', () => {
       length: expect.any(Number),
       delay: expect.any(Number),
       refractive_index: 1.5,
+      loss: 0.2,
+      transmissivity: expect.any(Number),
       node_a: 2,
       node_b: 1,
     })
@@ -73,6 +75,8 @@ describe('numeric expression assignment context', () => {
       length: null,
       delay: null,
       refractive_index: null,
+      loss: null,
+      transmissivity: null,
       node_a: 2,
       node_b: 1,
     })

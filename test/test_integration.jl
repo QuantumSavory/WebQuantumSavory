@@ -950,6 +950,8 @@
           "distanceMeters",
           "propagationDelaySeconds",
           "refractiveIndex",
+          "lossDbPerKm",
+          "transmissivity",
         )
           @test haskey(edge_properties, field)
           @test edge_properties[field]["type"] == "number"
@@ -969,6 +971,13 @@
         @test edge_properties["refractiveIndex"]["nullable"] == true
         @test contains(edge_properties["refractiveIndex"]["description"], "dimensionless")
         @test contains(edge_properties["refractiveIndex"]["description"], "omission or null")
+        @test edge_properties["lossDbPerKm"]["minimum"] == 0
+        @test edge_properties["lossDbPerKm"]["nullable"] == true
+        @test contains(edge_properties["lossDbPerKm"]["description"], "dB/km")
+        @test edge_properties["transmissivity"]["minimum"] == 0
+        @test edge_properties["transmissivity"]["maximum"] == 1
+        @test edge_properties["transmissivity"]["nullable"] == true
+        @test contains(edge_properties["transmissivity"]["description"], "dimensionless")
 
         numeric_operation = swagger["paths"]["/test_numeric_expression"]["post"]
         numeric_schema = numeric_operation["requestBody"]["content"]["application/json"]["schema"]
@@ -989,12 +998,17 @@
           "length",
           "delay",
           "refractive_index",
+          "loss",
+          "transmissivity",
           "node_a",
           "node_b",
         ])
         @test context_schemas[3]["properties"]["length"]["nullable"] == true
         @test context_schemas[3]["properties"]["delay"]["nullable"] == true
         @test context_schemas[3]["properties"]["refractive_index"]["nullable"] == true
+        @test context_schemas[3]["properties"]["loss"]["nullable"] == true
+        @test context_schemas[3]["properties"]["transmissivity"]["nullable"] == true
+        @test context_schemas[3]["properties"]["transmissivity"]["maximum"] == 1
         @test haskey(numeric_operation["responses"], "403")
       end
   end
@@ -1049,6 +1063,7 @@
           ("==(nodeid(\"Amherst\"))", "edge", true),
           (
             "values -> length > 0 && delay >= 0 && refractive_index > 0 && " *
+            "loss >= 0 && 0 <= transmissivity <= 1 && " *
             "node_a == 1 && node_b == 2 && Base.length(values) > 0",
             "edge",
             true,
@@ -1100,6 +1115,8 @@
           "length" => 100.0,
           "delay" => 5.0e-7,
           "refractive_index" => 1.5,
+          "loss" => 0.2,
+          "transmissivity" => 0.95,
           "node_a" => 1,
           "node_b" => 2,
         ),

@@ -247,6 +247,8 @@ async function expectCustomFunctionValidationLifecycle(
   await expect(contextHelp).toContainText('self')
   await expect(contextHelp).toContainText('node protocol')
   await expect(contextHelp).toContainText('refractive_index')
+  await expect(contextHelp).toContainText('loss')
+  await expect(contextHelp).toContainText('transmissivity')
   await expect(contextHelp).toContainText('Base.length(collection)')
   await page.keyboard.press('Escape')
   await expect(contextHelp).toHaveCount(0)
