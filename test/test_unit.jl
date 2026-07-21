@@ -4461,18 +4461,65 @@
       Dict("kind" => "numeric_expression", "source" => 1),
     )
 
-    function free_bindings(source)
-      WebQuantumSavory._free_numeric_context_bindings(
+    function lowered_bindings(source; evaluation_module=Module())
+      lowered = Meta.lower(
+        evaluation_module,
         WebQuantumSavory._parse_complete_source(source),
       )
+      return WebQuantumSavory._lowered_numeric_context_bindings(
+        lowered,
+        evaluation_module,
+      )
     end
-    @test free_bindings("delay / 2 + node_a") == Set((:delay, :node_a))
-    @test isempty(free_bindings("Base.length([1, 2])"))
-    @test isempty(free_bindings("let delay = 4; delay / 2; end"))
-    @test isempty(free_bindings("delay(x) = x + 1\ndelay(2)"))
-    @test free_bindings("x -> x + delay") == Set((:delay,))
-    @test isempty(free_bindings(":(delay + self)"))
-    @test free_bindings("# delay\nself") == Set((:self,))
+    @test lowered_bindings("delay / 2 + node_a") == Set((:delay, :node_a))
+    @test isempty(lowered_bindings("Base.length([1, 2])"))
+    @test isempty(lowered_bindings("let delay = 4; delay / 2; end"))
+    @test isempty(lowered_bindings("delay(x) = x + 1\ndelay(2)"))
+    @test lowered_bindings("x -> x + delay") == Set((:delay,))
+    @test isempty(lowered_bindings(":(delay + self)"))
+    @test lowered_bindings("# delay\nself") == Set((:self,))
+    @test lowered_bindings("@isdefined(delay)") == Set((:delay,))
+    @test isempty(lowered_bindings("if true; delay = 1; end; delay"))
+
+    macro_module = Module()
+    Core.eval(macro_module, :(expansion_count = Ref(0)))
+    Core.eval(macro_module, quote
+      macro count_expansion(expression)
+        expansion_count[] += 1
+        return esc(expression)
+      end
+      macro discard_expression(expression)
+        return :(1)
+      end
+      macro hygienic_delay()
+        return :(delay)
+      end
+      macro escaped_delay()
+        return esc(:delay)
+      end
+    end)
+    counted_lowered = Meta.lower(
+      macro_module,
+      WebQuantumSavory._parse_complete_source("@count_expansion(1 + 1)"),
+    )
+    @test isempty(WebQuantumSavory._lowered_numeric_context_bindings(
+      counted_lowered,
+      macro_module,
+    ))
+    @test Core.eval(macro_module, counted_lowered) == 2
+    @test Core.eval(macro_module, :expansion_count)[] == 1
+    @test isempty(lowered_bindings(
+      "@discard_expression(delay)";
+      evaluation_module=macro_module,
+    ))
+    @test lowered_bindings(
+      "@hygienic_delay";
+      evaluation_module=macro_module,
+    ) == Set((:delay,))
+    @test lowered_bindings(
+      "@escaped_delay";
+      evaluation_module=macro_module,
+    ) == Set((:delay,))
 
     withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
@@ -4485,6 +4532,7 @@
       @test results == Dict(
         :deferred => true,
         :target_type => "Float64",
+        :value => "1.5",
       )
 
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
@@ -4497,10 +4545,32 @@
       @test results[:deferred] == false
       @test parse(Float64, results[:value]) == 1.5
 
+      for (source, target, expected) in (
+        ("sum(range(1; length=3))", "Int64", "6"),
+        ("(; delay=1).delay", "Int64", "1"),
+        ("sum(length for length in 1:3)", "Int64", "6"),
+        ("if true; delay=1; end; delay", "Int64", "1"),
+        ("Base.length((1, 2))", "Int64", "2"),
+      )
+        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+          source,
+          target,
+          "variable",
+        )
+        @test success
+        @test error === nothing
+        @test results == Dict(
+          :deferred => false,
+          :target_type => target,
+          :value => expected,
+        )
+      end
+
       for source in (
         "delay / 2",
         "self + nodeid(\"Bob\")",
         "length + refractive_index + node_a + node_b",
+        "@isdefined(delay)",
       )
         success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
           source,
@@ -4615,9 +4685,43 @@
         "floating";
         context=(node_names=["Alice"],),
       )
+      @test success
+      @test results[:value] == "2"
+      @test error === nothing
+
+      contextual_body_file = tempname()
+      contextual_source = "open($(repr(contextual_body_file)), \"a\") do io; write(io, \"x\"); end; delay"
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        contextual_source,
+        "Float64",
+        "variable",
+      )
+      @test success
+      @test results[:deferred] == true
+      @test !isfile(contextual_body_file)
+
+      for placement in ("variable", "floating")
+        execution_file = tempname()
+        source = "open($(repr(execution_file)), \"a\") do io; write(io, \"x\"); end; 1"
+        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+          source,
+          "Int64",
+          placement,
+        )
+        @test success
+        @test results[:value] == "1"
+        @test read(execution_file, String) == "x"
+        rm(execution_file)
+      end
+
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "delay; break",
+        "Float64",
+        "variable",
+      )
       @test !success
       @test results === nothing
-      @test error isa UndefVarError
+      @test error isa Exception
     end
 
     concrete_edge_request = WebQuantumSavory._parse_numeric_expression_test_request(Dict(
@@ -4864,5 +4968,12 @@
       WebQuantumSavory.generate_julia_script(nonexecuting_payload)
     end
     @test occursin("export must not execute source", script)
+
+    parameter_by_name["success_prob"]["value"] =
+      expression("@server_must_not_expand_this_macro(delay)")
+    macro_script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+      WebQuantumSavory.generate_julia_script(nonexecuting_payload)
+    end
+    @test occursin("@server_must_not_expand_this_macro(delay)", macro_script)
   end
 end

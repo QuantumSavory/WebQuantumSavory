@@ -29,6 +29,7 @@ const TEMPLATE_PROTOCOL_DEFINITION = {
 async function mockBackend(page, {
   evaluationEnabled = true,
   numericRequests = [],
+  numericResponder = null,
 } = {}) {
   await page.route('**/known_functions', route => route.fulfill({
     json: { known_functions: ['identity'] },
@@ -74,6 +75,13 @@ async function mockBackend(page, {
         },
       })
     }
+    if (numericResponder) {
+      const response = await numericResponder(request)
+      return route.fulfill({
+        status: response.status || 200,
+        json: response.json || response,
+      })
+    }
 
     const deferred = request.placement === 'variable'
       ? /\b(delay|length|node_a|node_b|refractive_index|self)\b/.test(request.expression)
@@ -87,7 +95,7 @@ async function mockBackend(page, {
         results: {
           deferred,
           target_type: request.target_type,
-          ...(!deferred ? { value } : {}),
+          ...(!deferred || request.placement !== 'variable' ? { value } : {}),
         },
       },
     })
@@ -122,6 +130,19 @@ async function createPhysicalEdge(page) {
   const firstNode = page.locator('.node-marker').first()
   await firstNode.hover()
   await firstNode.locator('.connector.output').dragTo(page.locator('.node-marker').nth(1))
+  await expect(page.locator('.edge-list-item')).toHaveCount(1)
+}
+
+async function createRepeaterTemplate(page) {
+  for (const position of [{ x: 350, y: 250 }, { x: 700, y: 390 }, { x: 520, y: 320 }]) {
+    await page.keyboard.down('Alt')
+    await page.locator('canvas').first().click({ position })
+    await page.keyboard.up('Alt')
+  }
+  await expect(page.locator('.node-marker')).toHaveCount(3)
+  const templateNode = page.locator('.node-marker').nth(2)
+  await templateNode.hover()
+  await templateNode.locator('.connector.output').dragTo(page.locator('.node-marker').first())
   await expect(page.locator('.edge-list-item')).toHaveCount(1)
 }
 
@@ -357,7 +378,7 @@ test.describe('Default-first numeric expression inputs', () => {
     expect(numericRequests).toEqual([])
   })
 
-  test('validates layout-template source without computing or sending assignment context', async ({
+  test('shows a representative layout-template result without assignment context', async ({
     page,
   }) => {
     const numericRequests = []
@@ -378,11 +399,94 @@ test.describe('Default-first numeric expression inputs', () => {
     await row.getByRole('button', { name: 'Validate delay_scale expression' }).click()
 
     await expect(row.getByTestId('numeric-expression-deferred')).toHaveText(
-      'Evaluated when assigned.',
+      'Representative result; evaluated again when assigned.',
     )
-    await expect(row.getByTestId('numeric-expression-result')).toHaveCount(0)
+    await expect(row.getByTestId('numeric-expression-result')).toHaveText('Result: 2.5e-7')
     expect(numericRequests.at(-1)).toEqual({
       expression: 'delay / 2',
+      target_type: 'Float64',
+      placement: 'edge',
+    })
+  })
+
+  test('blocks Generate through edit, pending, and failure, then clones exact validated source', async ({
+    page,
+  }) => {
+    const numericRequests = []
+    let validationAttempt = 0
+    let resolveFirstValidation
+    await mockBackend(page, {
+      numericRequests,
+      numericResponder: request => {
+        validationAttempt += 1
+        if (validationAttempt === 1) {
+          return new Promise(resolve => { resolveFirstValidation = resolve })
+        }
+        return {
+          success: true,
+          results: {
+            deferred: true,
+            target_type: request.target_type,
+            value: '1.6666666666666665e-7',
+          },
+        }
+      },
+    })
+    await loadApp(page)
+    await createProject(page, 'Validated Template Generation')
+    await createRepeaterTemplate(page)
+
+    await page.getByRole('tab', { name: 'Layout Tools' }).click()
+    await page.getByRole('button', { name: 'Repeater Chain Generator' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Repeater Chain Generator' })
+    await dialog.locator('#chain-start-node').selectOption({ label: 'Node 1' })
+    await dialog.locator('#chain-end-node').selectOption({ label: 'Node 2' })
+    await dialog.locator('#chain-template-node').selectOption({ label: 'Node 3' })
+    await dialog.locator('#chain-template-edge').selectOption({ index: 1 })
+    await dialog.locator('#chain-repeater-count').fill('2')
+    await dialog.locator('#chain-replace-entangler').setChecked(true)
+
+    const constructor = dialog.getByTestId('template-protocol-constructor')
+    const row = parameterRow(constructor, 'delay_scale')
+    await row.getByRole('combobox', { name: 'Input option for delay_scale' })
+      .selectOption('expression:Float64')
+    const source = row.getByTestId('numeric-expression-source')
+    const generate = dialog.getByRole('button', { name: 'Generate Chain' })
+    await source.fill('delay / 2')
+    await expect(generate).toBeDisabled()
+
+    const validate = row.getByRole('button', { name: 'Validate delay_scale expression' })
+    await validate.click()
+    await expect(validate).toHaveText('Validating…')
+    await expect(validate).toBeDisabled()
+    await expect(generate).toBeDisabled()
+    resolveFirstValidation({ success: false, error: 'Representative validation failed.' })
+    await expect(row.getByTestId('numeric-expression-error'))
+      .toHaveText('Representative validation failed.')
+    await expect(generate).toBeDisabled()
+
+    await source.fill('delay / 3')
+    await expect(generate).toBeDisabled()
+    await validate.click()
+    await expect(row.getByTestId('numeric-expression-result'))
+      .toHaveText('Result: 1.6666666666666665e-7')
+    await expect(generate).toBeEnabled()
+    await generate.click()
+    await expect(dialog).toHaveCount(0)
+
+    const generatedValues = await page.evaluate(protocolType => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      return setup.projectData.net.edges.flatMap(edge => edge.data.protocols)
+        .filter(protocol => protocol.type === protocolType)
+        .map(protocol => protocol.parameters.find(parameter => parameter.name === 'delay_scale')?.value)
+    }, TEMPLATE_PROTOCOL_DEFINITION.type)
+    expect(generatedValues).toHaveLength(3)
+    expect(generatedValues).toEqual(Array(3).fill({
+      kind: 'numeric_expression',
+      source: 'delay / 3',
+    }))
+    expect(numericRequests.at(-1)).toEqual({
+      expression: 'delay / 3',
       target_type: 'Float64',
       placement: 'edge',
     })

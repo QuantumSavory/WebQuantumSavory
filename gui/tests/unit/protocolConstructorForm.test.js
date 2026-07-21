@@ -418,11 +418,11 @@ describe('ProtocolConstructorForm', () => {
       protocol: { type: ENTANGLER_TYPE, parameters: [refreshedParameter] }
     })
     await nextTick()
-    expect(refreshedParameter.selectedType).toBe('default')
-    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
+    expect(refreshedParameter.selectedType).toBe('DataType')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
   })
 
-  it('keeps the old nullable-tag Default representation backward compatible', () => {
+  it('preserves an explicit empty nullable-tag branch for validation', () => {
     api._config.value = {
       protocolTypes: {
         node: [],
@@ -452,12 +452,12 @@ describe('ProtocolConstructorForm', () => {
       stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
     })
 
-    expect(parameter.selectedType).toBe('default')
-    expect(wrapper.get('.complexTypeSelector').element.value).toBe('default')
-    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
+    expect(parameter.selectedType).toBe('DataType')
+    expect(wrapper.get('.complexTypeSelector').element.value).toBe('DataType')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
   })
 
-  it('does not carry an empty Tag branch into another protocol with the same field name', async () => {
+  it('preserves an explicit empty Tag branch across protocol refreshes', async () => {
     const otherProtocolType = 'Example.OtherTagProtocol'
     const nullableTagParameter = {
       field: 'tag',
@@ -502,9 +502,9 @@ describe('ProtocolConstructorForm', () => {
     })
     await nextTick()
 
-    expect(otherParameter.selectedType).toBe('default')
-    expect(wrapper.get('.complexTypeSelector').element.value).toBe('default')
-    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
+    expect(otherParameter.selectedType).toBe('DataType')
+    expect(wrapper.get('.complexTypeSelector').element.value).toBe('DataType')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
   })
 
   it('uses non-nullable live Consumer metadata instead of a saved Any type', () => {
@@ -757,6 +757,44 @@ describe('TypedValueInput disabled code values', () => {
     await wrapper.get('.validate-code-stub').trigger('click')
     await flushPromises()
     expect(parameter.error).toBe('```\n<transport> & "down"\n```')
+  })
+
+  it('blocks dirty and pending custom code until successful validation commits', async () => {
+    vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
+    let resolveValidation
+    vi.spyOn(api, 'validateFunction').mockImplementation(() => (
+      new Promise(resolve => { resolveValidation = resolve })
+    ))
+    const parameter = { name: 'nodeL', value: 'x -> true' }
+    const wrapper = mount(TypedValueInput, {
+      props: { parameter, type: 'Lambda', category: 'node' },
+      global: {
+        stubs: {
+          CodeEditorWithSymbols: {
+            props: ['modelValue', 'errorMessage'],
+            emits: ['update:modelValue', 'validate'],
+            template: `
+              <div>
+                <button class="edit-code-stub" @click="$emit('update:modelValue', 'x -> x < self')">Edit</button>
+                <button class="validate-code-stub" @click="$emit('validate')">Validate</button>
+              </div>
+            `
+          }
+        }
+      }
+    })
+
+    await wrapper.get('.edit-code-stub').trigger('click')
+    expect(parameter.value).toBe('x -> x < self')
+    expect(parameter.error).toBe('```\nValidate this code before continuing.\n```')
+    expect(wrapper.emitted('commit')).toBeUndefined()
+
+    await wrapper.get('.validate-code-stub').trigger('click')
+    expect(parameter.error).toBe('```\nCode validation is in progress.\n```')
+    resolveValidation({ success: true, results: {} })
+    await flushPromises()
+    expect(parameter).not.toHaveProperty('error')
+    expect(wrapper.emitted('commit')).toHaveLength(1)
   })
 })
 

@@ -1972,11 +1972,13 @@ end
     description: |
       Parses complete Julia source and casts its final value to Float64 or
       Int64. Concrete node, edge, and floating requests evaluate with the
-      supplied lexical assignment context. Omit context for template
-      validation; template results are always deferred. Variable requests must
-      omit context and are deferred only when supported assignment bindings are
-      referenced. This endpoint executes trusted Julia code in the server
-      process and is available only when unsafe evaluation is enabled.
+      supplied lexical assignment context. Omit context only for explicit
+      templates and Variables. Templates evaluate once with stable
+      representative values and return that value with deferred=true. Variable
+      requests lower once and are deferred without executing the expression
+      body when resolved assignment globals are referenced. This endpoint
+      executes trusted Julia code in the server process and is available only
+      when unsafe evaluation is enabled.
     requestBody:
       required: true
       content:
@@ -2068,7 +2070,7 @@ end
                       enum: [Float64, Int64]
                     value:
                       type: string
-                      description: Precision-safe cast result; absent when deferred.
+                      description: Precision-safe cast result; present for concrete, context-free Variable, and representative template results.
                 error_code:
                   type: string
                   enum: [EVALUATION_FAILED]

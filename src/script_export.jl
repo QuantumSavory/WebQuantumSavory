@@ -353,15 +353,25 @@ function _script_raw_expression(value, context::String)
 
   source = strip(String(value))
   isempty(source) && throw(validation_error("$context must not be blank"))
+  _script_validate_source(source, context; complete=false)
+  return "(" * source * ")"
+end
+
+"""Parse user source for export without lowering, macro expansion, or execution."""
+function _script_validate_source(
+  source::AbstractString,
+  context::String;
+  complete::Bool=true,
+)
   try
-    Meta.parse(source; raise=true)
+    complete ? _parse_complete_source(source) : Meta.parse(source; raise=true)
   catch error
     throw(validation_error(
       "$context is not valid Julia syntax",
       Dict{String,Any}("parse_error" => sprint(showerror, error)),
     ))
   end
-  return "(" * source * ")"
+  return nothing
 end
 
 function _script_declared_types(raw_type)
@@ -396,6 +406,18 @@ function _script_self_function(value, node_index, context::String)
   return nothing
 end
 
+function _script_assignment_bindings(node_index, edge_context; capture_nodeid::Bool=false)
+  bindings = capture_nodeid ? "    nodeid = Base.getproperty(@__MODULE__, :nodeid)\n" : ""
+  node_index === nothing || (bindings *= "    self = $node_index\n")
+  edge_context === nothing && return bindings
+  return bindings *
+    "    length = $(_script_literal(edge_context.distance_meters, "edge length"))\n" *
+    "    delay = $(_script_literal(edge_context.delay_seconds, "edge delay"))\n" *
+    "    refractive_index = $(_script_literal(edge_context.refractive_index, "edge refractive index"))\n" *
+    "    node_a = $(edge_context.node_a)\n" *
+    "    node_b = $(edge_context.node_b)\n"
+end
+
 function _script_custom_function_expression(
   source::AbstractString,
   node_index,
@@ -404,25 +426,10 @@ function _script_custom_function_expression(
 )
   source = strip(String(source))
   isempty(source) && throw(validation_error("$context must not be blank"))
-  try
-    _parse_function_source(source)
-  catch error
-    throw(validation_error(
-      "$context is not valid Julia syntax",
-      Dict{String,Any}("parse_error" => sprint(showerror, error)),
-    ))
-  end
+  _script_validate_source(source, context)
 
   indented = replace(source, "\n" => "\n        ")
-  context_bindings = node_index === nothing ? "" : "    self = $node_index\n"
-  if edge_context !== nothing
-    context_bindings *=
-      "    length = $(_script_literal(edge_context.distance_meters, "edge length"))\n" *
-      "    delay = $(_script_literal(edge_context.delay_seconds, "edge delay"))\n" *
-      "    refractive_index = $(_script_literal(edge_context.refractive_index, "edge refractive index"))\n" *
-      "    node_a = $(edge_context.node_a)\n" *
-      "    node_b = $(edge_context.node_b)\n"
-  end
+  context_bindings = _script_assignment_bindings(node_index, edge_context)
   return "(let\n" * context_bindings * "    function_value = let\n" *
     "        $indented\n" *
     "    end\n" *
@@ -475,43 +482,17 @@ function _script_numeric_expression(
   expression === nothing && throw(validation_error(
     "$context must use the numeric-expression tagged representation",
   ))
-  parsed = try
-    _parse_complete_source(expression.source)
-  catch error
-    throw(validation_error(
-      "$context is not valid Julia syntax",
-      Dict{String,Any}("parse_error" => sprint(showerror, error)),
-    ))
-  end
-  allowed_bindings = Set((:nodeid,))
-  node_index === nothing || push!(allowed_bindings, :self)
-  edge_context === nothing || union!(
-    allowed_bindings,
-    (:length, :delay, :refractive_index, :node_a, :node_b),
-  )
-  unavailable = setdiff(
-    _free_numeric_context_bindings(parsed),
-    allowed_bindings,
-  )
-  isempty(unavailable) || throw(validation_error(
-    "$context uses unavailable assignment binding '$(first(sort!(collect(unavailable))))'",
-  ))
+  _script_validate_source(expression.source, context)
 
   indented = replace(expression.source, "\n" => "\n        ")
   # A same-named local initializer (`nodeid = nodeid`) resolves its right-hand
   # side as the new local in Julia's hard scope. Capture the generated script's
   # global resolver explicitly before exposing the lexical expression binding.
-  context_bindings =
-    "    nodeid = Base.getproperty(@__MODULE__, :nodeid)\n"
-  node_index === nothing || (context_bindings *= "    self = $node_index\n")
-  if edge_context !== nothing
-    context_bindings *=
-      "    length = $(_script_literal(edge_context.distance_meters, "edge length"))\n" *
-      "    delay = $(_script_literal(edge_context.delay_seconds, "edge delay"))\n" *
-      "    refractive_index = $(_script_literal(edge_context.refractive_index, "edge refractive index"))\n" *
-      "    node_a = $(edge_context.node_a)\n" *
-      "    node_b = $(edge_context.node_b)\n"
-  end
+  context_bindings = _script_assignment_bindings(
+    node_index,
+    edge_context;
+    capture_nodeid=true,
+  )
 
   target_constructor = target_type == "Float64" ? "Base.Float64" : "Base.Int64"
   checks =
@@ -556,14 +537,7 @@ function _script_validate_deferred_numeric_expression(value, context::String)
   expression === nothing && throw(validation_error(
     "$context must use the numeric-expression tagged representation",
   ))
-  try
-    _parse_complete_source(expression.source)
-  catch error
-    throw(validation_error(
-      "$context is not valid Julia syntax",
-      Dict{String,Any}("parse_error" => sprint(showerror, error)),
-    ))
-  end
+  _script_validate_source(expression.source, context)
   return nothing
 end
 

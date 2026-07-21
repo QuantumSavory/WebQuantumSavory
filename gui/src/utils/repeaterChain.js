@@ -11,7 +11,8 @@ import {
 import {
   instantiateProtocolConstructor,
   protocolSimpleName,
-  seedProtocolConstructor
+  seedProtocolConstructor,
+  validateProtocolConstructorDraft
 } from './protocolConstructors'
 
 const MIN_REPEATER_COUNT = 1
@@ -211,14 +212,20 @@ function validateSwapperPredicateMetadata(definition) {
   }
 }
 
-function normalizeEnabledConstructor(setting, target) {
+function normalizeEnabledConstructor(setting, target, generatedPredicates = null) {
   validateDefinition(setting.definition, target)
   if (setting.protocol != null
     && (!isRecord(setting.protocol)
       || protocolSimpleName(setting.protocol) !== target.simpleName)) {
     throw new Error(`The ${target.simpleName} constructor does not match its runtime metadata.`)
   }
-  return seedProtocolConstructor(setting.definition, setting.protocol)
+  const constructor = seedProtocolConstructor(setting.definition, setting.protocol)
+  if (generatedPredicates) {
+    setGeneratedPredicate(constructor, setting.definition, 'nodeL', generatedPredicates.nodeL)
+    setGeneratedPredicate(constructor, setting.definition, 'nodeH', generatedPredicates.nodeH)
+  }
+  validateProtocolConstructorDraft(setting.definition, constructor)
+  return constructor
 }
 
 function resolveAutomation(rawAutomation, selection) {
@@ -257,8 +264,8 @@ function resolveAutomation(rawAutomation, selection) {
   }
 
   if (swapper.enabled) {
-    swapper.protocol = normalizeEnabledConstructor(swapper, TARGET_PROTOCOLS.swapper)
     if (predicateStrategy !== SWAPPER_PREDICATE_STRATEGIES.TEMPLATE) {
+      validateDefinition(swapper.definition, TARGET_PROTOCOLS.swapper)
       validateSwapperPredicateMetadata(swapper.definition)
       swapper.predicateSources = buildSwapperPredicateSources({
         strategy: predicateStrategy,
@@ -268,6 +275,11 @@ function resolveAutomation(rawAutomation, selection) {
         repeaterNameAt: index => repeaterName(selection.templateNode.name, index + 1)
       })
     }
+    swapper.protocol = normalizeEnabledConstructor(
+      swapper,
+      TARGET_PROTOCOLS.swapper,
+      swapper.predicateSources?.[0],
+    )
   }
 
   if (tracker.enabled) {

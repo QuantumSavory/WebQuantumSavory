@@ -13,7 +13,11 @@ import {
   resolveEdgePhysicalProperties,
 } from './edgeGeometry'
 import { isMapPosition } from './layoutTemplates'
-import { findParameterInputOption } from './parameterTypes'
+import {
+  buildParameterInputOptions,
+  findParameterInputOption,
+  inferParameterInputOption,
+} from './parameterTypes'
 import { normalizeRepresentationConfig } from './representations'
 
 export const PROJECT_SCHEMA_VERSION = 1
@@ -37,22 +41,12 @@ export const TRANSIENT_SLOT_FIELDS = Object.freeze([
   'ui_expanded',
   'renderedResult',
 ])
-export const TRANSIENT_NUMERIC_EXPRESSION_FIELDS = Object.freeze([
-  'numericExpressionResult',
-  'numericExpressionError',
-  'numericExpressionDeferred',
-  'numericExpressionPending',
-])
-
 const STORAGE_ONLY_PROJECT_FIELDS = new Set([
   'schemaVersion',
   'platformInfo',
   'uiGlobal',
 ])
 const TRANSIENT_SLOT_FIELD_SET = new Set(TRANSIENT_SLOT_FIELDS)
-const TRANSIENT_NUMERIC_EXPRESSION_FIELD_SET = new Set(
-  TRANSIENT_NUMERIC_EXPRESSION_FIELDS,
-)
 const RESOLVED_PHYSICAL_EDGE_FIELDS = Object.freeze([
   'distanceMeters',
   'propagationDelaySeconds',
@@ -258,17 +252,6 @@ function normalizeBackgroundNoise(value, context) {
   }
 }
 
-function declaredTypeNames(type) {
-  return (Array.isArray(type) ? type : [type])
-    .filter(entry => typeof entry === 'string' && entry)
-}
-
-function numericTypeName(type) {
-  return declaredTypeNames(type).find(entry => (
-    entry === 'Float64' || entry === 'Int64'
-  )) || null
-}
-
 function normalizeNumericExpressionValue(value, context) {
   if (!isRecord(value) || value.kind !== NUMERIC_EXPRESSION_VALUE_KIND) {
     return cloneValue(value)
@@ -284,52 +267,6 @@ function normalizeNumericExpressionValue(value, context) {
   }
 }
 
-function inferredParameterSelection(parameter, value) {
-  const declaredTypes = declaredTypeNames(parameter.type)
-  if (declaredTypes.some(type => type.includes('AbstractTag'))) return 'DataType'
-  if (value === 'nothing' && declaredTypes.includes('Nothing')) return 'Nothing'
-  if (
-    value === 'Wildcard'
-    && declaredTypes.some(type => type === 'Wildcard' || type === 'QuantumSavory.Wildcard')
-  ) {
-    return declaredTypes.find(type => (
-      type === 'Wildcard' || type === 'QuantumSavory.Wildcard'
-    ))
-  }
-  if (typeof value === 'boolean' && declaredTypes.includes('Bool')) return 'Bool'
-  if (typeof value === 'number') {
-    if (Number.isInteger(value)) {
-      const integerType = declaredTypes.find(type => type === 'Int' || type === 'Int64')
-      if (integerType) return integerType
-    }
-    const numberType = declaredTypes.find(type => (
-      type === 'Float64' || type === 'Float32'
-    ))
-    if (numberType) return numberType
-  }
-  if (Array.isArray(value)) {
-    const vectorType = declaredTypes.find(type => type.startsWith('Vector{'))
-    if (vectorType) return vectorType
-  }
-  if (typeof value === 'string') {
-    const numericType = declaredTypes.find(type => (
-      (type === 'Int' || type === 'Int64')
-        ? Number.isInteger(Number(value))
-        : (type === 'Float64' || type === 'Float32') && Number.isFinite(Number(value))
-    ))
-    if (numericType) return numericType
-    if (declaredTypes.includes('String')) return 'String'
-    if (declaredTypes.includes('Function')) return 'Function'
-    const symbolicType = declaredTypes.find(type => (
-      type === 'Symbolic'
-      || type.startsWith('SymbolicUtils.Symbolic')
-      || type.startsWith('QuantumSymbolics.SymQObj')
-    ))
-    if (symbolicType) return 'Symbolic'
-  }
-  return declaredTypes[0] || 'default'
-}
-
 /**
  * Normalize legacy scalar parameters into the explicit descriptor convention.
  *
@@ -338,7 +275,7 @@ function inferredParameterSelection(parameter, value) {
  */
 function normalizeProtocolParameter(rawParameter, context = 'Protocol parameter') {
   const source = isRecord(rawParameter) ? rawParameter : {}
-  const parameter = omitFields(source, TRANSIENT_NUMERIC_EXPRESSION_FIELD_SET)
+  const parameter = cloneValue(source)
   const value = normalizeNumericExpressionValue(parameter.value, context)
 
   if (value == null || value === '' || value === 'default') {
@@ -375,13 +312,15 @@ function normalizeProtocolParameter(rawParameter, context = 'Protocol parameter'
   }
 
   if (isNumericExpressionValue(value)) {
+    const declaredTypes = (Array.isArray(parameter.type) ? parameter.type : [parameter.type])
+      .filter(type => typeof type === 'string' && type)
     const selectedNumericType = typeof parameter.selectedType === 'string'
       && parameter.selectedType.startsWith('expression:')
       ? parameter.selectedType.slice('expression:'.length)
-      : numericTypeName(parameter.type)
+      : declaredTypes.find(type => ['Float64', 'Int64'].includes(type))
     if (
       !['Float64', 'Int64'].includes(selectedNumericType)
-      || !declaredTypeNames(parameter.type).includes(selectedNumericType)
+      || !declaredTypes.includes(selectedNumericType)
     ) {
       throw new Error(`${context} numeric expression requires a Float64 or Int64 declaration`)
     }
@@ -402,7 +341,10 @@ function normalizeProtocolParameter(rawParameter, context = 'Protocol parameter'
     && parameter.selectedType
     && parameter.selectedType !== 'default'
     ? parameter.selectedType
-    : inferredParameterSelection(parameter, value)
+    : inferParameterInputOption(
+        buildParameterInputOptions(parameter.type, parameter),
+        { ...parameter, value, selectedType: undefined },
+      ).id
   return {
     ...parameter,
     selectedType,
@@ -412,7 +354,7 @@ function normalizeProtocolParameter(rawParameter, context = 'Protocol parameter'
 
 function normalizeVariableRecord(rawVariable, context = 'Variable') {
   const source = isRecord(rawVariable) ? rawVariable : {}
-  const variable = omitFields(source, TRANSIENT_NUMERIC_EXPRESSION_FIELD_SET)
+  const variable = cloneValue(source)
   const value = normalizeNumericExpressionValue(variable.value, context)
   const type = typeof variable.type === 'string' && variable.type
     ? variable.type
@@ -889,7 +831,6 @@ function cleanProtocol(protocol, excludedParameterNames) {
         const cleaned = cloneValue(parameter)
         cleaned.type = parameterWireType(cleaned)
         delete cleaned.selectedType
-        TRANSIENT_NUMERIC_EXPRESSION_FIELDS.forEach(field => delete cleaned[field])
         return cleaned
       }),
   }

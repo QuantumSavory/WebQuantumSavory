@@ -265,25 +265,17 @@ function _require_exact_object_fields(
   received = Set(string(key) for key in keys(object))
   required = Set(String.(required_fields))
   allowed = union(required, Set(String.(optional_fields)))
-  missing = setdiff(required, received)
-  extras = setdiff(received, allowed)
-  isempty(missing) || throw(validation_error(
-    "$context is missing required field(s): $(join(sort!(collect(missing)), ", "))",
-  ))
-  isempty(extras) || throw(validation_error(
-    "$context contains unexpected field(s): $(join(sort!(collect(extras)), ", "))",
-  ))
+  issubset(required, received) && issubset(received, allowed) ||
+    throw(validation_error("$context fields do not match the request schema"))
   return object
 end
 
 function _numeric_context_node_names(context_object, context::String)
   raw_names = context_object["node_names"]
-  raw_names isa AbstractVector || throw(validation_error(
-    "$context field 'node_names' must be an array of strings",
-  ))
-  all(name -> name isa AbstractString, raw_names) || throw(validation_error(
-    "$context field 'node_names' must be an array of strings",
-  ))
+  raw_names isa AbstractVector && all(name -> name isa AbstractString, raw_names) ||
+    throw(validation_error(
+      "$context field 'node_names' must be an array of strings",
+    ))
   return String.(raw_names)
 end
 
@@ -306,29 +298,6 @@ function _numeric_context_node_index(
   end
   1 <= value <= length(node_names) || throw(validation_error(
     "$context field '$field' must refer to an entry in 'node_names'",
-  ))
-  return value
-end
-
-function _numeric_context_physical_value(
-  context_object,
-  field::String,
-  context::String;
-  positive::Bool=false,
-)
-  raw_value = context_object[field]
-  raw_value === nothing && return nothing
-  raw_value isa Real && !(raw_value isa Bool) || throw(validation_error(
-    "$context field '$field' must be a number or null",
-  ))
-  value = try
-    Float64(raw_value)
-  catch
-    throw(validation_error("$context field '$field' must be representable as Float64"))
-  end
-  valid = isfinite(value) && (positive ? value > 0 : value >= 0)
-  valid || throw(validation_error(
-    "$context field '$field' must be finite and $(positive ? "positive" : "nonnegative")",
   ))
   return value
 end
@@ -356,82 +325,34 @@ function _parse_numeric_expression_test_request(payload)
     "Field 'placement' must be 'node', 'edge', 'floating', or 'variable'",
   ))
 
-  if !haskey(payload, "context")
-    return (; expression, target_type, placement, context=nothing)
-  end
+  haskey(payload, "context") || return (; expression, target_type, placement, context=nothing)
   placement == "variable" && throw(validation_error(
     "Field 'context' must be omitted for variable numeric expressions",
   ))
   raw_context = payload["context"]
-
-  if placement == "floating"
-    _require_exact_object_fields(
-      raw_context,
-      ("node_names",);
-      context="Floating numeric expression context",
-    )
-    node_names = _numeric_context_node_names(
-      raw_context,
-      "Floating numeric expression context",
-    )
-    return (; expression, target_type, placement, context=(; node_names))
-  elseif placement == "node"
-    context_name = "Node numeric expression context"
-    _require_exact_object_fields(
-      raw_context,
-      ("node_names", "self");
-      context=context_name,
-    )
-    node_names = _numeric_context_node_names(raw_context, context_name)
-    self = _numeric_context_node_index(
-      raw_context,
-      "self",
-      node_names,
-      context_name,
-    )
-    return (; expression, target_type, placement, context=(; node_names, self))
-  end
-
-  context_name = "Edge numeric expression context"
+  context_name = "$(uppercasefirst(placement)) numeric expression context"
+  fields = placement == "floating" ? ("node_names",) :
+    placement == "node" ? ("node_names", "self") :
+    ("node_names", "length", "delay", "refractive_index", "node_a", "node_b")
   _require_exact_object_fields(
     raw_context,
-    (
-      "node_names",
-      "length",
-      "delay",
-      "refractive_index",
-      "node_a",
-      "node_b",
-    );
+    fields;
     context=context_name,
   )
   node_names = _numeric_context_node_names(raw_context, context_name)
-  node_a = _numeric_context_node_index(
-    raw_context,
-    "node_a",
-    node_names,
-    context_name,
-  )
-  node_b = _numeric_context_node_index(
-    raw_context,
-    "node_b",
-    node_names,
-    context_name,
-  )
-  distance_meters = _numeric_context_physical_value(
-    raw_context,
-    "length",
-    context_name,
-  )
-  delay_seconds = _numeric_context_physical_value(
-    raw_context,
-    "delay",
-    context_name,
-  )
-  refractive_index = _numeric_context_physical_value(
-    raw_context,
-    "refractive_index",
-    context_name;
+  placement == "floating" &&
+    return (; expression, target_type, placement, context=(; node_names))
+  if placement == "node"
+    self = _numeric_context_node_index(raw_context, "self", node_names, context_name)
+    return (; expression, target_type, placement, context=(; node_names, self))
+  end
+
+  node_a = _numeric_context_node_index(raw_context, "node_a", node_names, context_name)
+  node_b = _numeric_context_node_index(raw_context, "node_b", node_names, context_name)
+  distance_meters = _physical_edge_number(raw_context, "length", "field 'length'", context_name)
+  delay_seconds = _physical_edge_number(raw_context, "delay", "field 'delay'", context_name)
+  refractive_index = _physical_edge_number(
+    raw_context, "refractive_index", "field 'refractive_index'", context_name;
     positive=true,
   )
   physical_values = (distance_meters, delay_seconds, refractive_index)
@@ -441,11 +362,7 @@ function _parse_numeric_expression_test_request(payload)
       "$context_name physical fields must either all be numbers or all be null",
     ))
   edge_context = _EdgeFunctionContext(
-    distance_meters,
-    delay_seconds,
-    refractive_index,
-    node_a,
-    node_b,
+    distance_meters, delay_seconds, refractive_index, node_a, node_b,
   )
   return (; expression, target_type, placement, context=(; node_names, edge_context))
 end

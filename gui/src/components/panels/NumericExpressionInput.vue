@@ -46,7 +46,7 @@
       class="numeric-expression-validate"
       :disabled="disabled || !evaluationEnabled || !source.trim() || previewPending"
       :aria-label="`Validate ${parameter.name || 'numeric'} expression`"
-      @click="validateAndCommit"
+      @click="validate({ commit: true })"
     >
       {{ previewPending ? 'Validating…' : 'Validate' }}
     </button>
@@ -60,21 +60,21 @@
       {{ previewError }}
     </p>
     <p
-      v-else-if="previewDeferred"
-      class="numeric-expression-deferred"
-      data-testid="numeric-expression-deferred"
-      role="status"
-    >
-      Evaluated when assigned.
-    </p>
-    <p
-      v-else-if="previewResult != null"
+      v-if="previewResult != null && !(linked && template)"
       class="numeric-expression-result"
       data-testid="numeric-expression-result"
       role="status"
       :aria-label="`${parameter.name || 'Numeric expression'} result`"
     >
       Result: {{ previewResult }}
+    </p>
+    <p
+      v-if="!previewError && previewDeferred"
+      class="numeric-expression-deferred"
+      data-testid="numeric-expression-deferred"
+      role="status"
+    >
+      {{ template ? 'Representative result; evaluated again when assigned.' : 'Evaluated when assigned.' }}
     </p>
   </div>
 </template>
@@ -90,6 +90,7 @@ import CustomFunctionContextHelp from './CustomFunctionContextHelp.vue'
 
 const props = defineProps({
   parameter: { type: Object, required: true },
+  validationTarget: { type: Object, default: undefined },
   targetType: { type: String, required: true },
   placement: { type: String, default: 'floating' },
   context: { type: Object, default: undefined },
@@ -104,7 +105,8 @@ const emit = defineEmits(['commit'])
 
 let requestController = null
 let requestGeneration = 0
-let validatedSource = null
+let ownedError = null
+let ownedErrorTarget = null
 const previewResult = ref(null)
 const previewError = ref('')
 const previewDeferred = ref(false)
@@ -120,15 +122,28 @@ const sourceLabel = computed(() => (
   `${props.parameter.name || 'Parameter'} numeric expression source`
 ))
 const evaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
-const effectiveContext = computed(() => (
-  props.template || props.placement === 'variable' ? undefined : props.context
-))
+const effectiveValidationTarget = computed(() => props.validationTarget || props.parameter)
 
 function abortRequest() {
   requestController?.abort()
   requestController = null
   requestGeneration += 1
   previewPending.value = false
+}
+
+function setOwnedError(message) {
+  if (ownedErrorTarget && ownedErrorTarget !== effectiveValidationTarget.value) {
+    if (ownedErrorTarget.error === ownedError) delete ownedErrorTarget.error
+  }
+  ownedError = message
+  ownedErrorTarget = effectiveValidationTarget.value
+  ownedErrorTarget.error = message
+}
+
+function clearOwnedError() {
+  if (ownedErrorTarget && ownedErrorTarget.error === ownedError) delete ownedErrorTarget.error
+  ownedError = null
+  ownedErrorTarget = null
 }
 
 function clearPreview() {
@@ -138,26 +153,32 @@ function clearPreview() {
   previewDeferred.value = false
 }
 
+function setValidationError(message) {
+  previewError.value = message
+  setOwnedError(message)
+  return false
+}
+
 function onSourceInput(value) {
   if (props.disabled || !evaluationEnabled.value) return
   source.value = value
-  validatedSource = null
   clearPreview()
-}
-
-function responseError(response) {
-  if (typeof response?.error === 'string') return response.error
-  if (typeof response?.error?.message === 'string') return response.error.message
-  return 'Numeric expression validation failed.'
+  setValidationError('Validate this expression before continuing')
 }
 
 async function validate({ commit = false } = {}) {
   const currentSource = source.value
-  if (props.disabled || !currentSource.trim()) return false
-  if (!evaluationEnabled.value) {
+  if (props.disabled) return false
+  const localError = !currentSource.trim()
+    ? 'Validate this expression before continuing'
+    : !evaluationEnabled.value
+      ? 'Server-side Julia evaluation is disabled'
+      : !props.template && props.placement !== 'variable' && props.context == null
+        ? 'A concrete assignment context is required for validation'
+        : null
+  if (localError) {
     clearPreview()
-    previewError.value = 'Server-side Julia evaluation is disabled.'
-    return false
+    return setValidationError(localError)
   }
 
   abortRequest()
@@ -167,6 +188,7 @@ async function validate({ commit = false } = {}) {
   previewError.value = ''
   previewResult.value = null
   previewDeferred.value = false
+  setOwnedError('Expression validation is in progress')
 
   let response
   try {
@@ -175,23 +197,26 @@ async function validate({ commit = false } = {}) {
       props.targetType,
       props.placement,
       {
-        context: effectiveContext.value,
+        context: props.template || props.placement === 'variable'
+          ? undefined
+          : props.context,
         signal: requestController.signal,
       },
     )
   } catch (error) {
     if (error?.name === 'AbortError' || generation !== requestGeneration) return false
     previewPending.value = false
-    previewError.value = error?.message || 'Numeric expression validation failed.'
-    return false
+    return setValidationError(error?.message || 'Numeric expression validation failed.')
   }
   if (generation !== requestGeneration || currentSource !== source.value) return false
 
   requestController = null
   previewPending.value = false
   if (response?.success !== true) {
-    previewError.value = responseError(response)
-    return false
+    const error = typeof response?.error === 'string'
+      ? response.error
+      : response?.error?.message
+    return setValidationError(error || 'Numeric expression validation failed.')
   }
 
   const evaluatedValue = response.results?.value
@@ -203,14 +228,12 @@ async function validate({ commit = false } = {}) {
       || (Number.isFinite(props.maximum) && numericValue > props.maximum)
     )
   ) {
-    previewError.value = `${props.parameter.name || 'Value'} must be`
+    return setValidationError(`${props.parameter.name || 'Value'} must be`
       + `${Number.isFinite(props.minimum) ? ` at least ${props.minimum}` : ''}`
       + `${Number.isFinite(props.minimum) && Number.isFinite(props.maximum) ? ' and' : ''}`
-      + `${Number.isFinite(props.maximum) ? ` at most ${props.maximum}` : ''}.`
-    return false
+      + `${Number.isFinite(props.maximum) ? ` at most ${props.maximum}` : ''}.`)
   }
 
-  validatedSource = currentSource
   if (!props.linked) {
     props.parameter.value = createNumericExpressionValue(currentSource)
   }
@@ -218,22 +241,10 @@ async function validate({ commit = false } = {}) {
   if (evaluatedValue != null) {
     previewResult.value = String(evaluatedValue)
   }
+  clearOwnedError()
   if (commit) emit('commit')
   return true
 }
-
-async function validateAndCommit() {
-  await validate({ commit: true })
-}
-
-watch(
-  persistedSource,
-  value => {
-    if (value === source.value) return
-    source.value = value
-    validatedSource = value || null
-  },
-)
 
 watch(
   () => [
@@ -243,29 +254,30 @@ watch(
     JSON.stringify(props.context),
   ],
   () => {
-    const shouldRevalidate = props.linked || validatedSource === source.value
+    const shouldRevalidate = props.linked || persistedSource.value === source.value
     clearPreview()
     if (shouldRevalidate && source.value.trim()) void validate()
   },
 )
 
 watch(
-  () => [source.value, props.linked],
-  ([currentSource, linked], previous = []) => {
-    if (currentSource === previous[0] && linked === previous[1]) return
+  [persistedSource, () => props.linked],
+  ([persisted, linked]) => {
+    if (persisted !== source.value) source.value = persisted
     clearPreview()
-    if (
-      evaluationEnabled.value
-      && currentSource.trim()
-      && (linked || currentSource === persistedSource.value)
-    ) {
+    if (!source.value.trim()) {
+      setValidationError('Validate this expression before continuing')
+    } else if (linked || source.value === persisted) {
       void validate()
     }
   },
   { immediate: true },
 )
 
-onBeforeUnmount(abortRequest)
+onBeforeUnmount(() => {
+  abortRequest()
+  clearOwnedError()
+})
 </script>
 
 <style scoped>

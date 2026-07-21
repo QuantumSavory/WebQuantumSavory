@@ -99,9 +99,11 @@
                 <NumericExpressionInput
                   v-if="assignedVariableIsNumericExpression(param)"
                   :parameter="assignedVariable(param)"
+                  :validation-target="param"
                   :target-type="assignedVariable(param).type"
                   :placement="category"
                   :context="numericExpressionContext"
+                  :template="template"
                   :minimum="runtimeParameterDefinition(param)?.min"
                   :maximum="runtimeParameterDefinition(param)?.max"
                   linked
@@ -186,7 +188,6 @@ import { api } from '../../utils/ApiConnector'
 import { VariableReference, isVariableReference } from '../../models/Variable'
 import {
   buildParameterInputOptions,
-  clearNumericExpressionPreview,
   getTypeOptionLabel,
   inferParameterInputOption,
   isNumericExpressionOptionId,
@@ -254,13 +255,15 @@ function parameterInputOptions(param) {
 
 function initialOption(param) {
   const options = parameterInputOptions(param)
-  if (param.value == null || param.value === '' || param.value === 'default') return options[0]
   if (param.value === 'nothing') {
     return options.find(option => option.id === 'Nothing') || options[0]
   }
   if (param.value === 'Wildcard') {
     return options.find(option => option.inputKind === 'intrinsic') || options[0]
   }
+  const explicit = options.find(option => option.id === param.selectedType)
+  if (explicit) return explicit
+  if (param.value == null || param.value === '' || param.value === 'default') return options[0]
   return inferParameterInputOption(options, param)
 }
 
@@ -408,7 +411,6 @@ function assignVariable(param, variableId) {
   variablePickerParameter.value = null
   delete param.error
   delete param.latex
-  clearNumericExpressionPreview(param)
   emit('commit')
 }
 

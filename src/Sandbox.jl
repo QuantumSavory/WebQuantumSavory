@@ -8,17 +8,14 @@ using ResumableFunctions
 using ConcurrentSim
 using ..WebQuantumSavory: NUMERIC_EXPRESSION_PLACEMENTS,
                           NUMERIC_EXPRESSION_TARGETS,
-                          _ALL_NUMERIC_CONTEXT_BINDINGS,
-                          _EdgeFunctionContext,
                           _cast_numeric_expression_result,
-                          _evaluate_complete_source,
                           _evaluate_function_source,
-                          _free_numeric_context_bindings,
-                          _function_context_expression,
+                          _lowered_numeric_context_bindings,
                           _node_name_to_index,
                           _nodeid_resolver,
                           _numeric_expression_result_string,
                           _parse_complete_source,
+                          _representative_source_context,
                           _source_context_expression,
                           require_unsafe_code_evaluation
 
@@ -96,20 +93,12 @@ function test_code(code_string::String; placement::Union{Nothing,String}=nothing
             )
             _validate_query_function_globals(function_value, sandbox)
         else
-            function validation_nodeid(name::String)::Int
-                return 1
-            end
-            self_node_index = effective_placement in ("node", "variable") ? 1 : nothing
-            edge_context = if effective_placement in ("edge", "variable")
-                _EdgeFunctionContext(1.0, 2.0, 1.5, 1, 2)
-            else
-                nothing
-            end
-            transform = parsed -> _function_context_expression(
+            representative = _representative_source_context(effective_placement)
+            transform = parsed -> _source_context_expression(
                 parsed,
-                validation_nodeid,
-                self_node_index,
-                edge_context,
+                representative.nodeid,
+                representative.self_node_index,
+                representative.edge_context,
             )
             _evaluate_function_source(
                 code_string;
@@ -165,29 +154,15 @@ function test_code(code_string::String; placement::Union{Nothing,String}=nothing
     end
 end
 
-function _numeric_placement_bindings(placement::String)
-    placement == "node" && return Set((:nodeid, :self))
-    placement == "edge" && return Set((
-        :nodeid,
-        :length,
-        :delay,
-        :refractive_index,
-        :node_a,
-        :node_b,
-    ))
-    placement == "floating" && return Set((:nodeid,))
-    placement == "variable" && return copy(_ALL_NUMERIC_CONTEXT_BINDINGS)
-    return Set{Symbol}()
-end
-
 """
 Validate or evaluate one typed Julia numeric expression.
 
-Template protocol validation omits `context` and is always deferred. Variable
-validation also omits context, but evaluates context-free source immediately;
-free references to the supported assignment bindings are syntax-checked and
-reported as deferred. Concrete node, edge, and floating contexts evaluate in a
-fresh module with the same lexical bindings used by runtime construction.
+Template protocol validation omits `context`, evaluates once with stable
+representative values, and returns that cast value with `deferred=true`.
+Variable validation lowers once; expressions whose resolved globals include an
+assignment binding are deferred without executing their body, while other
+Variables evaluate that same lowered form. Concrete requests evaluate once in
+the supplied lexical assignment context.
 """
 function test_numeric_expression(
     expression::AbstractString,
@@ -208,39 +183,38 @@ function test_numeric_expression(
             "Numeric expression placement must be 'node', 'edge', 'floating', or 'variable'",
         ))
 
+        evaluation_module = Module()
         parsed = _parse_complete_source(expression)
-        references = _free_numeric_context_bindings(parsed)
-        unavailable = setdiff(references, _numeric_placement_bindings(placement))
-        isempty(unavailable) || throw(UndefVarError(first(sort!(collect(unavailable)))))
+        results = Dict{Symbol,Any}(:target_type => target_type)
 
-        deferred = context === nothing && (
-            placement != "variable" || !isempty(references)
-        )
-        results = Dict{Symbol,Any}(
-            :deferred => deferred,
-            :target_type => target_type,
-        )
-        deferred && return true, results, nothing
-
-        transform = identity
-        if context !== nothing
-            node_name_to_index = _node_name_to_index(context.node_names)
-            nodeid = _nodeid_resolver(node_name_to_index)
-            self_node_index = placement == "node" ? context.self : nothing
-            edge_context = placement == "edge" ? context.edge_context : nothing
-            transform = parsed_source -> _source_context_expression(
-                parsed_source,
-                nodeid,
-                self_node_index,
-                edge_context,
-            )
+        value = if placement == "variable"
+            lowered = Meta.lower(evaluation_module, parsed)
+            references = _lowered_numeric_context_bindings(lowered, evaluation_module)
+            if !isempty(references)
+                results[:deferred] = true
+                return true, results, nothing
+            end
+            results[:deferred] = false
+            Base.eval(evaluation_module, lowered)
+        else
+            source_context = if context === nothing
+                _representative_source_context(placement)
+            else
+                node_name_to_index = _node_name_to_index(context.node_names)
+                (
+                    nodeid=_nodeid_resolver(node_name_to_index),
+                    self_node_index=placement == "node" ? context.self : nothing,
+                    edge_context=placement == "edge" ? context.edge_context : nothing,
+                )
+            end
+            results[:deferred] = context === nothing
+            Base.eval(evaluation_module, _source_context_expression(
+                parsed,
+                source_context.nodeid,
+                source_context.self_node_index,
+                source_context.edge_context,
+            ))
         end
-
-        value = _evaluate_complete_source(
-            expression;
-            evaluation_module=Module(),
-            transform,
-        )
         cast_value = _cast_numeric_expression_result(value, target_type)
         results[:value] = _numeric_expression_result_string(cast_value)
         return true, results, nothing

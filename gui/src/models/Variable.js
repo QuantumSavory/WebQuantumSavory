@@ -81,6 +81,13 @@ export function isNumericExpressionValue(value) {
   return keys.length === 2 && keys[0] === 'kind' && keys[1] === 'source'
 }
 
+export function createNumericExpressionValue(source) {
+  return {
+    kind: NUMERIC_EXPRESSION_VALUE_KIND,
+    source: String(source ?? ''),
+  }
+}
+
 export function isStatesZooValue(value) {
   return value !== null
     && typeof value === 'object'

@@ -215,24 +215,43 @@ only the source:
 }
 ```
 
-Context-free Variable expressions are evaluated immediately. A Variable that
-refers to an assignment binding is validated but deferred and shown as
-**Evaluated when assigned**. Protocol template/layout constructors also defer
-numeric evaluation because they do not have a concrete assignment. An
-installed protocol uses its actual context:
+Validation has four modes:
+
+| Input | Validation result |
+| --- | --- |
+| Installed node, edge, or floating protocol | Evaluates once with the actual lexical assignment context, casts to the target type, applies metadata bounds, and returns `deferred: false` with the concrete value. |
+| Protocol template/layout constructor | Evaluates once with stable representative values for that placement, casts and checks bounds, and returns `deferred: true` with the representative value. Direct inputs display that value with **Representative result; evaluated again when assigned**. |
+| Context-free Variable | Lowers once, evaluates that same lowered form once, casts it, and returns `deferred: false` with the value. |
+| Context-dependent Variable | Lowers once, detects resolved assignment globals, and returns `deferred: true` without executing the expression body or casting it. |
+
+Only Variables use Julia lowering to decide whether evaluation must wait for an
+assignment. Lowering includes macro expansion and therefore runs only behind
+the unsafe-evaluation gate. Julia's resolved lowered globals distinguish real
+context dependencies from keyword labels, property names, generator bindings,
+local assignments, and macro hygiene.
+
+An installed protocol uses its actual context:
 
 - Every placement has `nodeid(name)` over the ordered project node names.
 - Node protocols additionally have one-based `self`.
 - Edge protocols additionally have `length`, `delay`, `refractive_index`,
   `node_a`, and `node_b`. The three physical values are `null` on virtual
-  edges.
+  edges. Unqualified `length` intentionally refers to the edge length;
+  `Base.length(collection)` always calls the collection function.
 - Floating protocols have only `nodeid(name)`.
 
+Variables conservatively treat unqualified `length` as assignment-dependent
+because they can later be linked to an edge. Node and floating contexts do not
+shadow ordinary `Base.length`.
+
 Preview results, validation errors, node-name maps, and physical context are
-transient and are never saved. A linked expression Variable is evaluated
-independently at each protocol assignment. Runtime construction and generated
-scripts use the same lexical bindings and target cast. Script export parses
-numeric source but never executes it on the server.
+transient and are never saved. A linked template shows the deferred status but
+suppresses the representative value; a linked installed protocol shows its
+concrete result. A linked expression Variable is evaluated independently at
+each protocol assignment. Runtime construction and generated scripts use the
+same lexical bindings and target cast. Script export validates the strict tag
+and complete Julia syntax only: it never lowers, macro-expands, or executes
+user source in the server.
 
 When unsafe evaluation is enabled, `POST /test_numeric_expression` accepts:
 
@@ -268,10 +287,12 @@ cast value as a precision-safe string:
 }
 ```
 
-A deferred success has the same shape without `value`. Malformed request data
-returns HTTP 400, disabled evaluation returns HTTP 403, and parse, evaluation,
-or cast failures use `error_code: "EVALUATION_FAILED"` with production
-redaction.
+A contextual Variable success is deferred without `value`. A template success
+is also deferred but includes its representative `value`. Omitted `context` is
+accepted only for an explicit template request and Variables. Malformed request
+data returns HTTP 400, disabled evaluation returns HTTP 403, and parse,
+evaluation, or cast failures use `error_code: "EVALUATION_FAILED"` with
+production redaction.
 
 ### Trusted Julia Evaluation
 

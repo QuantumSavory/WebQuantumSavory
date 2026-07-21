@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildParameterInputOptions,
   buildVariableInputOptions,
+  createNumericExpressionValue,
+  inferParameterInputOption,
   isNumericExpressionValue,
+  parameterInputIsComplete,
   parseNumericParameterValue,
 } from '../../src/utils/parameterTypes'
 
@@ -13,7 +16,6 @@ describe('parameter input descriptors', () => {
       expect.objectContaining({
         id: 'default',
         label: 'Default',
-        declaredType: 'Float64',
         inputKind: 'default',
         wireType: null,
         enabled: true,
@@ -85,6 +87,58 @@ describe('parameter input descriptors', () => {
       source: '1',
       result: 1,
     })).toBe(false)
+  })
+
+  it('infers legacy numeric strings and metadata-backed named tags', () => {
+    const numericOptions = buildParameterInputOptions(['Int64', 'String'])
+    expect(inferParameterInputOption(numericOptions, { value: '42' }).id).toBe('Int64')
+
+    const tagOptions = buildParameterInputOptions('Anything', { kind: 'named_tag_type' })
+    expect(inferParameterInputOption(tagOptions, { value: 'QuantumSavory.Tag' }).id)
+      .toBe('DataType')
+  })
+
+  it('checks completeness for every descriptor family and validation errors', () => {
+    const option = (type, id, metadata = {}) => (
+      buildParameterInputOptions(type, metadata).find(candidate => candidate.id === id)
+    )
+    const cases = [
+      [option('Float64', 'default'), { value: null }, true],
+      [option('Float64', 'default'), { value: '' }, false],
+      [option('Float64', 'Float64'), { value: '0.25', min: 0, max: 1 }, true],
+      [option('Float64', 'Float64'), { value: '2', max: 1 }, false],
+      [option('Float64', 'expression:Float64'), {
+        value: createNumericExpressionValue('delay / 2'),
+      }, true],
+      [option('Float64', 'expression:Float64'), { value: null }, false],
+      [option('Bool', 'Bool'), { value: false }, true],
+      [option('Nothing', 'Nothing'), { value: 'nothing' }, true],
+      [option('QuantumSavory.Wildcard', 'QuantumSavory.Wildcard'), {
+        value: 'Wildcard',
+      }, true],
+      [option('String', 'String'), { value: 'name' }, true],
+      [option('String', 'String'), { value: '   ' }, false],
+      [option('Vector{Int64}', 'Vector{Int64}'), { value: [1, 2] }, true],
+      [option('Vector{Int64}', 'Vector{Int64}'), { value: [1.5] }, false],
+      [option('Vector{Float64}', 'Vector{Float64}'), { value: [0.5] }, true],
+      [option('Function', 'Function'), { value: 'identity' }, true],
+      [option('Function', 'Lambda'), { value: 'x -> x' }, true],
+      [option('Function', 'Lambda'), { value: '' }, false],
+      [option('Anything', 'DataType', { kind: 'named_tag_type' }), {
+        value: 'QuantumSavory.Tag',
+      }, true],
+    ]
+
+    cases.forEach(([descriptor, parameter, expected]) => {
+      expect(parameterInputIsComplete(descriptor, parameter)).toBe(expected)
+    })
+    expect(parameterInputIsComplete(
+      option('Float64', 'expression:Float64'),
+      {
+        value: createNumericExpressionValue('1 / 2'),
+        error: 'Expression validation is in progress',
+      },
+    )).toBe(false)
   })
 })
 

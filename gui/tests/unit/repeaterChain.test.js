@@ -10,8 +10,13 @@ import {
   createProtocolFromDefinition,
   deepClone,
   protocolSimpleName,
-  seedProtocolConstructor
+  seedProtocolConstructor,
+  validateProtocolConstructorDraft,
 } from '../../src/utils/protocolConstructors'
+import {
+  buildParameterInputOptions,
+  inferParameterInputOption,
+} from '../../src/utils/parameterTypes'
 import {
   SWAPPER_PREDICATE_STRATEGIES,
   buildSwapperPredicateSources,
@@ -77,7 +82,13 @@ function configuredProtocol(type, values = {}) {
       : TRACKER_DEFINITION
   const draft = createProtocolFromDefinition(definition)
   draft.parameters.forEach(parameter => {
-    if (Object.hasOwn(values, parameter.name)) parameter.value = values[parameter.name]
+    if (!Object.hasOwn(values, parameter.name)) return
+    parameter.value = values[parameter.name]
+    const metadata = definition.parameters.find(candidate => candidate.field === parameter.name)
+    const options = buildParameterInputOptions(metadata.type, metadata)
+    const candidate = { ...parameter }
+    delete candidate.selectedType
+    parameter.selectedType = inferParameterInputOption(options, candidate).id
   })
   return draft
 }
@@ -240,6 +251,64 @@ describe('protocol constructor helpers', () => {
     parametersByName(seeded).success_prob.extra.nested = false
     expect(template.parameters[0].extra.nested).toBe(true)
     expect(ENTANGLER_DEFINITION.parameters[3].defaultValue.nested.value).toBe('metadata')
+  })
+
+  it('preserves an explicit empty branch and validates rather than normalizing it', () => {
+    const template = protocol('template-protocol', SWAPPER_TYPE, [{
+      name: 'rounds',
+      type: 'Int64',
+      selectedType: 'expression:Int64',
+      value: null,
+    }])
+    const seeded = seedProtocolConstructor(SWAPPER_DEFINITION, template)
+    expect(parametersByName(seeded).rounds).toMatchObject({
+      selectedType: 'expression:Int64',
+      value: null,
+    })
+    expect(() => validateProtocolConstructorDraft(SWAPPER_DEFINITION, seeded))
+      .toThrow(/field rounds requires a complete Int64 Expression value/)
+  })
+
+  it.each([
+    ['Int64', null],
+    ['String', ''],
+    ['Function', ''],
+    ['Lambda', ''],
+  ])('rejects an explicit empty %s constructor branch', (selectedType, value) => {
+    const definition = {
+      type: 'Example.Protocol',
+      parameters: [{ field: 'value', type: ['Int64', 'String', 'Function'] }],
+    }
+    const draft = {
+      type: definition.type,
+      parameters: [{ name: 'value', selectedType, value }],
+    }
+    expect(() => validateProtocolConstructorDraft(definition, draft))
+      .toThrow(/field value requires a complete/)
+  })
+
+  it('accepts absent defaults and strict Variable references but rejects invalid drafts', () => {
+    expect(validateProtocolConstructorDraft(ENTANGLER_DEFINITION, {
+      type: ENTANGLER_TYPE,
+      parameters: [],
+    })).toBe(true)
+    expect(validateProtocolConstructorDraft(ENTANGLER_DEFINITION, {
+      type: ENTANGLER_TYPE,
+      parameters: [{
+        name: 'success_prob',
+        selectedType: 'expression:Float64',
+        value: { kind: 'variable', id: 'rate' },
+      }],
+    })).toBe(true)
+    expect(() => validateProtocolConstructorDraft(ENTANGLER_DEFINITION, {
+      type: ENTANGLER_TYPE,
+      parameters: [{
+        name: 'success_prob',
+        selectedType: 'expression:Float64',
+        value: { kind: 'numeric_expression', source: '1 / 2' },
+        error: 'Expression validation is in progress',
+      }],
+    })).toThrow(/field success_prob has a validation error/)
   })
 })
 
@@ -454,8 +523,8 @@ describe('repeater-chain protocol automation', () => {
       ]
     })
     const automation = enabledAutomation()
-    parametersByName(automation.entangler.protocol).settings.value = { nested: { count: 1 } }
-    parametersByName(automation.swapper.protocol).settings.value = { nested: { count: 2 } }
+    automation.entangler.protocol.extra = { nested: { count: 1 } }
+    automation.swapper.protocol.extra = { nested: { count: 2 } }
 
     const result = generateRepeaterChain(net, baseOptions({
       repeaterCount: 2,
@@ -504,14 +573,14 @@ describe('repeater-chain protocol automation', () => {
     ]))
 
     const entanglers = result.chainEdges.map(edge => protocolsNamed(edge.data.protocols, 'EntanglerProt')[0])
-    parametersByName(entanglers[0]).settings.value.nested.count = 99
-    expect(parametersByName(entanglers[1]).settings.value.nested.count).toBe(1)
-    expect(parametersByName(automation.entangler.protocol).settings.value.nested.count).toBe(1)
+    entanglers[0].extra.nested.count = 99
+    expect(entanglers[1].extra.nested.count).toBe(1)
+    expect(automation.entangler.protocol.extra.nested.count).toBe(1)
 
     const swappers = result.generatedNodes.map(node => protocolsNamed(node.data.protocols, 'SwapperProt')[0])
-    parametersByName(swappers[0]).settings.value.nested.count = 88
-    expect(parametersByName(swappers[1]).settings.value.nested.count).toBe(2)
-    expect(parametersByName(automation.swapper.protocol).settings.value.nested.count).toBe(2)
+    swappers[0].extra.nested.count = 88
+    expect(swappers[1].extra.nested.count).toBe(2)
+    expect(automation.swapper.protocol.extra.nested.count).toBe(2)
   })
 
   it('omits metadata defaults when no configured constructor is supplied', () => {
@@ -707,7 +776,7 @@ describe('repeater-chain protocol automation', () => {
     expect(byId.end.data.protocols).toBe(endProtocols)
   })
 
-  it('does not partially mutate when constructor building fails after selection validation', () => {
+  it('reports constructor failures consistently without partially mutating', () => {
     const { net, byId } = makeNetwork({
       startProtocols: [protocol('start-tracker', TRACKER_TYPE)],
       endProtocols: [protocol('end-tracker', TRACKER_TYPE)]
@@ -741,7 +810,7 @@ describe('repeater-chain protocol automation', () => {
       })
     })
 
-    expect(validateRepeaterChain(net, options).valid).toBe(true)
+    expect(validateRepeaterChain(net, options).valid).toBe(false)
     expect(() => generateRepeaterChain(net, options)).toThrow()
     expect(net.nodes).toBe(originalNodes)
     expect(net.edges).toBe(originalEdges)

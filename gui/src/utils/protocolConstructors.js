@@ -1,7 +1,9 @@
 import {
   buildParameterInputOptions,
   inferParameterInputOption,
+  parameterInputIsComplete,
 } from './parameterTypes.js'
+import { isVariableReference } from '../models/Variable.js'
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -37,7 +39,7 @@ export function deepClone(value, seen = new WeakMap()) {
     if (Array.isArray(value) && key === 'length') return
 
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if ('value' in descriptor) descriptor.value = deepClone(descriptor.value, seen)
+    if ('value' in descriptor) descriptor.value = deepClone(value[key], seen)
     Object.defineProperty(clone, key, descriptor)
   })
 
@@ -56,17 +58,17 @@ function definitionParameters(definition) {
   if (!isRecord(definition) || typeof definition.type !== 'string' || !definition.type) {
     throw new Error('A runtime protocol definition is required.')
   }
-  if (!Array.isArray(definition.parameters)) {
-    throw new Error(`Runtime metadata for ${protocolSimpleName(definition)} has no parameter list.`)
-  }
+  if (!Array.isArray(definition.parameters)) throw new Error(
+    `Runtime metadata for ${protocolSimpleName(definition)} has no parameter list.`,
+  )
   return definition.parameters
 }
 
 function parameterFromDefinition(parameter) {
   const name = parameter?.field
-  if (typeof name !== 'string' || !name) {
-    throw new Error('Runtime protocol metadata contains a parameter without a field name.')
-  }
+  if (typeof name !== 'string' || !name) throw new Error(
+    'Runtime protocol metadata contains a parameter without a field name.',
+  )
 
   return {
     name,
@@ -79,18 +81,66 @@ function parameterFromDefinition(parameter) {
 function normalizeSeededParameter(parameter, definition) {
   const normalized = deepClone(parameter)
   const options = buildParameterInputOptions(definition.type, definition)
+  if (options.some(option => option.id === normalized.selectedType)) return normalized
+
   if (normalized.value == null || normalized.value === '' || normalized.value === 'default') {
     normalized.selectedType = 'default'
     normalized.value = null
     return normalized
   }
-  const selected = options.find(option => option.id === normalized.selectedType)
-  if (!selected || selected.inputKind === 'default') {
-    const candidate = { ...normalized }
-    delete candidate.selectedType
-    normalized.selectedType = inferParameterInputOption(options, candidate).id
-  }
+  normalized.selectedType = inferParameterInputOption(
+    options,
+    { ...normalized, selectedType: undefined },
+  ).id
   return normalized
+}
+
+function isStrictVariableReference(value) {
+  if (!isVariableReference(value)) return false
+  const keys = Object.keys(value).sort()
+  return value.id.trim()
+    && keys.length === 2 && keys[0] === 'id' && keys[1] === 'kind'
+}
+
+/** Validate a metadata-backed constructor draft before layout generation. */
+export function validateProtocolConstructorDraft(definition, protocol = null) {
+  const definitions = definitionParameters(definition)
+  const parameters = protocol == null ? [] : protocol.parameters
+  if (!Array.isArray(parameters)) {
+    throw new Error(`The ${protocolSimpleName(definition)} constructor has no parameter list.`)
+  }
+
+  const definitionsByName = new Map(definitions.map(parameter => [parameter?.field, parameter]))
+  const supplied = new Set()
+  for (const parameter of parameters) {
+    const field = parameter?.name
+    if (typeof field !== 'string' || !field) throw new Error(
+      'A constructor field is missing its name.',
+    )
+    if (supplied.has(field)) throw new Error(`Constructor field ${field} is duplicated.`)
+    supplied.add(field)
+
+    const parameterDefinition = definitionsByName.get(field)
+    if (!parameterDefinition) throw new Error(`Constructor field ${field} is unknown.`)
+    if (parameter.error) throw new Error(`Constructor field ${field} has a validation error.`)
+    if (isStrictVariableReference(parameter.value)) continue
+
+    const options = buildParameterInputOptions(
+      parameterDefinition.type,
+      parameterDefinition,
+    )
+    const option = Object.hasOwn(parameter, 'selectedType')
+      ? options.find(candidate => candidate.id === parameter.selectedType)
+      : inferParameterInputOption(options, parameter)
+    if (!option || !option.enabled) {
+      const status = option ? 'disabled' : 'unknown'
+      throw new Error(`Constructor field ${field} uses a ${status} input option.`)
+    }
+    if (!parameterInputIsComplete(option, parameter)) {
+      throw new Error(`Constructor field ${field} requires a complete ${option.label} value.`)
+    }
+  }
+  return true
 }
 
 /**

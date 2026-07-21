@@ -108,6 +108,19 @@ The normal lifecycle is:
   `Int64` target, rejects non-finite floats and inexact/overflowing integers,
   and then applies field ranges. Do not silently replace an invalid expression
   with a constructor default.
+- Numeric-expression validation has four modes. Concrete node, edge, and
+  floating fields evaluate once in their actual lexical context. Templates
+  evaluate once with stable representative placement values and return both a
+  representative value and `deferred=true`. Context-free Variables lower once
+  and evaluate that same lowered form; context-dependent Variables detect
+  resolved assignment-module `GlobalRef`s and defer without executing the body
+  or casting it. Only this unsafe Variables path may lower or macro-expand
+  source. Reject lowering errors even when a contextual reference is present.
+- Edge context intentionally shadows unqualified `length`; `Base.length`
+  always remains the collection function, and node/floating context does not
+  shadow it. Variables conservatively treat unqualified `length` as
+  assignment-dependent. Runtime evaluation uses the actual lexical context as
+  authority and must not reintroduce static source-name scans.
 - `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` is the sole unsafe-evaluation override and accepts only `true` or `false`. Without it, evaluation is enabled only in `dev` and `test`; production and unknown environments deny it.
 
 ## API changes
@@ -124,8 +137,8 @@ The normal lifecycle is:
   `nodeid`, node-only `self`, and edge-only physical/endpoint bindings. Direct
   and Variable-backed expressions are evaluated with the concrete assignment,
   and each expression Variable is evaluated independently per assignment.
-  Export must parse source but never evaluate it in the WebQuantumSavory
-  server.
+  Export must validate the strict tag and complete syntax only; never lower,
+  macro-expand, or evaluate user source in the WebQuantumSavory server.
 - Exported scripts are standalone QuantumSavory onboarding material, not WebQuantumSavory runtime clients. Keep the fixed-duration path executable by default and the animation and protocol-PNG examples clearly separated so a script does not accidentally advance one simulation through multiple recipes.
 - Export weighted States Zoo variables and their owned trace companions with one tuple-returning `let` block: construct the raw state once, compute its absolute trace once, and bind the normalized state and trace together. Never embed the companion's cached GUI value in the generated Julia.
 - Keep serialized responses free of live QuantumSavory objects. Return stable IDs, primitive metadata, and explicitly rendered HTML/PNG data only where the existing endpoints require it.

@@ -1134,6 +1134,7 @@
         @test parse_response(template_response)["results"] == Dict(
           "deferred" => true,
           "target_type" => "Float64",
+          "value" => "0.5",
         )
 
         variable_response = make_request(

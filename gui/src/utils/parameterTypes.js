@@ -1,3 +1,10 @@
+import {
+  createNumericExpressionValue,
+  isNumericExpressionValue,
+} from '../models/Variable.js'
+
+export { createNumericExpressionValue, isNumericExpressionValue }
+
 export const KNOWN_PARAMETER_TYPES = [
   'Float64',
   'Int',
@@ -29,7 +36,6 @@ export const VARIABLE_PARAMETER_TYPES = [
   'Nothing'
 ]
 
-export const NUMERIC_EXPRESSION_KIND = 'numeric_expression'
 export const NUMERIC_EXPRESSION_PREFIX = 'expression:'
 
 const TYPE_OPTION_LABELS = {
@@ -41,7 +47,6 @@ const TYPE_OPTION_LABELS = {
 function descriptor({
   id,
   label = getTypeOptionLabel(id),
-  declaredType = id,
   inputKind,
   wireType = id,
   enabled = true,
@@ -49,7 +54,6 @@ function descriptor({
   return Object.freeze({
     id,
     label,
-    declaredType,
     inputKind,
     wireType,
     enabled,
@@ -90,7 +94,6 @@ export function buildParameterInputOptions(
     descriptor({
       id: 'default',
       label: 'Default',
-      declaredType: inputType,
       inputKind: 'default',
       wireType: null,
     }),
@@ -100,7 +103,6 @@ export function buildParameterInputOptions(
     if (metadata.nullable === true) {
       options.push(descriptor({
         id: 'Nothing',
-        declaredType: inputType,
         inputKind: 'intrinsic',
         wireType: 'Nothing',
       }))
@@ -108,7 +110,6 @@ export function buildParameterInputOptions(
     options.push(descriptor({
       id: 'DataType',
       label: 'Tag',
-      declaredType: inputType,
       inputKind: 'named-tag',
       wireType: 'DataType',
     }))
@@ -122,14 +123,12 @@ export function buildParameterInputOptions(
         descriptor({
           id: 'Function',
           label: 'Predefined Function',
-          declaredType,
           inputKind: 'predefined-function',
           wireType: 'Function',
         }),
         descriptor({
           id: 'Lambda',
           label: 'Custom Function',
-          declaredType,
           inputKind: 'code',
           wireType: 'Lambda',
         }),
@@ -140,7 +139,6 @@ export function buildParameterInputOptions(
     const enabled = parameterTypeIsKnown(declaredType)
     options.push(descriptor({
       id: declaredType,
-      declaredType,
       inputKind: inputKindForType(declaredType),
       wireType: declaredType,
       enabled,
@@ -152,7 +150,6 @@ export function buildParameterInputOptions(
       options.push(descriptor({
         id: numericExpressionOptionId(declaredType),
         label: `${declaredType} Expression`,
-        declaredType,
         inputKind: 'numeric-expression',
         wireType: declaredType,
       }))
@@ -193,11 +190,6 @@ export function parameterInputOptionForVariable(inputType, metadata, variable) {
     && option.inputKind !== 'default'
     && parameterTypeSupportsVariableType(option.wireType, semanticType)
   )) || null
-}
-
-/** Compatibility wrapper for callers that still consume descriptor IDs. */
-export function parseJuliaType(inputType, metadata = {}) {
-  return buildParameterInputOptions(inputType, metadata).map(option => option.id)
 }
 
 export function getTypeOptionLabel(type) {
@@ -247,30 +239,6 @@ export function numericExpressionTargetType(id) {
   return isNumericExpressionOptionId(id) ? id.slice(NUMERIC_EXPRESSION_PREFIX.length) : null
 }
 
-export function isNumericExpressionValue(value) {
-  return value !== null
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && Object.keys(value).length === 2
-    && value.kind === NUMERIC_EXPRESSION_KIND
-    && typeof value.source === 'string'
-    && value.source.trim().length > 0
-}
-
-export function createNumericExpressionValue(source) {
-  return {
-    kind: NUMERIC_EXPRESSION_KIND,
-    source: String(source ?? ''),
-  }
-}
-
-export function clearNumericExpressionPreview(target) {
-  delete target.numericExpressionResult
-  delete target.numericExpressionError
-  delete target.numericExpressionDeferred
-  delete target.numericExpressionPending
-}
-
 export function inferParameterInputOption(options, parameter = {}) {
   const selected = options.find(option => option.id === parameter.selectedType)
   if (selected) return selected
@@ -305,6 +273,14 @@ export function inferParameterInputOption(options, parameter = {}) {
     return options.find(option => String(option.id).startsWith('Vector{')) || options[0]
   }
   if (typeof value === 'string') {
+    const numeric = options.find(option => {
+      if (option.inputKind !== 'number') return false
+      const parsed = parseNumericParameterValue(option.wireType, value, parameter)
+      return parsed.valid && !parsed.empty
+    })
+    if (numeric) return numeric
+    const namedTag = options.find(option => option.inputKind === 'named-tag')
+    if (namedTag && value.trim()) return namedTag
     const predefined = options.find(option => option.id === 'Function')
     if (predefined && value !== 'default') return predefined
     return options.find(option => option.id === 'String')
@@ -313,7 +289,43 @@ export function inferParameterInputOption(options, parameter = {}) {
       || options.find(option => option.inputKind === 'named-tag')
       || options[0]
   }
-  return options[0]
+  return options.find(option => option.inputKind !== 'default') || options[0]
+}
+
+/** Return whether one descriptor-backed draft contains a committed value. */
+export function parameterInputIsComplete(option, parameter = {}) {
+  if (!option?.enabled || parameter.error) return false
+  const value = parameter.value
+
+  if (option.inputKind === 'default') return value === null
+  if (option.inputKind === 'numeric-expression') {
+    return isNumericExpressionOptionId(option.id)
+      && numericExpressionTargetType(option.id) === option.wireType
+      && isNumericExpressionValue(value)
+  }
+  if (option.inputKind === 'number') {
+    const parsed = parseNumericParameterValue(option.wireType, value, parameter)
+    return parsed.valid && !parsed.empty
+  }
+  if (option.inputKind === 'boolean') return typeof value === 'boolean'
+  if (option.inputKind === 'intrinsic') {
+    return option.id === 'Nothing'
+      ? value === 'nothing'
+      : isWildcardType(option.id) && value === 'Wildcard'
+  }
+  if (['named-tag', 'predefined-function', 'code'].includes(option.inputKind)) {
+    return typeof value === 'string' && value.trim().length > 0
+  }
+  if (option.inputKind === 'text') {
+    if (String(option.wireType).startsWith('Vector{')) {
+      return Array.isArray(value) && value.length > 0 && value.every(item => (
+        typeof item === 'number' && Number.isFinite(item)
+          && (option.wireType !== 'Vector{Int64}' || Number.isInteger(item))
+      ))
+    }
+    return typeof value === 'string' && value.trim().length > 0
+  }
+  return false
 }
 
 export function parseNumericParameterValue(type, rawValue, parameter = {}) {
@@ -377,7 +389,6 @@ export function unknownParameterTypes(type) {
 export function resetValueForType(parameter, type) {
   delete parameter.error
   delete parameter.latex
-  clearNumericExpressionPreview(parameter)
 
   if (type === 'default') {
     parameter.value = null

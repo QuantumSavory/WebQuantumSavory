@@ -40,7 +40,7 @@
 - Runtime API metadata supplies available background, slot, and protocol types. Protocols are grouped as `node`, `edge`, or `floating`; do not replace this with a frontend-only catalog.
 - A protocol parameter is a named-tag-type field only when its current runtime constructor metadata has `kind: "named_tag_type"`; never infer that semantic from a saved `type` snapshot or parse a Julia type string. Populate these fields from the cached `/tag_types` `named_tags` catalog, persist only fully qualified IDs, honor runtime `nullable`, and keep variable assignment unavailable until variables have an explicit compatible tag-type model. Nonnullable fields use the outer Default/Tag selector; nullable fields use Default/Nothing/Tag. Mount the named-tag autocomplete without its own Default only while Tag is selected.
 - Build every editable protocol parameter and Variable from explicit input
-  descriptors with `{ id, label, declaredType, inputKind, wireType, enabled }`.
+  descriptors with `{ id, label, inputKind, wireType, enabled }`.
   The outer selector always begins with Default, including singleton, Function,
   Symbolic, Bool, intrinsic, and named-tag fields. `selectedType` stores the
   descriptor ID, while minimized payloads use `wireType`; unsupported
@@ -57,6 +57,15 @@
   validation errors, abort controllers, node maps, placement, and physical
   context outside project data. Expression Variable edits are draft-local and
   commit atomically only after complete validation.
+- Use `parameter.error` as the shared submission blocker for dirty, blank,
+  pending, disabled, missing-context, transport, backend, bounds, and code
+  validation failures. Keep source/result/deferred/pending/request state local
+  to the input; a linked Variable validates against the protocol parameter and
+  must never write errors or preview state to the shared Variable. Preserve a
+  recognized explicit `selectedType` even when its value is empty, and let the
+  descriptor completeness validator reject it instead of normalizing it to
+  Default. Repeater validation and generation must call the same constructor
+  draft validator before cloning.
 - Register the same strict tagged-value and descriptor-ID rules at the shared
   `DesignCommandService` boundary so GUI and MCP edits cannot diverge. MCP
   transports source data; it does not evaluate expressions or own preview
@@ -108,13 +117,21 @@
 - Keep protocol constructor parameters in the shared constructor form used by both ordinary protocol editors and layout automation. Union selection, Function/Symbolic validation, variable binding, metadata documentation, and contextual `self`/`nodeid` behavior must not be reimplemented in generator dialogs.
 - Keep custom-function contextual-keyword help centralized in `src/utils/customFunctionContext.js` and render its compact, viewport-safe helper popup from the Nodes list and the shared custom-function editor so protocol and Variables-tab Lambdas stay aligned. `nodeid("Node name")` is available for every protocol placement and `self` only for node protocols. Edge protocols also receive `length` (meters), `delay` (seconds), dimensionless `refractive_index`, and one-based source/target `node_a`/`node_b`; virtual-edge physical values are `nothing`, and help must warn that `length` shadows `Base.length`. These are backend-provided lexical bindings, so never serialize contextual values or node-name maps in stored project data.
 - Reuse that context catalog and source lifecycle for numeric expressions.
-  Context-free Variable expressions show a validation result; Variables with
-  supported free assignment bindings are deferred and show “Evaluated when
-  assigned.” Template/layout constructor forms always defer and never display a
-  computed value. Ordinary installed constructors build one concrete preview
-  context from canonical project state and pass it explicitly; invalidate or
-  abort stale previews whenever source, target, placement, node ordering/names,
-  endpoints, or physical-edge values change.
+  Context-free Variable expressions show a validation result; contextual
+  Variables defer without a value and show “Evaluated when assigned.” Direct
+  template/layout expressions show the representative result plus
+  “Representative result; evaluated again when assigned”; linked templates
+  suppress that representative value while retaining the deferred status.
+  Ordinary installed constructors build one concrete preview context from
+  canonical project state and pass it explicitly; invalidate or abort stale
+  previews whenever source, target, placement, node ordering/names, endpoints,
+  or physical-edge values change. Edge context shadows unqualified `length`,
+  while `Base.length` remains available and node/floating contexts do not
+  shadow it.
+- Variable dependency detection is backend-owned Julia lowering and may expand
+  macros only while unsafe evaluation is enabled. Generated-script export is
+  parse-only and must not lower, macro-expand, or execute numeric source in the
+  server.
 - Direct numeric expressions show their source and actual cast result. Linked
   expression Variables show the source and their concrete assignment result
   below the variable picker. Keep saved source visible when unsafe evaluation

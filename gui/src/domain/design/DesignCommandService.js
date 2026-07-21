@@ -2,6 +2,7 @@ import Edge from '../../models/Edge.js'
 import FloatingProtocol from '../../models/FloatingProtocol.js'
 import Node from '../../models/Node.js'
 import Variable, {
+  NUMERIC_EXPRESSION_VALUE_KIND,
   STATES_ZOO_VALUE_KIND,
   isStatesZooTraceVariable,
   isStatesZooVariable,
@@ -21,7 +22,6 @@ import {
 } from '../../utils/edgeGeometry.js'
 import { isMapPosition } from '../../utils/mapCoordinates.js'
 import {
-  NUMERIC_EXPRESSION_KIND,
   buildParameterInputOptions,
   buildVariableInputOptions,
   inferParameterInputOption,
@@ -1018,7 +1018,7 @@ export class DesignCommandService {
           validation?.message || `${label} contains an invalid numeric expression.`,
         )
       }
-      if (validation.deferred !== true && validation.value != null) {
+      if (validation.value != null) {
         const evaluated = Number(validation.value)
         const minimum = parameter.min == null ? null : Number(parameter.min)
         const maximum = parameter.max == null ? null : Number(parameter.max)
@@ -1165,7 +1165,7 @@ export class DesignCommandService {
     }
     const expressionParameter = noise.parameters.find(parameter => (
       record(parameter?.value)
-      && parameter.value.kind === NUMERIC_EXPRESSION_KIND
+      && parameter.value.kind === NUMERIC_EXPRESSION_VALUE_KIND
     ))
     if (expressionParameter) {
       const field = expressionParameter.field || expressionParameter.name || 'unknown'

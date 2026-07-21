@@ -631,7 +631,7 @@ describe('RepeaterChainDialog protocol automation', () => {
     await wrapper.get('#chain-replace-entangler').setValue(true)
 
     expect(wrapper.get('[role="alert"]').text()).toContain(
-      'Resolve the constructor validation error before generating the chain.'
+      'Constructor field success_prob has a validation error.'
     )
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
 

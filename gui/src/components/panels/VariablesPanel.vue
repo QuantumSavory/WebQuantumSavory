@@ -113,8 +113,7 @@ import {
   buildVariableInputOptions,
   inferParameterInputOption,
   isNumericExpressionValue,
-  isWildcardType,
-  parseNumericParameterValue,
+  parameterInputIsComplete,
   resetValueForType
 } from '../../utils/parameterTypes'
 import TypedValueInput from './TypedValueInput.vue'
@@ -255,35 +254,9 @@ function commitVariable(variable, value) {
   }])
 }
 
-function draftValueIsComplete(draft) {
-  const option = optionById(draft.selectedType)
-  if (option.inputKind === 'default') return draft.value == null
-  if (option.inputKind === 'boolean') return typeof draft.value === 'boolean'
-  if (option.inputKind === 'intrinsic') {
-    return option.id === 'Nothing'
-      ? draft.value === 'nothing'
-      : isWildcardType(option.id) && draft.value === 'Wildcard'
-  }
-  if (option.inputKind === 'numeric-expression') {
-    return isNumericExpressionValue(draft.value)
-  }
-  if (option.inputKind === 'number') {
-    const parsed = parseNumericParameterValue(option.wireType, draft.value, draft)
-    return parsed.valid && !parsed.empty
-  }
-  if (option.inputKind === 'predefined-function') {
-    return typeof draft.value === 'string' && draft.value.trim().length > 0
-  }
-  if (option.inputKind === 'code' || option.inputKind === 'text') {
-    if (Array.isArray(draft.value)) return draft.value.length > 0
-    return typeof draft.value === 'string' && draft.value.trim().length > 0
-  }
-  return false
-}
-
 function commitDraftValue(variable) {
   const draft = draftFor(variable)
-  if (!draftValueIsComplete(draft)) return
+  if (!parameterInputIsComplete(optionById(draft.selectedType), draft)) return
   draft._inputDirty = false
   commitVariable(variable, {
     type: draft.type,

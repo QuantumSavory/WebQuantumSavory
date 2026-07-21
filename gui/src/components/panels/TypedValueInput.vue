@@ -167,7 +167,7 @@ const selectableFunctions = computed(() => api.getKnownFunctions().filter(func =
   ['node', 'variable'].includes(props.category) || !func.endsWith('(self)')
 )))
 const codeEditorOpen = ref(false)
-const codeDraftDirty = ref(false)
+let codeValidationGeneration = 0
 const numericValueInvalid = computed(() => !parseNumericParameterValue(
   props.type,
   props.parameter.value,
@@ -177,9 +177,7 @@ const numericValueInvalid = computed(() => !parseNumericParameterValue(
     max: props.numericMaximum ?? props.parameter.max,
   },
 ).valid)
-const codeDraftInvalid = computed(() => (
-  Boolean(props.parameter.error) || codeDraftDirty.value
-))
+const codeDraftInvalid = computed(() => Boolean(props.parameter.error))
 
 watch(
   () => props.type,
@@ -200,23 +198,21 @@ watch(
     codeEditorOpen.value = isCodeType(type)
       ? props.initiallyOpen && !(isSymbolicType(type) && props.parameter.latex)
       : false
-    codeDraftDirty.value = false
+    if (
+      isCodeType(type)
+      && (typeof props.parameter.value !== 'string' || !props.parameter.value.trim())
+    ) {
+      props.parameter.error = markdownCodeBlock('Validate this code before continuing.')
+    }
   },
   { immediate: true }
-)
-
-watch(
-  () => props.parameter,
-  () => {
-    codeDraftDirty.value = false
-  }
 )
 
 function onCodeEditorValueChanged(value) {
   if (props.disabled) return
   props.parameter.value = value
-  delete props.parameter.error
-  codeDraftDirty.value = true
+  codeValidationGeneration += 1
+  props.parameter.error = markdownCodeBlock('Validate this code before continuing.')
 }
 
 function openCodeEditor() {
@@ -248,25 +244,32 @@ function commitTextLiteral() {
 }
 
 async function validateCode() {
-  if (props.disabled) return
+  if (props.disabled) return false
+  if (typeof props.parameter.value !== 'string' || !props.parameter.value.trim()) {
+    props.parameter.error = markdownCodeBlock('Validate this code before continuing.')
+    return false
+  }
   if (!unsafeCodeEvaluationEnabled.value) {
     props.parameter.error = markdownCodeBlock('Server-side Julia evaluation is disabled.')
-    codeDraftDirty.value = true
-    return
+    return false
   }
 
+  const generation = ++codeValidationGeneration
+  props.parameter.error = markdownCodeBlock('Code validation is in progress.')
   let response
   try {
     response = isSymbolicType(props.type)
       ? await api.validateSymbolicFunction(props.parameter.value)
       : await api.validateFunction(props.parameter.value, props.category)
   } catch (error) {
+    if (generation !== codeValidationGeneration) return false
     codeEditorOpen.value = true
     delete props.parameter.latex
     props.parameter.error = markdownCodeBlock(error?.message || 'Validation failed')
-    codeDraftDirty.value = true
-    return
+    return false
   }
+
+  if (generation !== codeValidationGeneration) return false
 
   if (response.success) {
     delete props.parameter.error
@@ -274,19 +277,17 @@ async function validateCode() {
       props.parameter.latex = response.results.latex.replace(/^\$+|\$+$/g, '')
     }
     codeEditorOpen.value = false
-    codeDraftDirty.value = false
-    return
+    return true
   }
 
   codeEditorOpen.value = true
   delete props.parameter.latex
   props.parameter.error = markdownCodeBlock(response.error)
-  codeDraftDirty.value = true
+  return false
 }
 
 async function validateAndCommitCode() {
-  await validateCode()
-  if (!props.parameter.error) emit('commit')
+  if (await validateCode()) emit('commit')
 }
 </script>
 

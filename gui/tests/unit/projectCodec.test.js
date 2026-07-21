@@ -607,7 +607,7 @@ describe('backend payload codecs', () => {
     })
   })
 
-  it('normalizes legacy numeric drafts and round-trips only durable expression source', () => {
+  it('normalizes legacy numeric drafts and round-trips exact expression tags', () => {
     const project = createEmptyProject('Numeric expressions')
     project.variables.push(new Variable({
       id: 'variable_delay',
@@ -616,8 +616,6 @@ describe('backend payload codecs', () => {
       selectedType: 'expression:Float64',
       value: { kind: 'numeric_expression', source: 'delay / 2' },
     }))
-    project.variables[0].numericExpressionResult = '2.5e-7'
-    project.variables[0].numericExpressionDeferred = true
     project.net.protocols.push(new FloatingProtocol({
       id: 'numeric_protocol',
       type: 'Example.NumericProtocol',
@@ -627,8 +625,6 @@ describe('backend payload codecs', () => {
           type: 'Float64',
           selectedType: 'expression:Float64',
           value: { kind: 'numeric_expression', source: '1 // 4' },
-          numericExpressionResult: '0.25',
-          numericExpressionError: 'stale',
         },
         { name: 'legacy_string', type: 'Float64', value: '0.5' },
         { name: 'metadata_default', type: 'Int64', value: null },
@@ -641,8 +637,6 @@ describe('backend payload codecs', () => {
       selectedType: 'expression:Float64',
       value: { kind: 'numeric_expression', source: 'delay / 2' },
     })
-    expect(stored.variables[0]).not.toHaveProperty('numericExpressionResult')
-    expect(stored.variables[0]).not.toHaveProperty('numericExpressionDeferred')
     expect(stored.net.protocols[0].parameters[0]).toEqual({
       name: 'direct',
       type: 'Float64',
