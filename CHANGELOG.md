@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.10.1
+
+- Added descriptor-driven physical quantities and unit metadata for global and
+  per-edge refractive index, fiber loss, propagation delay, and
+  transmissivity, with a default fiber loss of 0.2 dB/km.
+- Added automatic distance-and-loss transmissivity, bounded manual overrides,
+  reset behavior, dormant loss preservation, legacy schema-v1 normalization,
+  and material-aware generated-edge inheritance without persisting derived
+  values.
+- Added resolved `loss` and `transmissivity` edge bindings across Custom
+  Functions, numeric-expression previews and Variables, simulator runtime, and
+  executable generated scripts, while retaining nullable compatibility for
+  legacy and virtual-edge payloads.
+- Generalized physical-default design commands to validated partial updates
+  and synchronized the GUI, MCP schema, backend validation, Swagger, browser
+  workflows, and project round trips with the additive contracts.
+
 ## 1.10.0
 
 - Added one Default-first input selector for every editable protocol parameter

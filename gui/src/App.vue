@@ -741,13 +741,6 @@ function updateProjectDescription(description, afterCommit, afterError) {
   )
 }
 
-function updateRefractiveIndex(refractiveIndex) {
-  return executeGuiDesignOperations([{
-    kind: 'design.update',
-    value: { physicalConfig: { refractiveIndex } }
-  }])
-}
-
 function updateSimulationTime(time) {
   return executeGuiDesignOperations([{
     kind: 'design.update',
@@ -1614,7 +1607,6 @@ onUnmounted(() => {
         @open-star-network-generator="openStarNetworkGenerator"
         @open-graph-network-generator="openGraphNetworkGenerator"
         @add-annotation="beginAnnotationCreation"
-        @update:refractive-index="updateRefractiveIndex"
         @update:curve-editing-enabled="curveEditingEnabled = $event"
         @update:show-physical-badges="showPhysicalBadges = $event"
         @design-operations="executeGuiDesignOperations"

@@ -9,10 +9,16 @@ import { setEdgeCorrectNodeOrder } from './Utils'
 import { normalizeAnnotations } from './annotationGeometry'
 import {
   CURVE_POINT_TYPES,
-  DEFAULT_REFRACTIVE_INDEX,
   resolveEdgePhysicalProperties,
 } from './edgeGeometry'
 import { isMapPosition } from './layoutTemplates'
+import {
+  DEFAULT_PHYSICAL_CONFIG_VALUES,
+  EDGE_PHYSICAL_PARAMETER_DESCRIPTORS,
+  GLOBAL_PHYSICAL_PARAMETER_DESCRIPTORS,
+  RESOLVED_PHYSICAL_EDGE_FIELDS,
+  validatePhysicalParameterValue,
+} from './physicalParameters'
 import {
   buildParameterInputOptions,
   findParameterInputOption,
@@ -28,7 +34,7 @@ const DEFAULT_SIMULATION_TIME_STEP = 0.1
 export const DEFAULT_MAP_CENTER = [-98.5795, 39.8283]
 export const DEFAULT_MAP_ZOOM = 4
 export const DEFAULT_PHYSICAL_CONFIG = Object.freeze({
-  refractiveIndex: DEFAULT_REFRACTIVE_INDEX,
+  ...DEFAULT_PHYSICAL_CONFIG_VALUES,
   nodeTemplate: Object.freeze({
     slots: Object.freeze([]),
   }),
@@ -47,12 +53,6 @@ const STORAGE_ONLY_PROJECT_FIELDS = new Set([
   'uiGlobal',
 ])
 const TRANSIENT_SLOT_FIELD_SET = new Set(TRANSIENT_SLOT_FIELDS)
-const RESOLVED_PHYSICAL_EDGE_FIELDS = Object.freeze([
-  'distanceMeters',
-  'propagationDelaySeconds',
-  'refractiveIndex',
-])
-
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -80,16 +80,6 @@ function omitFields(value, fields) {
 
 function finiteNumber(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-function validateOptionalNumber(value, name, { positive = false } = {}) {
-  if (value == null) return
-  const valid = typeof value === 'number'
-    && Number.isFinite(value)
-    && (positive ? value > 0 : value >= 0)
-  if (!valid) {
-    throw new Error(`${name} must be a finite ${positive ? 'positive' : 'nonnegative'} number`)
-  }
 }
 
 function normalizeNodeTemplate(value, context) {
@@ -128,10 +118,22 @@ function normalizePhysicalConfig(value, context = {}) {
     throw new Error('Project physicalConfig must be an object')
   }
   const source = value || {}
-  validateOptionalNumber(source.refractiveIndex, 'Project refractive index', { positive: true })
+  const normalizedValues = Object.fromEntries(
+    GLOBAL_PHYSICAL_PARAMETER_DESCRIPTORS.map(parameter => {
+      const configured = source[parameter.configField]
+      if (configured != null) {
+        validatePhysicalParameterValue(
+          parameter,
+          configured,
+          `Project ${parameter.label.toLowerCase()}`,
+        )
+      }
+      return [parameter.configField, configured ?? parameter.defaultValue]
+    }),
+  )
   return {
     ...cloneValue(source),
-    refractiveIndex: source.refractiveIndex ?? DEFAULT_REFRACTIVE_INDEX,
+    ...normalizedValues,
     nodeTemplate: normalizeNodeTemplate(source.nodeTemplate, context),
   }
 }
@@ -166,18 +168,22 @@ function normalizePhysicalOverrides(value, edgeId) {
   if (!isRecord(value)) {
     throw new Error(`Project edge ${edgeId} physicalOverrides must be an object or null`)
   }
-  validateOptionalNumber(value.distanceMeters, `Project edge ${edgeId} distance`)
-  validateOptionalNumber(
-    value.refractiveIndex,
-    `Project edge ${edgeId} refractive index`,
-    { positive: true },
+  const normalizedValues = Object.fromEntries(
+    EDGE_PHYSICAL_PARAMETER_DESCRIPTORS.map(parameter => {
+      const configured = value[parameter.overrideField]
+      if (configured != null) {
+        validatePhysicalParameterValue(
+          parameter,
+          configured,
+          `Project edge ${edgeId} ${parameter.label.toLowerCase()}`,
+        )
+      }
+      return [parameter.overrideField, configured ?? null]
+    }),
   )
-  validateOptionalNumber(value.delaySeconds, `Project edge ${edgeId} delay`)
   return {
     ...cloneValue(value),
-    distanceMeters: value.distanceMeters ?? null,
-    refractiveIndex: value.refractiveIndex ?? null,
-    delaySeconds: value.delaySeconds ?? null,
+    ...normalizedValues,
   }
 }
 
@@ -932,6 +938,8 @@ export function toSimulationPayload(project) {
                       distanceMeters: resolvedPhysical.distanceMeters,
                       propagationDelaySeconds: resolvedPhysical.propagationDelaySeconds,
                       refractiveIndex: resolvedPhysical.refractiveIndex,
+                      lossDbPerKm: resolvedPhysical.lossDbPerKm,
+                      transmissivity: resolvedPhysical.transmissivity,
                     }
                   : {}),
                 protocols: (payloadData.protocols || [])

@@ -44,6 +44,51 @@ describe('DesignCommandService', () => {
     })).toEqual(operations)
   })
 
+  it('validates partial physical-default updates through one design command', async () => {
+    const project = createEmptyProject('Physical defaults')
+    const service = serviceFor(project)
+
+    await service.execute({
+      operations: [{
+        kind: 'design.update',
+        value: { physicalConfig: { lossDbPerKm: 0.18 } },
+      }],
+    })
+    expect(project.net.physicalConfig).toMatchObject({
+      refractiveIndex: 1.468,
+      lossDbPerKm: 0.18,
+    })
+
+    await service.execute({
+      operations: [{
+        kind: 'design.update',
+        value: { physicalConfig: { refractiveIndex: 1.5 } },
+      }],
+    })
+    expect(project.net.physicalConfig).toMatchObject({
+      refractiveIndex: 1.5,
+      lossDbPerKm: 0.18,
+    })
+
+    for (const physicalConfig of [
+      {},
+      { lossDbPerKm: -0.1 },
+      { refractiveIndex: 0 },
+      { unsupported: 1 },
+    ]) {
+      await expect(service.execute({
+        operations: [{
+          kind: 'design.update',
+          value: { physicalConfig },
+        }],
+      })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
+    }
+    expect(project.net.physicalConfig).toMatchObject({
+      refractiveIndex: 1.5,
+      lossDbPerKm: 0.18,
+    })
+  })
+
   it('resolves transaction-local references and preserves retained identities', async () => {
     const project = createEmptyProject('Transaction')
     const retainedNode = new Node({

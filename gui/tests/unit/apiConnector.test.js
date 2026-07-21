@@ -97,6 +97,8 @@ describe('ApiConnector project namespaces', () => {
       length: 100,
       delay: 5e-7,
       refractive_index: 1.5,
+      loss: 0.2,
+      transmissivity: 0.95,
       node_a: 1,
       node_b: 2,
     }

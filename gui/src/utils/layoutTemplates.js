@@ -1,6 +1,11 @@
 import { MercatorCoordinate } from 'maplibre-gl'
 import { generateUUid, setEdgeCorrectNodeOrder } from './Utils'
 import { isMapPosition } from './mapCoordinates'
+import {
+  MATERIAL_PHYSICAL_OVERRIDE_FIELDS,
+  PERSISTED_PHYSICAL_OVERRIDE_FIELDS,
+  RESOLVED_PHYSICAL_EDGE_FIELDS,
+} from './physicalParameters'
 
 const PROJECTED_BOUNDARY_TOLERANCE = 1e-7
 
@@ -176,18 +181,20 @@ export function cloneEdgeData(templateData, nextId) {
     })
   }
 
-  const templateRefractiveIndex = data.physicalOverrides?.refractiveIndex
+  const materialOverrides = Object.fromEntries(
+    MATERIAL_PHYSICAL_OVERRIDE_FIELDS.map(field => [
+      field,
+      data.physicalOverrides?.[field] ?? null,
+    ]),
+  )
   data.curvePoints = []
-  data.physicalOverrides = templateRefractiveIndex == null
+  data.physicalOverrides = Object.values(materialOverrides).every(value => value == null)
     ? null
-    : {
-        distanceMeters: null,
-        refractiveIndex: templateRefractiveIndex,
-        delaySeconds: null
-      }
-  delete data.distanceMeters
-  delete data.propagationDelaySeconds
-  delete data.refractiveIndex
+    : Object.fromEntries(PERSISTED_PHYSICAL_OVERRIDE_FIELDS.map(field => [
+        field,
+        materialOverrides[field] ?? null,
+      ]))
+  RESOLVED_PHYSICAL_EDGE_FIELDS.forEach(field => delete data[field])
 
   return data
 }

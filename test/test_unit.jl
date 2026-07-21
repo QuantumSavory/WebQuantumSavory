@@ -80,6 +80,8 @@
     payload["net"]["edges"][1]["data"]["distanceMeters"] = 12_500.0
     payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = 0.125
     payload["net"]["edges"][1]["data"]["refractiveIndex"] = 1.5
+    payload["net"]["edges"][1]["data"]["lossDbPerKm"] = 0.2
+    payload["net"]["edges"][1]["data"]["transmissivity"] = 0.95
     parameters = payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
     parameter_by_name = Dict(parameter["name"] => parameter for parameter in parameters)
     parameter_by_name["pairstate"]["value"] = Dict("kind" => "variable", "id" => "state-variable")
@@ -285,6 +287,7 @@
     raw_context_lambda =
       "slot -> (MessageBuffer; EntanglementConsumer; LinearAlgebra.tr; " *
       "length == 12500.0 && delay == 0.125 && refractive_index == 1.5 && " *
+      "loss == 0.2 && transmissivity == 0.95 && " *
       "node_a == 1 && node_b == 2 && Base.length((slot,)) == 1 && slot > 0)"
     lambda_by_name["chooseA"]["type"] = "Lambda"
     lambda_by_name["chooseA"]["value"] = raw_context_lambda
@@ -300,6 +303,8 @@
     @test occursin("length = 12500.0", lambda_script)
     @test occursin("delay = 0.125", lambda_script)
     @test occursin("refractive_index = 1.5", lambda_script)
+    @test occursin("loss = 0.2", lambda_script)
+    @test occursin("transmissivity = 0.95", lambda_script)
     @test occursin("node_a = 1", lambda_script)
     @test occursin("node_b = 2", lambda_script)
     @test occursin("Base.length((slot,))", lambda_script)
@@ -623,9 +628,12 @@
     virtual_edge_expression = WebQuantumSavory._script_value_expression(
       "Lambda",
       "() -> isnothing(length) && isnothing(delay) && isnothing(refractive_index) && " *
+      "isnothing(loss) && isnothing(transmissivity) && " *
       "node_a == 2 && node_b == 1",
       "Virtual edge custom function";
       edge_context=WebQuantumSavory._EdgeFunctionContext(
+        nothing,
+        nothing,
         nothing,
         nothing,
         nothing,
@@ -1116,6 +1124,7 @@
       for placement in ("edge", "variable")
         success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
           "candidates -> length > 0 && delay >= 0 && refractive_index > 0 && " *
+          "loss >= 0 && 0 <= transmissivity <= 1 && " *
           "node_a == 1 && node_b == 2 && Base.length(candidates) > 0";
           placement=placement,
         )
@@ -1313,6 +1322,8 @@
           1250.0,
           0.25,
           1.5,
+          0.2,
+          0.95,
           1,
           2,
         )
@@ -1328,7 +1339,8 @@
           :selector,
           "Lambda",
           "candidates -> length == 1250.0 && delay == 0.25 && " *
-          "refractive_index == 1.5 && node_a == 1 && node_b == 2 && " *
+          "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
+          "node_a == 1 && node_b == 2 && " *
           "Base.length(candidates) == 2",
           edge_ctx,
         )
@@ -1336,8 +1348,11 @@
 
         virtual_function = WebQuantumSavory.create_lambda(
           "() -> isnothing(length) && isnothing(delay) && isnothing(refractive_index) && " *
+          "isnothing(loss) && isnothing(transmissivity) && " *
           "node_a == 2 && node_b == 1";
           edge_context=WebQuantumSavory._EdgeFunctionContext(
+            nothing,
+            nothing,
             nothing,
             nothing,
             nothing,
@@ -2145,6 +2160,11 @@
         ("distanceMeters", Inf, "distance"),
         ("refractiveIndex", 0, "refractive index"),
         ("refractiveIndex", "glass", "refractive index"),
+        ("lossDbPerKm", -1, "fiber loss"),
+        ("lossDbPerKm", Inf, "fiber loss"),
+        ("transmissivity", -0.01, "transmissivity"),
+        ("transmissivity", 1.01, "transmissivity"),
+        ("transmissivity", Inf, "transmissivity"),
       )
         invalid_payload = deepcopy(test_payload)
         invalid_payload["net"]["edges"][1]["data"][field] = invalid_value
@@ -2157,6 +2177,12 @@
         @test physical_error isa WebQuantumSavory.APIError
         @test occursin(message, physical_error.message)
       end
+
+      independent_physical_values = deepcopy(test_payload)
+      independent_physical_values["net"]["edges"][1]["data"]["distanceMeters"] = 1.0
+      independent_physical_values["net"]["edges"][1]["data"]["lossDbPerKm"] = 0.2
+      independent_physical_values["net"]["edges"][1]["data"]["transmissivity"] = 0.1
+      @test WebQuantumSavory.validate_payload(independent_physical_values)["success"] == true
   end
 
   @testset "Simulation Variables" begin
@@ -2456,6 +2482,8 @@
       payload["net"]["edges"][1]["data"]["distanceMeters"] = 12_500.0
       payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = 0.125
       payload["net"]["edges"][1]["data"]["refractiveIndex"] = 1.5
+      payload["net"]["edges"][1]["data"]["lossDbPerKm"] = 0.2
+      payload["net"]["edges"][1]["data"]["transmissivity"] = 0.95
       entangler_definition = payload["net"]["edges"][1]["data"]["protocols"][1]
       choose_a = only(filter(
         parameter -> parameter["name"] == "chooseA",
@@ -2464,7 +2492,8 @@
       choose_a["type"] = "Lambda"
       choose_a["value"] =
         "slot -> length == 12500.0 && delay == 0.125 && " *
-        "refractive_index == 1.5 && node_a == 1 && node_b == 2 ? " *
+        "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
+        "node_a == 1 && node_b == 2 ? " *
         "slot > 0 : false"
       virtual_edge = deepcopy(payload["net"]["edges"][1])
       virtual_edge["id"] = "virtual-edge"
@@ -2484,6 +2513,8 @@
       @test physical_context.distance_meters == 12_500.0
       @test physical_context.delay_seconds == 0.125
       @test physical_context.refractive_index == 1.5
+      @test physical_context.loss_db_per_km == 0.2
+      @test physical_context.transmissivity == 0.95
       @test physical_context.node_a == 1
       @test physical_context.node_b == 2
 
@@ -2491,6 +2522,8 @@
       @test isnothing(virtual_context.distance_meters)
       @test isnothing(virtual_context.delay_seconds)
       @test isnothing(virtual_context.refractive_index)
+      @test isnothing(virtual_context.loss_db_per_km)
+      @test isnothing(virtual_context.transmissivity)
       @test virtual_context.node_a == 1
       @test virtual_context.node_b == 2
 
@@ -2498,10 +2531,14 @@
       delete!(legacy_edge["data"], "distanceMeters")
       delete!(legacy_edge["data"], "propagationDelaySeconds")
       delete!(legacy_edge["data"], "refractiveIndex")
+      delete!(legacy_edge["data"], "lossDbPerKm")
+      delete!(legacy_edge["data"], "transmissivity")
       legacy_context = WebQuantumSavory._edge_function_context(legacy_edge, 1, 2)
       @test isnothing(legacy_context.distance_meters)
       @test legacy_context.delay_seconds == 0.0
       @test isnothing(legacy_context.refractive_index)
+      @test isnothing(legacy_context.loss_db_per_km)
+      @test isnothing(legacy_context.transmissivity)
 
       try
         state = WebQuantumSavory.parse_network_graph(WebQuantumSavory.validate_payload(payload))
@@ -4472,6 +4509,7 @@
       )
     end
     @test lowered_bindings("delay / 2 + node_a") == Set((:delay, :node_a))
+    @test lowered_bindings("loss * transmissivity") == Set((:loss, :transmissivity))
     @test isempty(lowered_bindings("Base.length([1, 2])"))
     @test isempty(lowered_bindings("let delay = 4; delay / 2; end"))
     @test isempty(lowered_bindings("delay(x) = x + 1\ndelay(2)"))
@@ -4569,7 +4607,7 @@
       for source in (
         "delay / 2",
         "self + nodeid(\"Bob\")",
-        "length + refractive_index + node_a + node_b",
+        "length + refractive_index + loss + transmissivity + node_a + node_b",
         "@isdefined(delay)",
       )
         success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
@@ -4589,6 +4627,8 @@
           100.0,
           5.0e-7,
           1.5,
+          0.2,
+          0.95,
           1,
           2,
         ),
@@ -4606,6 +4646,16 @@
         :target_type => "Float64",
         :value => "2.5e-7",
       )
+
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "loss + transmissivity",
+        "Float64",
+        "edge";
+        context=edge_context,
+      )
+      @test success
+      @test error === nothing
+      @test parse(Float64, results[:value]) ≈ 1.15
 
       duplicate_context = (
         node_names=["Alice", "Alice"],
@@ -4627,12 +4677,15 @@
           nothing,
           nothing,
           nothing,
+          nothing,
+          nothing,
           1,
           2,
         ),
       )
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "isnothing(delay) ? node_b - node_a : 99",
+        "all(isnothing, (length, delay, refractive_index, loss, transmissivity)) ? " *
+        "node_b - node_a : 99",
         "Int64",
         "edge";
         context=virtual_context,
@@ -4733,11 +4786,15 @@
         "length" => 100.0,
         "delay" => 5.0e-7,
         "refractive_index" => 1.5,
+        "loss" => 0.2,
+        "transmissivity" => 0.95,
         "node_a" => 1,
         "node_b" => 2,
       ),
     ))
     @test concrete_edge_request.context.edge_context.delay_seconds == 5.0e-7
+    @test concrete_edge_request.context.edge_context.loss_db_per_km == 0.2
+    @test concrete_edge_request.context.edge_context.transmissivity == 0.95
     @test WebQuantumSavory._parse_numeric_expression_test_request(Dict(
       "expression" => "self",
       "target_type" => "Int64",
@@ -4770,6 +4827,23 @@
           "length" => nothing,
           "delay" => 1.0,
           "refractive_index" => nothing,
+          "loss" => nothing,
+          "transmissivity" => nothing,
+          "node_a" => 1,
+          "node_b" => 2,
+        ),
+      ),
+      Dict(
+        "expression" => "1",
+        "target_type" => "Float64",
+        "placement" => "edge",
+        "context" => Dict(
+          "node_names" => ["Alice", "Bob"],
+          "length" => 100.0,
+          "delay" => 5.0e-7,
+          "refractive_index" => 1.5,
+          "loss" => 0.2,
+          "transmissivity" => 1.01,
           "node_a" => 1,
           "node_b" => 2,
         ),
@@ -4868,11 +4942,13 @@
     runtime_payload["net"]["edges"][1]["data"]["distanceMeters"] = 100.0
     runtime_payload["net"]["edges"][1]["data"]["propagationDelaySeconds"] = 0.2
     runtime_payload["net"]["edges"][1]["data"]["refractiveIndex"] = 1.5
+    runtime_payload["net"]["edges"][1]["data"]["lossDbPerKm"] = 0.2
+    runtime_payload["net"]["edges"][1]["data"]["transmissivity"] = 0.95
     runtime_payload["variables"] = [Dict(
       "id" => "per-assignment-expression",
       "name" => "per assignment expression",
       "type" => "Float64",
-      "value" => expression("delay / 4"),
+      "value" => expression("(loss + transmissivity) * delay / 4"),
     )]
     protocol_definition = runtime_payload["net"]["edges"][1]["data"]["protocols"][1]
     parameter_by_name = Dict(
@@ -4890,7 +4966,7 @@
       state = WebQuantumSavory.parse_network_graph(validation)
       WebQuantumSavory.prepare_simulation(state, runtime_payload["name"])
       protocol = state.protocol_mapping[protocol_definition["id"]]
-      @test protocol.success_prob == 0.05
+      @test protocol.success_prob ≈ 0.0575
       @test protocol.attempt_time == 0.1
 
       variables = WebQuantumSavory._parse_variables(runtime_payload)
@@ -4902,7 +4978,7 @@
         WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY =>
           WebQuantumSavory._node_name_to_index(validation["graph_info"]["nodes"]),
         WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY =>
-          WebQuantumSavory._EdgeFunctionContext(100.0, 0.2, 1.5, 1, 2),
+          WebQuantumSavory._EdgeFunctionContext(100.0, 0.2, 1.5, 0.2, 0.95, 1, 2),
       )
       first_assignment = WebQuantumSavory._instantiate_protocol(
         protocol_definition,
@@ -4910,17 +4986,17 @@
         variables,
       )
       assignment_context[WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY] =
-        WebQuantumSavory._EdgeFunctionContext(100.0, 0.4, 1.5, 1, 2)
+        WebQuantumSavory._EdgeFunctionContext(100.0, 0.4, 1.5, 0.2, 0.95, 1, 2)
       second_assignment = WebQuantumSavory._instantiate_protocol(
         protocol_definition,
         assignment_context;
         variables,
       )
-      @test first_assignment.success_prob == 0.05
-      @test second_assignment.success_prob == 0.1
+      @test first_assignment.success_prob ≈ 0.0575
+      @test second_assignment.success_prob ≈ 0.115
 
       script = WebQuantumSavory.generate_julia_script(runtime_payload)
-      @test occursin("delay / 4", script)
+      @test occursin("(loss + transmissivity) * delay / 4", script)
       @test occursin("nodeid(\"Cambridge\")", script)
       @test count(
         ==("    nodeid = Base.getproperty(@__MODULE__, :nodeid)"),

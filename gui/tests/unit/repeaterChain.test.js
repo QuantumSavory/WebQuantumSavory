@@ -407,7 +407,7 @@ describe('Swapper predicate source generation', () => {
 })
 
 describe('repeater-chain protocol automation', () => {
-  it('starts generated physical links straight and retains only template refractive index', () => {
+  it('starts generated physical links straight and retains only material overrides', () => {
     const { net, templateEdge } = makeNetwork()
     templateEdge.data.curvePoints = [
       { id: 'template-curve-point', position: [-71, 43], type: 'smooth' }
@@ -415,11 +415,15 @@ describe('repeater-chain protocol automation', () => {
     templateEdge.data.physicalOverrides = {
       distanceMeters: 42,
       refractiveIndex: 1.5,
-      delaySeconds: 0.25
+      delaySeconds: 0.25,
+      lossDbPerKm: 0.3,
+      transmissivity: 0.8
     }
     templateEdge.data.distanceMeters = 42
     templateEdge.data.propagationDelaySeconds = 0.25
     templateEdge.data.refractiveIndex = 1.5
+    templateEdge.data.lossDbPerKm = 0.3
+    templateEdge.data.transmissivity = 0.8
 
     const result = generateRepeaterChain(net, baseOptions({ repeaterCount: 2 }))
 
@@ -428,11 +432,15 @@ describe('repeater-chain protocol automation', () => {
       expect(edge.data.physicalOverrides).toEqual({
         distanceMeters: null,
         refractiveIndex: 1.5,
-        delaySeconds: null
+        delaySeconds: null,
+        lossDbPerKm: 0.3,
+        transmissivity: null
       })
       expect(edge.data).not.toHaveProperty('distanceMeters')
       expect(edge.data).not.toHaveProperty('propagationDelaySeconds')
       expect(edge.data).not.toHaveProperty('refractiveIndex')
+      expect(edge.data).not.toHaveProperty('lossDbPerKm')
+      expect(edge.data).not.toHaveProperty('transmissivity')
     })
     expect(result.virtualEdge.data).not.toHaveProperty('curvePoints')
     expect(result.virtualEdge.data).not.toHaveProperty('physicalOverrides')

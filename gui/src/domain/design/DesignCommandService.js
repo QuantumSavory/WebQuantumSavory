@@ -42,6 +42,10 @@ import {
 } from '../../utils/protocolConstructors.js'
 import { buildNumericExpressionContext } from '../../utils/numericExpressionContext.js'
 import {
+  GLOBAL_PHYSICAL_PARAMETER_DESCRIPTORS,
+  validatePhysicalParameterValue,
+} from '../../utils/physicalParameters.js'
+import {
   QUBIT_REPRESENTATION_OPTIONS,
   QUMODE_REPRESENTATION_OPTIONS,
 } from '../../utils/representations.js'
@@ -620,12 +624,38 @@ export class DesignCommandService {
         )
       }
     }
-    if (value.physicalConfig) {
-      project.net.physicalConfig.refractiveIndex = requireFinite(
-        value.physicalConfig.refractiveIndex,
-        'Refractive index',
-        { positive: true },
+    if (Object.hasOwn(value, 'physicalConfig')) {
+      const config = value.physicalConfig
+      if (!record(config)) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          'Physical configuration must be an object.',
+        )
+      }
+      const parameters = new Map(
+        GLOBAL_PHYSICAL_PARAMETER_DESCRIPTORS.map(parameter => [
+          parameter.configField,
+          parameter,
+        ]),
       )
+      const fields = Object.keys(config)
+      if (fields.length === 0 || fields.some(field => !parameters.has(field))) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Physical configuration must update one or more of: ${[...parameters.keys()].join(', ')}.`,
+        )
+      }
+      for (const field of fields) {
+        const parameter = parameters.get(field)
+        try {
+          project.net.physicalConfig[field] = validatePhysicalParameterValue(
+            parameter,
+            config[field],
+          )
+        } catch (error) {
+          throw new DesignCommandError('VALIDATION_FAILED', error.message)
+        }
+      }
     }
     context.affectedIds.add('project')
   }

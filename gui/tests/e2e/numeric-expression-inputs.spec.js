@@ -84,7 +84,8 @@ async function mockBackend(page, {
     }
 
     const deferred = request.placement === 'variable'
-      ? /\b(delay|length|node_a|node_b|refractive_index|self)\b/.test(request.expression)
+      ? /\b(delay|length|node_a|node_b|refractive_index|loss|transmissivity|self)\b/
+        .test(request.expression)
       : request.context === undefined
     const value = request.expression.includes('delay')
       ? '2.5e-7'
@@ -242,6 +243,8 @@ test.describe('Default-first numeric expression inputs', () => {
     expect(Number.isFinite(numericRequests.at(-1).context.length)).toBe(true)
     expect(Number.isFinite(numericRequests.at(-1).context.delay)).toBe(true)
     expect(Number.isFinite(numericRequests.at(-1).context.refractive_index)).toBe(true)
+    expect(Number.isFinite(numericRequests.at(-1).context.loss)).toBe(true)
+    expect(Number.isFinite(numericRequests.at(-1).context.transmissivity)).toBe(true)
 
     expect(await serializedParameter(page)).toEqual({
       name: 'delay_scale',
@@ -336,6 +339,8 @@ test.describe('Default-first numeric expression inputs', () => {
         node_b: 2,
       },
     })
+    expect(Number.isFinite(numericRequests.at(-1).context.loss)).toBe(true)
+    expect(Number.isFinite(numericRequests.at(-1).context.transmissivity)).toBe(true)
   })
 
   test('keeps saved source visible while disabled and leaves numeric literals usable', async ({

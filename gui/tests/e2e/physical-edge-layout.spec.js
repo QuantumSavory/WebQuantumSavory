@@ -46,10 +46,53 @@ test('edits physical curves and overrides while keeping virtual links nonphysica
 
   await expect(page.locator('.edge-badge-distance')).toHaveCount(1)
   await expect(page.locator('.edge-badge-delay')).toHaveCount(1)
+  await expect(page.locator('.edge-badge-stack')).not.toContainText('dB/km')
   await page.locator('.edge-list-item').first().click()
   await expect(page.getByText('PHYSICAL PROPAGATION', { exact: true })).toBeVisible()
 
   await page.locator('#bottom-panel-layout-tools-tab').click()
+  await expect(page.locator('#default-refractive-index')).toHaveValue('1.468')
+  const defaultLoss = page.locator('#default-loss-db-per-km')
+  await expect(defaultLoss).toHaveValue('0.2')
+  await expect(
+    page.locator('.defaults-card [data-quantity="lossDbPerKm"] .quantity-field__unit'),
+  ).toHaveText('dB/km')
+  await defaultLoss.fill('0.3')
+  await defaultLoss.press('Tab')
+  await expect.poll(() => page.evaluate(() => window.projectData.net.physicalConfig)).toMatchObject({
+    refractiveIndex: 1.468,
+    lossDbPerKm: 0.3,
+  })
+  await defaultLoss.fill('0.2')
+  await defaultLoss.press('Tab')
+
+  const edgeLoss = page.locator('#edge-loss-db-per-km')
+  const edgeTransmissivity = page.locator('#edge-transmissivity')
+  await expect(edgeLoss).toHaveValue('0.2')
+  await expect(
+    page.locator('.physical-edge-controls [data-quantity="lossDbPerKm"] .quantity-field__unit'),
+  ).toHaveText('dB/km')
+  expect(Number(await edgeTransmissivity.inputValue())).toBeGreaterThan(0)
+  expect(Number(await edgeTransmissivity.inputValue())).toBeLessThan(1)
+
+  await edgeLoss.fill('0.4')
+  await edgeLoss.press('Tab')
+  const distanceInput = page.locator('#edge-distance-meters')
+  await distanceInput.fill('1000')
+  await distanceInput.press('Tab')
+  await expect(edgeTransmissivity).toHaveValue('0.912')
+
+  await edgeTransmissivity.fill('0.5')
+  await edgeTransmissivity.press('Tab')
+  await expect(page.locator('#edge-loss-db-per-km')).toHaveText('n/a')
+  await expect.poll(() => page.evaluate(() => (
+    window.projectData.net.edges[0].data.physicalOverrides
+  ))).toMatchObject({
+    distanceMeters: 1000,
+    lossDbPerKm: 0.4,
+    transmissivity: 0.5,
+  })
+
   await page.locator('#curve-editing-enabled').check()
   await canvas.click({ position: { x: 525, y: 350 } })
   const handle = page.locator('.curve-point-handle')
@@ -65,11 +108,18 @@ test('edits physical curves and overrides while keeping virtual links nonphysica
   await delayInput.press('Tab')
   await expect(page.locator('#edge-distance-meters')).toHaveText('n/a')
   await expect(page.locator('#edge-refractive-index')).toHaveText('n/a')
+  await expect(page.locator('#edge-transmissivity')).toHaveValue('0.5')
   await expect(page.locator('.edge-badge-distance')).toHaveCount(0)
   await expect(page.locator('.edge-badge-delay')).toHaveText('250 ms')
 
   await page.getByRole('button', { name: 'Reset propagation delay to automatic' }).click()
   await expect(page.locator('.edge-badge-distance')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Reset transmissivity to automatic' }).click()
+  await expect(page.locator('#edge-loss-db-per-km')).toHaveValue('0.4')
+  await expect(page.locator('#edge-transmissivity')).toHaveValue('0.912')
+  await page.getByRole('button', { name: 'Reset fiber loss to automatic' }).click()
+  await expect(page.locator('#edge-loss-db-per-km')).toHaveValue('0.2')
+  await expect(page.locator('#edge-transmissivity')).toHaveValue('0.955')
   await page.locator('#physical-badges-visible').uncheck()
   await expect(page.locator('.edge-badge-stack')).toHaveCount(0)
   await page.locator('#physical-badges-visible').check()

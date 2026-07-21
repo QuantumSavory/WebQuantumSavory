@@ -32,6 +32,18 @@ const contextualKeywordDefinitions = [
     availability: 'Available only for edge protocol source; it is nothing on virtual edges.'
   },
   {
+    id: 'loss',
+    syntax: 'loss',
+    description: 'The resolved physical-edge fiber loss in dB/km.',
+    availability: 'Available only for edge protocol source; it is nothing on virtual edges.'
+  },
+  {
+    id: 'transmissivity',
+    syntax: 'transmissivity',
+    description: 'The resolved dimensionless physical-edge transmissivity from zero through one.',
+    availability: 'Available only for edge protocol source; it is nothing on virtual edges.'
+  },
+  {
     id: 'node_a',
     syntax: 'node_a',
     description: 'The one-based simulator ID of the edge source endpoint.',

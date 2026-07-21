@@ -7,9 +7,14 @@ import {
   unprojectMapPosition,
 } from './layoutTemplates'
 import { isMapPosition } from './mapCoordinates'
+import { resolvePhysicalParameters } from './physicalParameters'
 
-export const SPEED_OF_LIGHT_METERS_PER_SECOND = 299_792_458
-export const DEFAULT_REFRACTIVE_INDEX = 1.468
+export {
+  DEFAULT_LOSS_DB_PER_KM,
+  DEFAULT_REFRACTIVE_INDEX,
+  SPEED_OF_LIGHT_METERS_PER_SECOND,
+  formatPhysicalValue,
+} from './physicalParameters'
 export const CURVE_POINT_TYPES = Object.freeze(['smooth', 'sharp'])
 export const INVALID_EDGE_GEOMETRY_REASON = 'INVALID_EDGE_GEOMETRY'
 
@@ -317,74 +322,17 @@ export function assertNodeMoveGeometry(node, position, edges) {
   return position
 }
 
-function finiteNonnegative(value, name) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    throw new Error(`${name} must be a finite nonnegative number.`)
-  }
-  return value
-}
-
-function finitePositive(value, name) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    throw new Error(`${name} must be a finite positive number.`)
-  }
-  return value
-}
-
 /** Resolve persisted overrides to the physical values used by badges and payloads. */
 export function resolveEdgePhysicalProperties(edge, physicalConfig = {}, options = {}) {
   if (edge?.isLogic === true) return null
 
   const sampled = sampleEdgeRoute(edge, options)
-  const overrides = edge?.data?.physicalOverrides
-  const distanceMeters = overrides?.distanceMeters == null
-    ? sampled.distanceMeters
-    : finiteNonnegative(overrides.distanceMeters, 'Physical distance')
-  const refractiveIndex = overrides?.refractiveIndex == null
-    ? finitePositive(
-        physicalConfig?.refractiveIndex ?? DEFAULT_REFRACTIVE_INDEX,
-        'Refractive index',
-      )
-    : finitePositive(overrides.refractiveIndex, 'Refractive index')
-  const manualDelay = overrides?.delaySeconds != null
-  const propagationDelaySeconds = manualDelay
-    ? finiteNonnegative(overrides.delaySeconds, 'Propagation delay')
-    : distanceMeters * refractiveIndex / SPEED_OF_LIGHT_METERS_PER_SECOND
-
   return {
     ...sampled,
-    manualDelay,
-    distanceMeters,
-    refractiveIndex,
-    propagationDelaySeconds,
+    ...resolvePhysicalParameters(
+      sampled.distanceMeters,
+      physicalConfig,
+      edge?.data?.physicalOverrides,
+    ),
   }
-}
-
-const SI_PREFIXES = new Map([
-  [-12, 'p'],
-  [-9, 'n'],
-  [-6, 'µ'],
-  [-3, 'm'],
-  [0, ''],
-  [3, 'k'],
-  [6, 'M'],
-  [9, 'G'],
-  [12, 'T'],
-])
-
-/** Format a finite value with three significant digits and an adaptive SI prefix. */
-export function formatPhysicalValue(value, unit) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a'
-  if (value === 0) return `0.00 ${unit}`
-
-  const rawExponent = Math.floor(Math.log10(Math.abs(value)) / 3) * 3
-  let exponent = Math.max(-12, Math.min(12, rawExponent))
-  let scaled = value / (10 ** exponent)
-  if (Math.abs(Number(scaled.toPrecision(3))) >= 1000 && exponent < 12) {
-    exponent += 3
-    scaled /= 1000
-  }
-  const roundedMagnitude = Math.abs(Number(scaled.toPrecision(3)))
-  const decimalPlaces = Math.max(0, 2 - Math.floor(Math.log10(roundedMagnitude)))
-  return `${scaled.toFixed(decimalPlaces)} ${SI_PREFIXES.get(exponent)}${unit}`
 }

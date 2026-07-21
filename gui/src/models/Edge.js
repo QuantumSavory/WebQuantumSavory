@@ -1,3 +1,5 @@
+import { RESOLVED_PHYSICAL_EDGE_FIELDS } from '../utils/physicalParameters.js'
+
 /**
  * Represents an edge (connection) between two nodes
  */
@@ -24,9 +26,7 @@ export default class Edge {
     if (this.isLogic) {
       delete this.data.curvePoints
       delete this.data.physicalOverrides
-      delete this.data.distanceMeters
-      delete this.data.propagationDelaySeconds
-      delete this.data.refractiveIndex
+      RESOLVED_PHYSICAL_EDGE_FIELDS.forEach(field => delete this.data[field])
     } else {
       this.data.curvePoints = Array.isArray(this.data.curvePoints)
         ? this.data.curvePoints

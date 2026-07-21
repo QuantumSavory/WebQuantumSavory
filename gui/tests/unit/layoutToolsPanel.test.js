@@ -55,13 +55,14 @@ describe('layout tools physical settings', () => {
     const wrapper = mountPanel({
       props: {
         disabled: true,
-        physicalConfig: { refractiveIndex: 1.468 },
+        physicalConfig: { refractiveIndex: 1.468, lossDbPerKm: 0.2 },
         curveEditingEnabled: false,
         showPhysicalBadges: true,
       },
     })
 
     expect(wrapper.get('#default-refractive-index').attributes()).toHaveProperty('disabled')
+    expect(wrapper.get('#default-loss-db-per-km').attributes()).toHaveProperty('disabled')
     expect(wrapper.get('.template-node .add-slot-btn').attributes()).toHaveProperty('disabled')
     expect(wrapper.get('#curve-editing-enabled').attributes()).toHaveProperty('disabled')
     expect(wrapper.get('#physical-badges-visible').attributes()).not.toHaveProperty('disabled')
@@ -75,21 +76,31 @@ describe('layout tools physical settings', () => {
     expect(wrapper.get('#layout-tools-disabled-help').text()).toContain('Annotations remain available')
   })
 
-  it('rejects invalid refractive indices and emits drawing changes', async () => {
+  it('renders descriptor units and emits validated partial physical-default changes', async () => {
     const wrapper = mountPanel({
       props: {
-        physicalConfig: { refractiveIndex: 1.468 },
+        physicalConfig: { refractiveIndex: 1.468, lossDbPerKm: 0.2 },
         curveEditingEnabled: false,
       },
     })
     const refractiveIndex = wrapper.get('#default-refractive-index')
 
     await refractiveIndex.setValue('-1')
-    expect(wrapper.emitted('update:refractive-index')).toBeUndefined()
+    expect(wrapper.emitted('design-operations')).toBeUndefined()
     expect(refractiveIndex.element.value).toBe('1.468')
 
     await refractiveIndex.setValue('1.6')
-    expect(wrapper.emitted('update:refractive-index')).toEqual([[1.6]])
+    expect(wrapper.emitted('design-operations')[0][0]).toEqual([{
+      kind: 'design.update',
+      value: { physicalConfig: { refractiveIndex: 1.6 } },
+    }])
+    expect(wrapper.get('[data-quantity="lossDbPerKm"] .quantity-field__unit').text())
+      .toBe('dB/km')
+    await wrapper.get('#default-loss-db-per-km').setValue('0.18')
+    expect(wrapper.emitted('design-operations')[1][0]).toEqual([{
+      kind: 'design.update',
+      value: { physicalConfig: { lossDbPerKm: 0.18 } },
+    }])
     await wrapper.get('#curve-editing-enabled').setValue(true)
     expect(wrapper.emitted('update:curve-editing-enabled')).toEqual([[true]])
   })
@@ -99,6 +110,7 @@ describe('layout tools physical settings', () => {
       props: {
         physicalConfig: {
           refractiveIndex: 1.468,
+          lossDbPerKm: 0.2,
           nodeTemplate: {
             slots: [{
               id: 'template_slot',

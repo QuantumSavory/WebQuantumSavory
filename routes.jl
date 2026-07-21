@@ -884,6 +884,19 @@ end
                               exclusiveMinimum: true
                               nullable: true
                               description: Optional resolved dimensionless physical-edge refractive index; a number must be finite and greater than zero, while omission or null leaves custom-function context unknown
+                            lossDbPerKm:
+                              type: number
+                              format: double
+                              minimum: 0
+                              nullable: true
+                              description: Optional resolved physical-edge fiber loss in dB/km; a number must be finite and nonnegative, while omission or null leaves custom-function context unknown
+                            transmissivity:
+                              type: number
+                              format: double
+                              minimum: 0
+                              maximum: 1
+                              nullable: true
+                              description: Optional resolved dimensionless physical-edge transmissivity; a number must be finite from zero through one, while omission or null leaves custom-function context unknown
                             protocols:
                               type: array
                               items:
@@ -2024,7 +2037,7 @@ end
                   - type: object
                     title: Edge protocol context
                     additionalProperties: false
-                    required: [node_names, length, delay, refractive_index, node_a, node_b]
+                    required: [node_names, length, delay, refractive_index, loss, transmissivity, node_a, node_b]
                     properties:
                       node_names:
                         type: array
@@ -2043,6 +2056,15 @@ end
                         nullable: true
                         minimum: 0
                         exclusiveMinimum: true
+                      loss:
+                        type: number
+                        nullable: true
+                        minimum: 0
+                      transmissivity:
+                        type: number
+                        nullable: true
+                        minimum: 0
+                        maximum: 1
                       node_a:
                         type: integer
                         minimum: 1

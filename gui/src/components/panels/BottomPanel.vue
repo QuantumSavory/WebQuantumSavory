@@ -149,7 +149,6 @@
               :curve-editing-enabled="curveEditingEnabled"
               :show-physical-badges="showPhysicalBadges"
               :annotation-creation-enabled="annotationCreationEnabled"
-              @update:refractive-index="emit('update:refractive-index', $event)"
               @update:curve-editing-enabled="emit('update:curve-editing-enabled', $event)"
               @update:show-physical-badges="emit('update:show-physical-badges', $event)"
               @add-annotation="emit('add-annotation')"
@@ -365,7 +364,6 @@ const emit = defineEmits([
   'open-star-network-generator',
   'open-graph-network-generator',
   'add-annotation',
-  'update:refractive-index',
   'update:curve-editing-enabled',
   'update:show-physical-badges',
   'update:collapsed',

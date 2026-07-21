@@ -38,6 +38,8 @@ describe('custom-function contextual help', () => {
       'length',
       'delay',
       'refractive_index',
+      'loss',
+      'transmissivity',
       'node_a',
       'node_b',
     ])
@@ -45,7 +47,7 @@ describe('custom-function contextual help', () => {
     expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid.recommendation)
     expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.self.availability)
     expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.length.recommendation)
-    expect(CUSTOM_FUNCTION_CONTEXT_KEYWORDS).toHaveLength(7)
+    expect(CUSTOM_FUNCTION_CONTEXT_KEYWORDS).toHaveLength(9)
 
     closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await nextTick()

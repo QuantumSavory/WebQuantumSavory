@@ -186,6 +186,36 @@ The best way to explore the API is through the interactive Swagger documentation
 - Interactive testing interface
 - Example payloads and responses
 
+### Physical Links
+
+Layout Tools stores global material defaults for refractive index and fiber
+loss. New and legacy projects resolve missing loss to **0.2 dB/km**, a
+representative attenuation for modern telecom single-mode fiber near the
+1550-nm window ([Corning SMF-28 Ultra specification](https://www.corning.com/media/worldwide/coc/documents/Fiber/product-information-sheets/PI-1424-AEN.pdf)).
+Each physical edge may override distance, refractive index, propagation delay,
+loss, and transmissivity. Virtual edges carry no physical payload fields.
+
+Automatic transmissivity is dimensionless and is calculated explicitly from
+the resolved route distance and loss:
+
+```text
+transmissivity = 10^(-(lossDbPerKm * distanceMeters / 1000) / 10)
+```
+
+For example, 1 km at 0.2 dB/km has transmissivity approximately
+`0.954992586`. A manual transmissivity must be between zero and one. While it
+is manual, the GUI displays loss as `n/a` but preserves the dormant global or
+per-edge loss; resetting transmissivity restores automatic calculation. Manual
+delay is independent, while distance overrides affect both automatic delay and
+automatic transmissivity. Map badges remain limited to distance and delay.
+
+Schema-v1 project JSON persists only material/link overrides in
+`data.physicalOverrides`; it never stores derived physical values. Minimized
+simulator and script-export payloads resolve `distanceMeters`,
+`propagationDelaySeconds`, `refractiveIndex`, `lossDbPerKm`, and
+`transmissivity` for physical edges. The additive loss and transmissivity
+fields may be omitted or `null` by legacy API clients.
+
 ### Protocol Inputs and Numeric Expressions
 
 Protocol constructor inputs follow one metadata-driven pipeline:
@@ -235,8 +265,11 @@ An installed protocol uses its actual context:
 - Every placement has `nodeid(name)` over the ordered project node names.
 - Node protocols additionally have one-based `self`.
 - Edge protocols additionally have `length`, `delay`, `refractive_index`,
-  `node_a`, and `node_b`. The three physical values are `null` on virtual
-  edges. Unqualified `length` intentionally refers to the edge length;
+  `loss`, `transmissivity`, `node_a`, and `node_b`. The five physical values
+  are `null` on virtual edges. `loss` is in dB/km, transmissivity is
+  dimensionless from zero through one, and both stay numerically available to
+  protocol code when transmissivity is manually overridden. Unqualified
+  `length` intentionally refers to the edge length;
   `Base.length(collection)` always calls the collection function.
 - Floating protocols have only `nodeid(name)`.
 
@@ -265,6 +298,8 @@ When unsafe evaluation is enabled, `POST /test_numeric_expression` accepts:
     "length": 100.0,
     "delay": 5e-7,
     "refractive_index": 1.5,
+    "loss": 0.2,
+    "transmissivity": 0.95,
     "node_a": 1,
     "node_b": 2
   }
