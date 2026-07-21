@@ -1,7 +1,10 @@
 import Edge from '../models/Edge'
 import FloatingProtocol from '../models/FloatingProtocol'
 import Node from '../models/Node'
-import Variable from '../models/Variable'
+import Variable, {
+  NUMERIC_EXPRESSION_VALUE_KIND,
+  isNumericExpressionValue,
+} from '../models/Variable'
 import { setEdgeCorrectNodeOrder } from './Utils'
 import { normalizeAnnotations } from './annotationGeometry'
 import {
@@ -10,6 +13,11 @@ import {
   resolveEdgePhysicalProperties,
 } from './edgeGeometry'
 import { isMapPosition } from './layoutTemplates'
+import {
+  buildParameterInputOptions,
+  findParameterInputOption,
+  inferParameterInputOption,
+} from './parameterTypes'
 import { normalizeRepresentationConfig } from './representations'
 
 export const PROJECT_SCHEMA_VERSION = 1
@@ -33,7 +41,6 @@ export const TRANSIENT_SLOT_FIELDS = Object.freeze([
   'ui_expanded',
   'renderedResult',
 ])
-
 const STORAGE_ONLY_PROJECT_FIELDS = new Set([
   'schemaVersion',
   'platformInfo',
@@ -245,12 +252,196 @@ function normalizeBackgroundNoise(value, context) {
   }
 }
 
+function normalizeNumericExpressionValue(value, context) {
+  if (!isRecord(value) || value.kind !== NUMERIC_EXPRESSION_VALUE_KIND) {
+    return cloneValue(value)
+  }
+  if (!isNumericExpressionValue(value)) {
+    throw new Error(
+      `${context} numeric expression must contain exactly a nonblank source and kind`,
+    )
+  }
+  return {
+    kind: NUMERIC_EXPRESSION_VALUE_KIND,
+    source: value.source,
+  }
+}
+
+/**
+ * Normalize legacy scalar parameters into the explicit descriptor convention.
+ *
+ * The runtime metadata snapshot remains untouched. `selectedType` identifies
+ * only the durable editor branch; minimized payloads translate it separately.
+ */
+function normalizeProtocolParameter(rawParameter, context = 'Protocol parameter') {
+  const source = isRecord(rawParameter) ? rawParameter : {}
+  const parameter = cloneValue(source)
+  const value = normalizeNumericExpressionValue(parameter.value, context)
+
+  if (value == null || value === '' || value === 'default') {
+    return {
+      ...parameter,
+      selectedType: 'default',
+      value: null,
+    }
+  }
+
+  if (
+    parameter.selectedType === 'Function'
+    && typeof value === 'string'
+    && value.trim().toLowerCase() === 'default'
+  ) {
+    return {
+      ...parameter,
+      selectedType: 'default',
+      value: null,
+    }
+  }
+
+  if (
+    isRecord(value)
+    && value.kind === 'variable'
+    && typeof parameter.selectedType === 'string'
+    && parameter.selectedType
+  ) {
+    return {
+      ...parameter,
+      selectedType: parameter.selectedType,
+      value,
+    }
+  }
+
+  if (isNumericExpressionValue(value)) {
+    const declaredTypes = (Array.isArray(parameter.type) ? parameter.type : [parameter.type])
+      .filter(type => typeof type === 'string' && type)
+    const selectedNumericType = typeof parameter.selectedType === 'string'
+      && parameter.selectedType.startsWith('expression:')
+      ? parameter.selectedType.slice('expression:'.length)
+      : declaredTypes.find(type => ['Float64', 'Int64'].includes(type))
+    if (
+      !['Float64', 'Int64'].includes(selectedNumericType)
+      || !declaredTypes.includes(selectedNumericType)
+    ) {
+      throw new Error(`${context} numeric expression requires a Float64 or Int64 declaration`)
+    }
+    return {
+      ...parameter,
+      selectedType: `expression:${selectedNumericType}`,
+      value,
+    }
+  }
+  if (
+    typeof parameter.selectedType === 'string'
+    && parameter.selectedType.startsWith('expression:')
+  ) {
+    throw new Error(`${context} expression selection requires a numeric-expression value`)
+  }
+
+  const selectedType = typeof parameter.selectedType === 'string'
+    && parameter.selectedType
+    && parameter.selectedType !== 'default'
+    ? parameter.selectedType
+    : inferParameterInputOption(
+        buildParameterInputOptions(parameter.type, parameter),
+        { ...parameter, value, selectedType: undefined },
+      ).id
+  return {
+    ...parameter,
+    selectedType,
+    value,
+  }
+}
+
+function normalizeVariableRecord(rawVariable, context = 'Variable') {
+  const source = isRecord(rawVariable) ? rawVariable : {}
+  const variable = cloneValue(source)
+  const value = normalizeNumericExpressionValue(variable.value, context)
+  const type = typeof variable.type === 'string' && variable.type
+    ? variable.type
+    : 'Float64'
+
+  if (
+    value === 'default'
+    && (type.toLowerCase() === 'default' || variable.selectedType === 'default')
+  ) {
+    return {
+      ...variable,
+      type: 'default',
+      selectedType: 'default',
+      value: null,
+    }
+  }
+
+  if (
+    type === 'Function'
+    && typeof value === 'string'
+    && value.trim().toLowerCase() === 'default'
+  ) {
+    return {
+      ...variable,
+      type: 'default',
+      selectedType: 'default',
+      value: null,
+    }
+  }
+
+  if (value == null || value === '') {
+    return {
+      ...variable,
+      type: 'default',
+      selectedType: 'default',
+      value: null,
+    }
+  }
+
+  if (isNumericExpressionValue(value)) {
+    if (!['Float64', 'Int64'].includes(type)) {
+      throw new Error(`${context} numeric expression requires type Float64 or Int64`)
+    }
+    if (
+      typeof variable.selectedType === 'string'
+      && variable.selectedType.startsWith('expression:')
+      && variable.selectedType !== `expression:${type}`
+    ) {
+      throw new Error(`${context} numeric expression selection does not match type ${type}`)
+    }
+    return {
+      ...variable,
+      type,
+      selectedType: `expression:${type}`,
+      value,
+    }
+  }
+  if (
+    typeof variable.selectedType === 'string'
+    && variable.selectedType.startsWith('expression:')
+  ) {
+    throw new Error(`${context} expression selection requires a numeric-expression value`)
+  }
+
+  return {
+    ...variable,
+    type,
+    selectedType: typeof variable.selectedType === 'string'
+      && variable.selectedType
+      && variable.selectedType !== 'default'
+      ? variable.selectedType
+      : type,
+    value,
+  }
+}
+
 function hydrateProtocol(rawProtocol) {
   const source = isRecord(rawProtocol) ? rawProtocol : {}
   const protocol = new FloatingProtocol({
     id: source.id,
     type: source.type,
-    parameters: Array.isArray(source.parameters) ? cloneValue(source.parameters) : [],
+    parameters: Array.isArray(source.parameters)
+      ? source.parameters.map((parameter, index) => normalizeProtocolParameter(
+          parameter,
+          `Protocol parameter ${index + 1}`,
+        ))
+      : [],
   })
   Object.assign(protocol, omitFields(source, new Set(['id', 'type', 'parameters'])))
   return protocol
@@ -319,7 +510,12 @@ function plainProtocol(protocol) {
   const source = isRecord(protocol) ? protocol : {}
   return {
     ...omitFields(source, new Set(['parameters'])),
-    parameters: Array.isArray(source.parameters) ? cloneValue(source.parameters) : [],
+    parameters: Array.isArray(source.parameters)
+      ? source.parameters.map((parameter, index) => normalizeProtocolParameter(
+          parameter,
+          `Protocol parameter ${index + 1}`,
+        ))
+      : [],
   }
 }
 
@@ -381,7 +577,7 @@ function plainEdge(edge) {
 }
 
 function plainVariable(variable) {
-  return isRecord(variable) ? cloneValue(variable) : {}
+  return normalizeVariableRecord(variable)
 }
 
 function normalizeMap(rawMap, context) {
@@ -470,11 +666,15 @@ export function decodeStoredProject(raw, context = {}) {
     description: typeof source.description === 'string' ? source.description : '',
     annotations: normalizeAnnotations(source.annotations),
     variables: Array.isArray(source.variables)
-      ? source.variables.map(variable => {
-          const hydrated = new Variable(isRecord(variable) ? cloneValue(variable) : {})
+      ? source.variables.map((variable, index) => {
+          const normalized = normalizeVariableRecord(variable, `Variable ${index + 1}`)
+          const hydrated = new Variable(normalized)
           Object.assign(
             hydrated,
-            omitFields(variable, new Set(['id', 'name', 'type', 'value'])),
+            omitFields(
+              normalized,
+              new Set(['id', 'name', 'type', 'value', 'selectedType']),
+            ),
           )
           return hydrated
         })
@@ -603,7 +803,20 @@ export function decodeDesignDocument(document, context = {}) {
 }
 
 function hasValue(parameter) {
-  return parameter?.value != null && parameter.value !== ''
+  return parameter?.selectedType !== 'default'
+    && parameter?.value != null
+    && parameter.value !== ''
+}
+
+function parameterWireType(parameter) {
+  const selectedType = parameter?.selectedType
+  const option = findParameterInputOption(
+    parameter?.type,
+    parameter,
+    selectedType,
+  )
+  if (option?.wireType) return option.wireType
+  return selectedType ?? parameter?.type
 }
 
 function cleanProtocol(protocol, excludedParameterNames) {
@@ -616,9 +829,7 @@ function cleanProtocol(protocol, excludedParameterNames) {
       ))
       .map(parameter => {
         const cleaned = cloneValue(parameter)
-        if (cleaned.selectedType != null) {
-          cleaned.type = cleaned.selectedType
-        }
+        cleaned.type = parameterWireType(cleaned)
         delete cleaned.selectedType
         return cleaned
       }),
@@ -665,16 +876,19 @@ export function toSimulationPayload(project) {
     ])),
     simulationConfig: normalizeRepresentationConfig(source.simulationConfig),
     variables: Array.isArray(source.variables)
-      ? source.variables.map(variable => ({
-          id: variable?.id,
-          name: variable?.name,
-          type: variable?.type,
-          value: cloneValue(variable?.value),
-          ...(typeof variable?.statesZooTraceSourceId === 'string'
-            && variable.statesZooTraceSourceId
-            ? { statesZooTraceSourceId: variable.statesZooTraceSourceId }
-            : {}),
-        }))
+      ? source.variables.map((variable, index) => {
+          const normalized = normalizeVariableRecord(variable, `Variable ${index + 1}`)
+          return {
+            id: normalized.id,
+            name: normalized.name,
+            type: normalized.type,
+            value: cloneValue(normalized.value),
+            ...(typeof normalized.statesZooTraceSourceId === 'string'
+              && normalized.statesZooTraceSourceId
+              ? { statesZooTraceSourceId: normalized.statesZooTraceSourceId }
+              : {}),
+          }
+        })
       : [],
     net: {
       ...omitFields(sourceNet, new Set(['nodes', 'edges', 'protocols', 'physicalConfig'])),

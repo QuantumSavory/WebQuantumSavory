@@ -315,7 +315,7 @@ describe('RepeaterChainDialog protocol automation', () => {
     }
   })
 
-  it('seeds EntanglerProt and SwapperProt from the first matching templates and fills metadata defaults', async () => {
+  it('seeds matching template values while leaving metadata defaults omitted', async () => {
     const fixture = makeFixture({
       templateProtocols: [
         protocol('node-other', 'Example.OtherProtocol', []),
@@ -367,7 +367,10 @@ describe('RepeaterChainDialog protocol automation', () => {
 
     expect(entangler.id).toBeUndefined()
     expect(entanglerValues.success_prob.value).toBe(0.45)
-    expect(entanglerValues.attempts.value).toBe(5)
+    expect(entanglerValues.attempts).toMatchObject({
+      selectedType: 'default',
+      value: null
+    })
     expect(swapper.id).toBeUndefined()
     expect(swapperValues.nodeL.value).toBe('x -> x == 11')
     expect(swapperValues.nodeH.value).toBe('x -> x == 12')
@@ -433,8 +436,10 @@ describe('RepeaterChainDialog protocol automation', () => {
     await selectValidTemplate(wrapper)
     await wrapper.get('#chain-replace-entangler').setValue(true)
 
-    const typeSelector = constructorFor(wrapper, ENTANGLER_TYPE)
-      .get('.complexTypeSelector')
+    const typeSelector = parameterByName(
+      constructorFor(wrapper, ENTANGLER_TYPE),
+      'tag'
+    ).get('.complexTypeSelector')
     expect(typeSelector.findAll('option').map(option => option.text())).toEqual([
       'Default',
       'Nothing',
@@ -519,6 +524,7 @@ describe('RepeaterChainDialog protocol automation', () => {
     }
 
     const rounds = parameterByName(constructor, 'rounds')
+    await rounds.get('[aria-label="Input option for rounds"]').setValue('Int64')
     expect(rounds.get('input[type="number"]').attributes('disabled')).toBeUndefined()
     expect(rounds.get('.variable-binding-button').attributes('disabled')).toBeUndefined()
     await rounds.get('input[type="number"]').setValue('9')
@@ -625,7 +631,7 @@ describe('RepeaterChainDialog protocol automation', () => {
     await wrapper.get('#chain-replace-entangler').setValue(true)
 
     expect(wrapper.get('[role="alert"]').text()).toContain(
-      'Resolve the constructor validation error before generating the chain.'
+      'Constructor field success_prob has a validation error.'
     )
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeDefined()
 
@@ -644,7 +650,11 @@ describe('RepeaterChainDialog protocol automation', () => {
     const entanglerConstructor = constructorFor(wrapper, ENTANGLER_TYPE)
     const swapperConstructor = constructorFor(wrapper, SWAPPER_TYPE)
     await parameterByName(entanglerConstructor, 'success_prob')
+      .get('[aria-label="Input option for success_prob"]').setValue('Float64')
+    await parameterByName(entanglerConstructor, 'success_prob')
       .get('input[type="number"]').setValue('0.73')
+    await parameterByName(swapperConstructor, 'rounds')
+      .get('[aria-label="Input option for rounds"]').setValue('Int64')
     await parameterByName(swapperConstructor, 'rounds')
       .get('input[type="number"]').setValue('8')
     await wrapper.get('#chain-swapper-strategy-eager').setValue()
@@ -671,10 +681,15 @@ describe('RepeaterChainDialog protocol automation', () => {
           protocol: {
             type: ENTANGLER_TYPE,
             parameters: [
-              { name: 'nodeA', type: 'Int64', value: undefined },
-              { name: 'nodeB', type: 'Int64', value: undefined },
-              { name: 'success_prob', type: 'Float64', value: 0.73 },
-              { name: 'attempts', type: 'Int64', value: 5 }
+              { name: 'nodeA', type: 'Int64', selectedType: 'default', value: null },
+              { name: 'nodeB', type: 'Int64', selectedType: 'default', value: null },
+              {
+                name: 'success_prob',
+                type: 'Float64',
+                selectedType: 'Float64',
+                value: 0.73
+              },
+              { name: 'attempts', type: 'Int64', selectedType: 'default', value: null }
             ]
           }
         },
@@ -684,7 +699,7 @@ describe('RepeaterChainDialog protocol automation', () => {
           protocol: {
             type: SWAPPER_TYPE,
             parameters: [
-              { name: 'node', type: 'Int64', value: undefined },
+              { name: 'node', type: 'Int64', selectedType: 'default', value: null },
               {
                 name: 'nodeL',
                 type: ['QuantumSavory.Wildcard', 'Int64', 'Function'],
@@ -697,7 +712,7 @@ describe('RepeaterChainDialog protocol automation', () => {
                 value: 'x -> (x > self && x <= nodeid("Repeater-3")) || x == nodeid("End")',
                 selectedType: 'Lambda'
               },
-              { name: 'rounds', type: 'Int64', value: 8 }
+              { name: 'rounds', type: 'Int64', selectedType: 'Int64', value: 8 }
             ]
           },
           predicateStrategy: 'eager'
@@ -707,7 +722,12 @@ describe('RepeaterChainDialog protocol automation', () => {
           definition: TRACKER_DEFINITION,
           protocol: {
             type: TRACKER_TYPE,
-            parameters: [{ name: 'node', type: 'Int64', value: undefined }]
+            parameters: [{
+              name: 'node',
+              type: 'Int64',
+              selectedType: 'default',
+              value: null
+            }]
           }
         }
       }

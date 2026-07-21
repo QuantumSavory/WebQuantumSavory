@@ -93,6 +93,7 @@ describe('States Zoo trace variable ownership', () => {
       name: 'state_tr',
       type: 'Float64',
       value: 0.25,
+      selectedType: 'Float64',
       statesZooTraceSourceId: 'state_id',
     })
     expect(isStatesZooTraceVariable({
@@ -567,6 +568,156 @@ describe('encodeStoredProject', () => {
 })
 
 describe('backend payload codecs', () => {
+  it('normalizes legacy null Variables to a backend-safe Default choice', () => {
+    const project = createEmptyProject('Legacy Variables')
+    project.variables = [
+      {
+        id: 'legacy-empty',
+        name: 'legacy_empty',
+        type: 'Float64',
+        value: null,
+      },
+      {
+        id: 'legacy-sentinel',
+        name: 'legacy_sentinel',
+        type: 'default',
+        selectedType: 'default',
+        value: 'default',
+      },
+    ]
+
+    const decoded = decodeStoredProject(project, { storageName: project.name }).project
+    expect(decoded.variables[0]).toMatchObject({
+      type: 'default',
+      selectedType: 'default',
+      value: null,
+    })
+    expect(toSimulationPayload(decoded).variables[0]).toMatchObject({
+      type: 'default',
+      value: null,
+    })
+    expect(decoded.variables[1]).toMatchObject({
+      type: 'default',
+      selectedType: 'default',
+      value: null,
+    })
+    expect(toSimulationPayload(decoded).variables[1]).toMatchObject({
+      type: 'default',
+      value: null,
+    })
+  })
+
+  it('normalizes legacy numeric drafts and round-trips exact expression tags', () => {
+    const project = createEmptyProject('Numeric expressions')
+    project.variables.push(new Variable({
+      id: 'variable_delay',
+      name: 'delay_fraction',
+      type: 'Float64',
+      selectedType: 'expression:Float64',
+      value: { kind: 'numeric_expression', source: 'delay / 2' },
+    }))
+    project.net.protocols.push(new FloatingProtocol({
+      id: 'numeric_protocol',
+      type: 'Example.NumericProtocol',
+      parameters: [
+        {
+          name: 'direct',
+          type: 'Float64',
+          selectedType: 'expression:Float64',
+          value: { kind: 'numeric_expression', source: '1 // 4' },
+        },
+        { name: 'legacy_string', type: 'Float64', value: '0.5' },
+        { name: 'metadata_default', type: 'Int64', value: null },
+      ],
+    }))
+
+    const stored = encodeStoredProject(project)
+    expect(stored.variables[0]).toMatchObject({
+      type: 'Float64',
+      selectedType: 'expression:Float64',
+      value: { kind: 'numeric_expression', source: 'delay / 2' },
+    })
+    expect(stored.net.protocols[0].parameters[0]).toEqual({
+      name: 'direct',
+      type: 'Float64',
+      selectedType: 'expression:Float64',
+      value: { kind: 'numeric_expression', source: '1 // 4' },
+    })
+    expect(stored.net.protocols[0].parameters[1].selectedType).toBe('Float64')
+    expect(stored.net.protocols[0].parameters[2]).toMatchObject({
+      selectedType: 'default',
+      value: null,
+    })
+
+    const payload = toSimulationPayload(project)
+    expect(payload.variables[0]).toEqual({
+      id: 'variable_delay',
+      name: 'delay_fraction',
+      type: 'Float64',
+      value: { kind: 'numeric_expression', source: 'delay / 2' },
+    })
+    expect(payload.net.protocols[0].parameters).toEqual([
+      {
+        name: 'direct',
+        type: 'Float64',
+        value: { kind: 'numeric_expression', source: '1 // 4' },
+      },
+      { name: 'legacy_string', type: 'Float64', value: '0.5' },
+    ])
+  })
+
+  it('normalizes the legacy protocol default sentinel to keyword omission', () => {
+    const project = createEmptyProject('Legacy protocol default')
+    project.net.protocols.push(new FloatingProtocol({
+      id: 'legacy-default',
+      type: 'Example.Protocol',
+      parameters: [{
+        name: 'tag_or_function',
+        type: 'Function',
+        selectedType: 'Function',
+        value: 'default',
+      }],
+    }))
+
+    const stored = encodeStoredProject(project)
+    expect(stored.net.protocols[0].parameters[0]).toMatchObject({
+      selectedType: 'default',
+      value: null,
+    })
+    expect(toSimulationPayload(project).net.protocols[0].parameters).toEqual([])
+  })
+
+  it('rejects malformed numeric-expression tags instead of persisting preview state', () => {
+    const project = createEmptyProject('Malformed expression')
+    project.variables.push({
+      id: 'variable_bad',
+      name: 'bad',
+      type: 'Float64',
+      selectedType: 'expression:Float64',
+      value: {
+        kind: 'numeric_expression',
+        source: '1 / 2',
+        result: 0.5,
+      },
+    })
+
+    expect(() => encodeStoredProject(project)).toThrow(/exactly a nonblank source and kind/)
+    expect(() => decodeStoredProject({
+      ...createEmptyProject('Malformed import'),
+      variables: [{
+        id: 'variable_bad',
+        name: 'bad',
+        type: 'Float64',
+        value: { kind: 'numeric_expression', source: '   ' },
+      }],
+    })).toThrow(/exactly a nonblank source and kind/)
+
+    project.variables[0].value = 0.5
+    expect(() => toSimulationPayload(project)).toThrow(
+      /expression selection requires a numeric-expression value/,
+    )
+  })
+
   it('preserves generated trace ownership for script-export tuple bindings', () => {
     const project = createEmptyProject('Weighted State')
     project.variables.push(new Variable({

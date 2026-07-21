@@ -1,17 +1,30 @@
 <template>
+  <NumericExpressionInput
+    v-if="isNumericExpressionOptionId(type)"
+    :parameter="parameter"
+    :target-type="numericExpressionTargetType(type)"
+    :placement="category"
+    :context="numericExpressionContext"
+    :template="template"
+    :disabled="disabled"
+    :minimum="numericMinimum"
+    :maximum="numericMaximum"
+    :aria-describedby="ariaDescribedby"
+    @commit="emit('commit')"
+  />
   <input
-    v-if="parameterTypeIsNumber(type)"
+    v-else-if="parameterTypeIsNumber(type)"
     type="number"
     v-model="parameter.value"
-    :min="parameter.min"
-    :max="parameter.max"
+    :min="numericMinimum ?? parameter.min"
+    :max="numericMaximum ?? parameter.max"
     :step="numberInputStep"
     :placeholder="placeholder"
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :aria-invalid="numericValueInvalid"
     :disabled="disabled"
-    @change="emit('commit')"
+    @change="commitNumericLiteral"
   />
   <Checkbox
     v-else-if="type === 'Bool'"
@@ -57,9 +70,9 @@
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :disabled="disabled"
-    @change="emit('commit')"
+    @change="commitPredefinedFunction"
   >
-    <option value="default">Default</option>
+    <option value="" disabled>Select a function</option>
     <option v-for="func in selectableFunctions" :key="func" :value="func">{{ func }}</option>
   </select>
   <span v-else-if="type === 'default'">Use protocol default</span>
@@ -73,7 +86,7 @@
     :aria-label="valueInputLabel"
     :aria-describedby="ariaDescribedby"
     :disabled="disabled"
-    @change="emit('commit')"
+    @change="commitTextLiteral"
   />
 </template>
 
@@ -84,12 +97,15 @@ import { Check } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
 import { markdownCodeBlock } from '../../utils/markdown.js'
 import {
+  isNumericExpressionOptionId,
   isCodeType,
   isSymbolicType,
   isWildcardType,
+  numericExpressionTargetType,
   parameterTypeIsNumber,
   parseNumericParameterValue
 } from '../../utils/parameterTypes'
+import NumericExpressionInput from './NumericExpressionInput.vue'
 
 const CodeEditorWithSymbols = defineAsyncComponent(() => import('./CodeEditorWithSymbols.vue'))
 
@@ -121,6 +137,22 @@ const props = defineProps({
   ariaDescribedby: {
     type: String,
     default: undefined
+  },
+  numericExpressionContext: {
+    type: Object,
+    default: undefined
+  },
+  template: {
+    type: Boolean,
+    default: false
+  },
+  numericMinimum: {
+    type: Number,
+    default: undefined
+  },
+  numericMaximum: {
+    type: Number,
+    default: undefined
   }
 })
 const emit = defineEmits(['commit'])
@@ -135,15 +167,17 @@ const selectableFunctions = computed(() => api.getKnownFunctions().filter(func =
   ['node', 'variable'].includes(props.category) || !func.endsWith('(self)')
 )))
 const codeEditorOpen = ref(false)
-const codeDraftDirty = ref(false)
+let codeValidationGeneration = 0
 const numericValueInvalid = computed(() => !parseNumericParameterValue(
   props.type,
   props.parameter.value,
-  props.parameter,
+  {
+    ...props.parameter,
+    min: props.numericMinimum ?? props.parameter.min,
+    max: props.numericMaximum ?? props.parameter.max,
+  },
 ).valid)
-const codeDraftInvalid = computed(() => (
-  Boolean(props.parameter.error) || codeDraftDirty.value
-))
+const codeDraftInvalid = computed(() => Boolean(props.parameter.error))
 
 watch(
   () => props.type,
@@ -164,49 +198,78 @@ watch(
     codeEditorOpen.value = isCodeType(type)
       ? props.initiallyOpen && !(isSymbolicType(type) && props.parameter.latex)
       : false
-    codeDraftDirty.value = false
+    if (
+      isCodeType(type)
+      && (typeof props.parameter.value !== 'string' || !props.parameter.value.trim())
+    ) {
+      props.parameter.error = markdownCodeBlock('Validate this code before continuing.')
+    }
   },
   { immediate: true }
-)
-
-watch(
-  () => props.parameter,
-  () => {
-    codeDraftDirty.value = false
-  }
 )
 
 function onCodeEditorValueChanged(value) {
   if (props.disabled) return
   props.parameter.value = value
-  delete props.parameter.error
-  codeDraftDirty.value = true
+  codeValidationGeneration += 1
+  props.parameter.error = markdownCodeBlock('Validate this code before continuing.')
 }
 
 function openCodeEditor() {
   if (!props.disabled && isCodeType(props.type)) codeEditorOpen.value = true
 }
 
+function commitNumericLiteral() {
+  const parsed = parseNumericParameterValue(props.type, props.parameter.value, {
+    ...props.parameter,
+    min: props.numericMinimum ?? props.parameter.min,
+    max: props.numericMaximum ?? props.parameter.max,
+  })
+  if (parsed.valid && !parsed.empty) emit('commit')
+}
+
+function commitPredefinedFunction() {
+  if (typeof props.parameter.value === 'string' && props.parameter.value.trim()) {
+    emit('commit')
+  }
+}
+
+function commitTextLiteral() {
+  if (
+    (typeof props.parameter.value === 'string' && props.parameter.value.trim())
+    || (Array.isArray(props.parameter.value) && props.parameter.value.length)
+  ) {
+    emit('commit')
+  }
+}
+
 async function validateCode() {
-  if (props.disabled) return
+  if (props.disabled) return false
+  if (typeof props.parameter.value !== 'string' || !props.parameter.value.trim()) {
+    props.parameter.error = markdownCodeBlock('Validate this code before continuing.')
+    return false
+  }
   if (!unsafeCodeEvaluationEnabled.value) {
     props.parameter.error = markdownCodeBlock('Server-side Julia evaluation is disabled.')
-    codeDraftDirty.value = true
-    return
+    return false
   }
 
+  const generation = ++codeValidationGeneration
+  props.parameter.error = markdownCodeBlock('Code validation is in progress.')
   let response
   try {
     response = isSymbolicType(props.type)
       ? await api.validateSymbolicFunction(props.parameter.value)
       : await api.validateFunction(props.parameter.value, props.category)
   } catch (error) {
+    if (generation !== codeValidationGeneration) return false
     codeEditorOpen.value = true
     delete props.parameter.latex
     props.parameter.error = markdownCodeBlock(error?.message || 'Validation failed')
-    codeDraftDirty.value = true
-    return
+    return false
   }
+
+  if (generation !== codeValidationGeneration) return false
 
   if (response.success) {
     delete props.parameter.error
@@ -214,19 +277,17 @@ async function validateCode() {
       props.parameter.latex = response.results.latex.replace(/^\$+|\$+$/g, '')
     }
     codeEditorOpen.value = false
-    codeDraftDirty.value = false
-    return
+    return true
   }
 
   codeEditorOpen.value = true
   delete props.parameter.latex
   props.parameter.error = markdownCodeBlock(response.error)
-  codeDraftDirty.value = true
+  return false
 }
 
 async function validateAndCommitCode() {
-  await validateCode()
-  if (!props.parameter.error) emit('commit')
+  if (await validateCode()) emit('commit')
 }
 </script>
 

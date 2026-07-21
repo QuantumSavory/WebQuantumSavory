@@ -10,7 +10,7 @@
       @click="togglePopover"
     >
       <CircleHelp :size="15" aria-hidden="true" />
-      Custom function context
+      {{ label }}
     </button>
 
     <Popover
@@ -22,12 +22,12 @@
       <section class="custom-function-context-popup">
         <header class="custom-function-context-header">
           <h2 class="custom-function-context-heading">
-            Context available to custom functions
+            Context available to {{ subject }}
           </h2>
           <button
             type="button"
             class="custom-function-context-close noborder"
-            aria-label="Close custom function context"
+            :aria-label="`Close ${label.toLowerCase()}`"
             autofocus
             @click="closePopover"
           >
@@ -35,7 +35,7 @@
           </button>
         </header>
         <dl>
-          <template v-for="keyword in CUSTOM_FUNCTION_CONTEXT_KEYWORDS" :key="keyword.id">
+          <template v-for="keyword in SOURCE_CONTEXT_KEYWORDS" :key="keyword.id">
             <dt><code>{{ keyword.syntax }}</code></dt>
             <dd>
               {{ keyword.description }}
@@ -53,7 +53,18 @@
 import { ref, useId } from 'vue'
 import { CircleHelp, X } from '@lucide/vue'
 import Popover from 'primevue/popover'
-import { CUSTOM_FUNCTION_CONTEXT_KEYWORDS } from '../../utils/customFunctionContext'
+import { SOURCE_CONTEXT_KEYWORDS } from '../../utils/customFunctionContext'
+
+const props = defineProps({
+  label: {
+    type: String,
+    default: 'Custom function context',
+  },
+  subject: {
+    type: String,
+    default: 'custom functions',
+  },
+})
 
 const popover = ref(null)
 const trigger = ref(null)
@@ -62,8 +73,10 @@ const popoverId = `custom-function-context-${useId()}`
 const popoverPassThrough = {
   root: {
     id: popoverId,
-    'aria-label': 'Custom function context',
-    'data-testid': 'custom-function-context-help',
+    'aria-label': props.label,
+    'data-testid': props.label === 'Custom function context'
+      ? 'custom-function-context-help'
+      : 'numeric-expression-context-help',
     class: 'custom-function-context-overlay',
   },
   content: {

@@ -1,7 +1,10 @@
 # Error handling framework for WebQuantumSavory API
 
 # Standard error response format
-function create_error_response(error::APIError)
+function create_error_response(
+  error::APIError;
+  environment::AbstractString=Genie.Configuration.env(),
+)
   response = Dict(
     "success" => false,
     "error" => error.message,
@@ -13,7 +16,10 @@ function create_error_response(error::APIError)
   end
 
   if error.details !== nothing
-    response["details"] = error.details
+    response["details"] = redact_evaluation_failure_details(
+      error.details;
+      environment,
+    )
   end
 
   return response

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.10.0
+
+- Added one Default-first input selector for every editable protocol parameter
+  and Variable, with omitted constructor defaults and explicit empty value
+  validation across singleton, union, function, intrinsic, and named-tag
+  inputs.
+- Added tagged Julia numeric expressions for `Float64` and `Int64` protocol
+  parameters and Variables, including concrete placement previews,
+  representative template results, lowering-based contextual-Variable
+  deferral, per-assignment runtime evaluation, and parse-only script export
+  that does not lower, macro-expand, or execute source in the server.
+- Made edited and pending numeric-expression and custom-code drafts explicit
+  constructor validation errors, and reused descriptor completeness checks in
+  Variables and repeater generation so stale or empty explicit branches cannot
+  silently generate as Default.
+- Extended the existing trusted-code evaluation gate, API documentation, GUI
+  and MCP design-command contract, project normalization, and browser coverage
+  for the new descriptor and numeric-expression inputs.
+
 ## 1.9.2
 
 - Watermarked every generated protocol, slot-state, and States Zoo PNG in the browser with

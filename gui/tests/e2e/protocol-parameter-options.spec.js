@@ -313,6 +313,9 @@ test.describe('Protocol parameter options', () => {
     for (const name of SELF_FUNCTIONS) {
       await expect(edgeFunctionSelector.locator(`option[value="${name}"]`)).toHaveCount(0)
     }
+    // An explicit Function branch is incomplete until a function is selected.
+    // Return it to Default before committing the independent intrinsic field.
+    await chooseslotRow.locator('.complexTypeSelector').selectOption('default')
 
     const retryRow = parameterRow(entanglerEditor, 'retry_lock_time')
     await retryRow.locator('.complexTypeSelector').selectOption('Nothing')
@@ -334,18 +337,21 @@ test.describe('Protocol parameter options', () => {
       'Default',
       'QuantumSavory.Wildcard',
       'Int64',
-      'Predefined function',
-      'Custom function',
+      'Int64 Expression',
+      'Predefined Function',
+      'Custom Function',
     ])
     await nodeLTypeSelector.selectOption('Lambda')
     await expect(nodeLRow.locator('.code-editor-with-symbols')).toBeVisible()
+    // Keep the independent constructor valid before committing chooseL.
+    await nodeLTypeSelector.selectOption('default')
 
     const chooseLRow = parameterRow(swapperEditor, 'chooseL')
     const chooseLTypeSelector = chooseLRow.locator('.complexTypeSelector')
     await expect(chooseLTypeSelector.locator('option')).toHaveText([
       'Default',
-      'Predefined function',
-      'Custom function',
+      'Predefined Function',
+      'Custom Function',
     ])
 
     await chooseLTypeSelector.selectOption('Function')
@@ -359,7 +365,7 @@ test.describe('Protocol parameter options', () => {
     })
 
     await chooseLTypeSelector.selectOption('default')
-    await expect(chooseLRow.locator('.param-value')).toHaveText('Use protocol default')
+    await expect(chooseLRow.locator('.param-value')).toBeEmpty()
     await expect.poll(() => serializedNodeParameter(page, 'chooseL')).toBeUndefined()
 
     await chooseLTypeSelector.selectOption('Lambda')
@@ -407,16 +413,23 @@ test.describe('Protocol parameter options', () => {
 
     await tagTypeSelector.selectOption('default')
     await expect(tagInput).toHaveCount(0)
-    await expect(tagRow.locator('.param-value')).toHaveText('Use protocol default')
+    await expect(tagRow.locator('.param-value')).toBeEmpty()
     await expect.poll(() => serializedEdgeParameter(page, 'tag')).toBeUndefined()
 
     const consumer = await openProtocolEditor(panel, 'EntanglementConsumer')
     const consumerRow = parameterRow(consumer, 'tag')
+    const consumerTypeSelector = consumerRow.getByRole('combobox', {
+      name: 'Input option for tag',
+    })
+    await expect(consumerTypeSelector.locator('option')).toHaveText([
+      'Default',
+      'Tag',
+    ])
+    await expect(consumerTypeSelector).toHaveValue('default')
+    await expect(consumerRow.getByRole('combobox', { name: 'tag named tag type' })).toHaveCount(0)
+    await consumerTypeSelector.selectOption('DataType')
     const consumerInput = consumerRow.getByRole('combobox', { name: 'tag named tag type' })
-    await expect(consumerInput).toHaveValue('Default')
-    await consumerInput.click()
-    await expect(page.locator('.named-tag-type-overlay')
-      .getByRole('option', { name: 'Nothing', exact: true })).toHaveCount(0)
+    await expect(consumerInput).toHaveValue('')
     await consumerInput.fill('counterpart')
     await page.locator('.named-tag-type-overlay')
       .getByRole('option', { name: 'EntanglementCounterpart', exact: true }).click()
@@ -426,7 +439,7 @@ test.describe('Protocol parameter options', () => {
       CONSUMER_TYPE.type,
     )).toEqual({
       name: 'tag',
-      type: 'Any',
+      type: 'DataType',
       value: TAG_UNIQUE,
     })
 

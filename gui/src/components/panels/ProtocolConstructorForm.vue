@@ -1,46 +1,49 @@
 <template>
-  <div class="protocol-constructor-form">
+  <div
+    class="protocol-constructor-form"
+    :data-testid="template ? 'template-protocol-constructor' : 'protocol-constructor'"
+    :data-template="String(template)"
+  >
     <div v-if="filteredParameters.length" class="params-container">
-      <div class="param-item" v-for="param in filteredParameters" :key="param.name">
+      <div v-for="param in filteredParameters" :key="param.name" class="param-item">
         <div
           class="param-item-row"
           :class="{
             'grayed-parameter': isGrayedParameter(param),
-            'columnParamRow': !isVariableAssigned(param) && isCodeType(effectiveParameterType(param)),
-            'controlled-parameter': isControlledParameter(param)
+            'columnParamRow': !isVariableAssigned(param) && optionUsesWideEditor(param),
+            'controlled-parameter': isControlledParameter(param),
           }"
         >
           <div
             v-tooltip.top="{
               value: protocolParameterDefinitionText(param),
-              pt: { arrow: { style: { borderTopColor: '#fff' } } }
+              pt: { arrow: { style: { borderTopColor: '#fff' } } },
             }"
             class="param-name"
           >
             {{ param.name }}
-            <span v-if="paramUnknownTypes(param).length > 0" class="unknown-type-indicator">
+            <span v-if="paramUnknownTypes(param).length" class="unknown-type-indicator">
               <TriangleAlert :size="13" aria-hidden="true" />
             </span>
-            <template v-if="parameterTypeChoices(param)">
-              <br/>
-              <select
-                v-model="param.selectedType"
-                class="complexTypeSelector"
-                :disabled="parameterDisabled(param) || isVariableAssigned(param)"
-                :aria-label="`Type for ${param.name}`"
-                :aria-describedby="controlledDescriptionId(param)"
-                @change="onSelectedTypeChanged(param)"
+            <br>
+            <select
+              v-model="param.selectedType"
+              class="complexTypeSelector"
+              data-testid="parameter-option-selector"
+              :disabled="parameterDisabled(param) || isVariableAssigned(param)"
+              :aria-label="`Input option for ${param.name}`"
+              :aria-describedby="controlledDescriptionId(param)"
+              @change="onSelectedTypeChanged(param)"
+            >
+              <option
+                v-for="option in parameterInputOptions(param)"
+                :key="option.id"
+                :value="option.id"
+                :disabled="!option.enabled"
               >
-                <option
-                  v-for="type in parameterTypeChoices(param)"
-                  :key="type"
-                  :value="type"
-                  :disabled="!parameterTypeChoiceIsKnown(param, type)"
-                >
-                  {{ parameterTypeOptionLabel(param, type) }}
-                </option>
-              </select>
-            </template>
+                {{ option.label }}
+              </option>
+            </select>
           </div>
 
           <div
@@ -48,73 +51,103 @@
             :class="{
               noInteraction: isGrayedParameter(param)
                 && !isVariableAssigned(param)
-                && !isVariablePickerOpen(param)
+                && !isVariablePickerOpen(param),
             }"
           >
             <div
               v-if="isVariableAssigned(param) || isVariablePickerOpen(param)"
               class="variable-assignment"
             >
-              <Link2 :size="14" aria-hidden="true" />
-              <select
-                class="variable-selector"
-                :value="isVariableAssigned(param) ? param.value.id : ''"
-                :disabled="parameterDisabled(param)"
-                :aria-label="`Variable for ${param.name}`"
-                :aria-describedby="controlledDescriptionId(param)"
-                @change="assignVariable(param, $event.target.value)"
-              >
-                <option v-if="!isVariableAssigned(param)" value="" disabled>
-                  Select a variable
-                </option>
-                <option
-                  v-else-if="!assignedVariable(param)"
-                  :value="param.value.id"
-                  disabled
-                >
-                  Missing variable ({{ param.value.id }})
-                </option>
-                <option
-                  v-else-if="!variableIsCompatible(param, assignedVariable(param))"
-                  :value="param.value.id"
-                  disabled
-                >
-                  Incompatible variable: {{ assignedVariable(param).name }}
-                  ({{ getTypeOptionLabel(assignedVariable(param).type) }})
-                </option>
-                <option
-                  v-for="variable in compatibleVariables(param)"
-                  :key="variable.id"
-                  :value="variable.id"
-                >
-                  {{ variable.name }} ({{ getTypeOptionLabel(variable.type) }})
-                </option>
-              </select>
+              <div class="variable-assignment-control">
+                <div class="variable-assignment-selector">
+                  <Link2 :size="14" aria-hidden="true" />
+                  <select
+                    class="variable-selector"
+                    :value="isVariableAssigned(param) ? param.value.id : ''"
+                    :disabled="parameterDisabled(param)"
+                    :aria-label="`Variable for ${param.name}`"
+                    :aria-describedby="controlledDescriptionId(param)"
+                    @change="assignVariable(param, $event.target.value)"
+                  >
+                    <option v-if="!isVariableAssigned(param)" value="" disabled>
+                      Select a variable
+                    </option>
+                    <option
+                      v-else-if="!assignedVariable(param)"
+                      :value="param.value.id"
+                      disabled
+                    >
+                      Missing variable ({{ param.value.id }})
+                    </option>
+                    <option
+                      v-else-if="!variableIsCompatible(param, assignedVariable(param))"
+                      :value="param.value.id"
+                      disabled
+                    >
+                      Incompatible variable: {{ assignedVariable(param).name }}
+                      ({{ variableDisplayType(assignedVariable(param)) }})
+                    </option>
+                    <option
+                      v-for="variable in compatibleVariables(param)"
+                      :key="variable.id"
+                      :value="variable.id"
+                    >
+                      {{ variable.name }} ({{ variableDisplayType(variable) }})
+                    </option>
+                  </select>
+                </div>
+                <NumericExpressionInput
+                  v-if="assignedVariableIsNumericExpression(param)"
+                  :parameter="assignedVariable(param)"
+                  :validation-target="param"
+                  :target-type="assignedVariable(param).type"
+                  :placement="category"
+                  :context="numericExpressionContext"
+                  :template="template"
+                  :minimum="runtimeParameterDefinition(param)?.min"
+                  :maximum="runtimeParameterDefinition(param)?.max"
+                  linked
+                />
+              </div>
             </div>
+
+            <template v-else-if="effectiveOption(param).inputKind === 'default'" />
+            <span v-else-if="effectiveOption(param).inputKind === 'intrinsic'">
+              {{ effectiveOption(param).id === 'Nothing' ? 'Nothing' : 'Wildcard' }}
+            </span>
             <NamedTagTypeAutocomplete
-              v-else-if="showNamedTagTypeAutocomplete(param)"
+              v-else-if="effectiveOption(param).inputKind === 'named-tag'"
               :model-value="param.value"
-              :include-default="!namedTagTypeIsNullable(param)"
+              :include-default="false"
               :disabled="parameterDisabled(param)"
               :parameter-name="param.name"
               :aria-describedby="controlledDescriptionId(param)"
               @update:model-value="updateNamedTagTypeValue(param, $event)"
             />
+            <span
+              v-else-if="effectiveOption(param).inputKind === 'unsupported'"
+              class="unsupported-parameter-value"
+            >
+              Unsupported input type
+            </span>
             <TypedValueInput
               v-else
               :parameter="param"
-              :type="effectiveParameterType(param)"
+              :type="effectiveOption(param).id"
               :disabled="parameterDisabled(param)"
               :category="category"
+              :numeric-expression-context="numericExpressionContext"
+              :numeric-minimum="runtimeParameterDefinition(param)?.min"
+              :numeric-maximum="runtimeParameterDefinition(param)?.max"
+              :template="template"
+              :initially-open="effectiveOption(param).inputKind === 'code'
+                && !(typeof param.value === 'string' && param.value.trim())"
               :aria-describedby="controlledDescriptionId(param)"
               @commit="emit('commit')"
             />
           </div>
 
-          <span
-            class="variable-binding-control"
-            v-tooltip.top="variableButtonTitle(param)"
-          >
+          <span class="variable-binding-control" v-tooltip.top="variableButtonTitle(param)">
             <button
               type="button"
               class="variable-binding-button noborder"
@@ -154,62 +187,46 @@ import { useDomId } from '../../composables/useDomId'
 import { api } from '../../utils/ApiConnector'
 import { VariableReference, isVariableReference } from '../../models/Variable'
 import {
+  buildParameterInputOptions,
   getTypeOptionLabel,
-  isCodeType,
-  isWildcardType,
-  parameterTypeIsKnown,
+  inferParameterInputOption,
+  isNumericExpressionOptionId,
+  isNumericExpressionValue,
+  parameterInputOptionForVariable,
   parameterTypeSupportsVariableType,
-  parseJuliaType,
-  unknownParameterTypes
+  resetValueForType,
+  unknownParameterTypes,
 } from '../../utils/parameterTypes'
 import NamedTagTypeAutocomplete from './NamedTagTypeAutocomplete.vue'
+import NumericExpressionInput from './NumericExpressionInput.vue'
 import TypedValueInput from './TypedValueInput.vue'
 
 const props = defineProps({
-  protocol: {
-    type: Object,
-    required: true
-  },
-  category: {
-    type: String,
-    default: 'floating'
-  },
-  variables: {
-    type: Array,
-    default: () => []
-  },
-  editingLocked: {
-    type: Boolean,
-    default: false
-  },
-  disabled: {
-    type: Boolean,
-    default: false
-  },
-  controlledParameters: {
-    type: Object,
-    default: () => ({})
-  },
-  emptyText: {
-    type: String,
-    default: 'No configurable parameters.'
-  }
+  protocol: { type: Object, required: true },
+  category: { type: String, default: 'floating' },
+  variables: { type: Array, default: () => [] },
+  editingLocked: { type: Boolean, default: false },
+  disabled: { type: Boolean, default: false },
+  controlledParameters: { type: Object, default: () => ({}) },
+  emptyText: { type: String, default: 'No configurable parameters.' },
+  numericExpressionContext: { type: Object, default: undefined },
+  template: { type: Boolean, default: false },
 })
 const emit = defineEmits(['commit'])
 
 const blacklistParamNames = new Set(['sim', 'net', 'node', 'nodeA', 'nodeB'])
-// Keep the established DataType wire value; only the constructor UI calls this branch Tag.
-const NAMED_TAG_TYPE_BRANCH = 'DataType'
-const NULLABLE_NAMED_TAG_TYPE_CHOICES = Object.freeze([
-  'default',
-  'Nothing',
-  NAMED_TAG_TYPE_BRANCH
-])
+// Draft parameter objects are replaced after each authoritative Design Command
+// commit. Key the transient direct-value backup by constructor field so a
+// link/unlink round trip survives that reconciliation without persisting UI
+// state in the project.
 const directParameterValues = new Map()
-const pendingNullableNamedTagBranches = new Map()
-const initializedNullableNamedTagParameters = new WeakSet()
+const initializedParameters = new WeakSet()
 const variablePickerParameter = shallowRef(null)
 const formId = useDomId('protocol-constructor')
+
+function directParameterKey(param) {
+  return `${props.protocol?.type ?? ''}\u0000${param.name}`
+}
 
 const isEditingDisabled = computed(() => props.disabled || props.editingLocked)
 const filteredParameters = computed(() => {
@@ -221,8 +238,58 @@ const filteredParameters = computed(() => {
   return parameters.filter(param => !blacklistParamNames.has(param.name))
 })
 
+function runtimeParameterDefinition(param) {
+  return api.getProtocolParameterDefinition(props.category, props.protocol.type, param.name)
+}
+
+function declaredParameterType(param) {
+  return runtimeParameterDefinition(param)?.type ?? param.type
+}
+
+function parameterInputOptions(param) {
+  return buildParameterInputOptions(
+    declaredParameterType(param),
+    runtimeParameterDefinition(param),
+  )
+}
+
+function initialOption(param) {
+  const options = parameterInputOptions(param)
+  if (param.value === 'nothing') {
+    return options.find(option => option.id === 'Nothing') || options[0]
+  }
+  if (param.value === 'Wildcard') {
+    return options.find(option => option.inputKind === 'intrinsic') || options[0]
+  }
+  const explicit = options.find(option => option.id === param.selectedType)
+  if (explicit) return explicit
+  if (param.value == null || param.value === '' || param.value === 'default') return options[0]
+  return inferParameterInputOption(options, param)
+}
+
+function initializeParameter(param) {
+  if (isVariableAssigned(param)) {
+    const linkedOption = inputOptionForVariable(param, assignedVariable(param))
+    if (linkedOption) param.selectedType = linkedOption.id
+    initializedParameters.add(param)
+    return
+  }
+  if (initializedParameters.has(param)) return
+  param.selectedType = initialOption(param).id
+  initializedParameters.add(param)
+}
+
+function effectiveOption(param) {
+  return parameterInputOptions(param).find(option => option.id === param.selectedType)
+    || parameterInputOptions(param)[0]
+}
+
+function optionUsesWideEditor(param) {
+  return ['code', 'numeric-expression'].includes(effectiveOption(param).inputKind)
+}
+
 function isGrayedParameter(param) {
-  return !isNamedTagTypeParameter(param) && param.type === 'Any'
+  return effectiveOption(param).inputKind === 'unsupported'
 }
 
 function hasControlledParameter(param) {
@@ -243,8 +310,8 @@ function controlledReason(param) {
 
 function controlledDescriptionId(param) {
   if (!controlledReason(param)) return undefined
-  const parameterName = String(param.name || 'parameter').replace(/[^a-zA-Z0-9_-]/g, '-')
-  return `${formId}-${parameterName}-controlled`
+  const name = String(param.name || 'parameter').replace(/[^a-zA-Z0-9_-]/g, '-')
+  return `${formId}-${name}-controlled`
 }
 
 function parameterDisabled(param) {
@@ -253,140 +320,33 @@ function parameterDisabled(param) {
 
 function protocolParameterDefinitionText(param) {
   let result = runtimeParameterDefinition(param)?.doc || 'NO DOC'
-  const unknownTypes = paramUnknownTypes(param)
-  if (unknownTypes.length > 0) {
+  const unsupported = paramUnknownTypes(param)
+  if (unsupported.length) {
     result += '\n\n**Unsupported:** '
-      + unknownTypes.map(type => `\`${type}\``).join(', ')
+      + unsupported.map(type => `\`${type}\``).join(', ')
   }
   return result
 }
 
-function runtimeParameterDefinition(param) {
-  return api.getProtocolParameterDefinition(
-    props.category,
-    props.protocol.type,
-    param.name
-  )
-}
-
-function isNamedTagTypeParameter(param) {
-  return runtimeParameterDefinition(param)?.kind === 'named_tag_type'
-}
-
-function namedTagTypeIsNullable(param) {
-  return isNamedTagTypeParameter(param)
-    && runtimeParameterDefinition(param)?.nullable === true
-}
-
-function nullableNamedTagParameterKey(param) {
-  return [
-    props.protocol?.id || '',
-    props.protocol?.type || '',
-    param.name
-  ].join('\0')
-}
-
-function nullableNamedTagSelectedType(param) {
-  if (param.value === 'nothing') return 'Nothing'
-  if (param.value != null && param.value !== '') return NAMED_TAG_TYPE_BRANCH
-  return pendingNullableNamedTagBranches.get(nullableNamedTagParameterKey(param))
-    === NAMED_TAG_TYPE_BRANCH
-    ? NAMED_TAG_TYPE_BRANCH
-    : 'default'
-}
-
-function initializeNullableNamedTagParameter(param) {
-  if (
-    !namedTagTypeIsNullable(param)
-    || initializedNullableNamedTagParameters.has(param)
-    || isVariableAssigned(param)
-  ) {
-    return
-  }
-  param.selectedType = nullableNamedTagSelectedType(param)
-  initializedNullableNamedTagParameters.add(param)
-}
-
-function showNamedTagTypeAutocomplete(param) {
-  return isNamedTagTypeParameter(param)
-    && (
-      !namedTagTypeIsNullable(param)
-      || param.selectedType === NAMED_TAG_TYPE_BRANCH
-    )
-}
-
 function paramUnknownTypes(param) {
-  return isNamedTagTypeParameter(param) ? [] : unknownParameterTypes(param.type)
+  return runtimeParameterDefinition(param)?.kind === 'named_tag_type'
+    ? []
+    : unknownParameterTypes(declaredParameterType(param))
 }
 
 function updateNamedTagTypeValue(param, value) {
   if (parameterDisabled(param) || isVariableAssigned(param)) return
-  if (namedTagTypeIsNullable(param)) {
-    const parameterKey = nullableNamedTagParameterKey(param)
-    if (value == null || value === '') {
-      pendingNullableNamedTagBranches.set(parameterKey, NAMED_TAG_TYPE_BRANCH)
-    } else {
-      pendingNullableNamedTagBranches.delete(parameterKey)
-    }
-  }
   param.value = value
   delete param.error
   delete param.latex
-  emit('commit')
+  if (typeof value === 'string' && value.trim()) emit('commit')
 }
 
 function onSelectedTypeChanged(param) {
   if (parameterDisabled(param)) return
-  if (namedTagTypeIsNullable(param)) {
-    const parameterKey = nullableNamedTagParameterKey(param)
-    if (param.selectedType === NAMED_TAG_TYPE_BRANCH) {
-      pendingNullableNamedTagBranches.set(parameterKey, NAMED_TAG_TYPE_BRANCH)
-    } else {
-      pendingNullableNamedTagBranches.delete(parameterKey)
-    }
-  }
-  if (param.selectedType === 'default') {
-    param.value = null
-  } else if (isWildcardType(param.selectedType)) {
-    param.value = 'Wildcard'
-  } else if (param.selectedType === 'Nothing') {
-    param.value = 'nothing'
-  } else if (param.value === 'Wildcard' || param.value === 'nothing') {
-    param.value = null
-  }
-  if (isNamedTagTypeParameter(param)) {
-    delete param.error
-    delete param.latex
-  }
-  emit('commit')
-}
-
-function parameterTypeChoices(param) {
-  if (isNamedTagTypeParameter(param)) {
-    return namedTagTypeIsNullable(param) ? NULLABLE_NAMED_TAG_TYPE_CHOICES : null
-  }
-  const parsedType = parseJuliaType(param.type)
-  return Array.isArray(parsedType) ? parsedType : null
-}
-
-function parameterTypeChoiceIsKnown(param, type) {
-  return isNamedTagTypeParameter(param)
-    ? NULLABLE_NAMED_TAG_TYPE_CHOICES.includes(type)
-    : parameterTypeIsKnown(type)
-}
-
-function parameterTypeOptionLabel(param, type) {
-  if (isNamedTagTypeParameter(param) && type === NAMED_TAG_TYPE_BRANCH) return 'Tag'
-  return getTypeOptionLabel(type)
-}
-
-function effectiveParameterType(param) {
-  if (isNamedTagTypeParameter(param)) {
-    return namedTagTypeIsNullable(param)
-      ? (param.selectedType || nullableNamedTagSelectedType(param))
-      : 'named_tag_type'
-  }
-  return parameterTypeChoices(param) ? (param.selectedType || '') : param.type
+  resetValueForType(param, param.selectedType)
+  const option = effectiveOption(param)
+  if (['default', 'boolean', 'intrinsic'].includes(option.inputKind)) emit('commit')
 }
 
 function isVariableAssigned(param) {
@@ -398,21 +358,37 @@ function assignedVariable(param) {
   return props.variables.find(variable => variable.id === param.value.id) || null
 }
 
-function declaredParameterType(param) {
-  return runtimeParameterDefinition(param)?.type ?? param.type
-}
-
 function variableIsCompatible(param, variable) {
-  if (isNamedTagTypeParameter(param)) return false
-  return !!variable && parameterTypeSupportsVariableType(
-    declaredParameterType(param),
-    variable.type
-  )
+  return runtimeParameterDefinition(param)?.kind !== 'named_tag_type'
+    && !!variable
+    && parameterTypeSupportsVariableType(
+      declaredParameterType(param),
+      variable.selectedType === 'default' ? 'default' : variable.type,
+    )
 }
 
 function compatibleVariables(param) {
-  if (isNamedTagTypeParameter(param)) return []
   return props.variables.filter(variable => variableIsCompatible(param, variable))
+}
+
+function variableDisplayType(variable) {
+  return getTypeOptionLabel(variable?.selectedType || variable?.type)
+}
+
+function inputOptionForVariable(param, variable) {
+  return parameterInputOptionForVariable(
+    declaredParameterType(param),
+    runtimeParameterDefinition(param),
+    variable,
+  )
+}
+
+function assignedVariableIsNumericExpression(param) {
+  const variable = assignedVariable(param)
+  return !!variable && (
+    isNumericExpressionOptionId(variable.selectedType)
+    || isNumericExpressionValue(variable.value)
+  )
 }
 
 function isVariablePickerOpen(param) {
@@ -422,7 +398,15 @@ function isVariablePickerOpen(param) {
 function assignVariable(param, variableId) {
   if (parameterDisabled(param)) return
   if (!compatibleVariables(param).some(variable => variable.id === variableId)) return
-  if (!isVariableAssigned(param)) directParameterValues.set(param.name, param.value)
+  if (!isVariableAssigned(param)) {
+    directParameterValues.set(directParameterKey(param), {
+      selectedType: param.selectedType,
+      value: param.value,
+    })
+  }
+  const variable = props.variables.find(candidate => candidate.id === variableId)
+  const linkedOption = inputOptionForVariable(param, variable)
+  if (linkedOption) param.selectedType = linkedOption.id
   param.value = new VariableReference(variableId)
   variablePickerParameter.value = null
   delete param.error
@@ -432,33 +416,26 @@ function assignVariable(param, variableId) {
 
 function clearVariableAssignment(param) {
   if (parameterDisabled(param)) return
-  param.value = directParameterValues.has(param.name)
-    ? directParameterValues.get(param.name)
-    : null
-  if (namedTagTypeIsNullable(param)) {
-    param.selectedType = nullableNamedTagSelectedType(param)
-    initializedNullableNamedTagParameters.add(param)
-  }
-  directParameterValues.delete(param.name)
-  if (isVariablePickerOpen(param)) variablePickerParameter.value = null
+  const key = directParameterKey(param)
+  const direct = directParameterValues.get(key)
+  param.selectedType = direct?.selectedType || 'default'
+  param.value = direct?.value ?? null
+  directParameterValues.delete(key)
+  variablePickerParameter.value = null
   emit('commit')
 }
 
 function toggleVariableAssignment(param) {
   if (parameterDisabled(param)) return
-  if (isVariableAssigned(param)) {
-    clearVariableAssignment(param)
-  } else if (isVariablePickerOpen(param)) {
-    variablePickerParameter.value = null
-  } else if (compatibleVariables(param).length > 0) {
-    variablePickerParameter.value = param
-  }
+  if (isVariableAssigned(param)) clearVariableAssignment(param)
+  else if (isVariablePickerOpen(param)) variablePickerParameter.value = null
+  else if (compatibleVariables(param).length) variablePickerParameter.value = param
 }
 
 function variableButtonDisabled(param) {
   if (parameterDisabled(param)) return true
   if (isVariableAssigned(param)) return false
-  if (isNamedTagTypeParameter(param)) return true
+  if (runtimeParameterDefinition(param)?.kind === 'named_tag_type') return true
   return compatibleVariables(param).length === 0
 }
 
@@ -466,11 +443,11 @@ function variableButtonTitle(param) {
   if (isControlledParameter(param)) return controlledReason(param)
   if (isEditingDisabled.value) return 'Reset the simulation to edit protocol parameters'
   if (isVariableAssigned(param)) return 'Use a direct value'
-  if (isNamedTagTypeParameter(param)) {
+  if (runtimeParameterDefinition(param)?.kind === 'named_tag_type') {
     return 'Named tag type parameters cannot use Variables yet'
   }
   if (isVariablePickerOpen(param)) return 'Cancel choosing a variable'
-  if (compatibleVariables(param).length === 0) {
+  if (!compatibleVariables(param).length) {
     return props.variables.length === 0
       ? 'Create a compatible variable in the Variables tab first'
       : 'No variables have a type supported by this parameter'
@@ -489,9 +466,9 @@ watch(() => props.protocol, () => {
 })
 
 watchEffect(() => {
-  filteredParameters.value.forEach(initializeNullableNamedTagParameter)
+  filteredParameters.value.forEach(initializeParameter)
   const param = variablePickerParameter.value
-  if (param && (parameterDisabled(param) || compatibleVariables(param).length === 0)) {
+  if (param && (parameterDisabled(param) || !compatibleVariables(param).length)) {
     variablePickerParameter.value = null
   }
 })
@@ -504,48 +481,38 @@ watchEffect(() => {
   gap: 4px;
 }
 
-.param-item {
-  border-bottom: none;
-}
-
 .param-item:not(:last-child) {
   border-bottom: solid 1px #ccc;
 }
 
 .param-item-row {
   display: flex;
-  padding: 0px 0px 3px;
   gap: 10px;
+  padding: 0 0 3px;
 }
 
 .param-name {
-  font-weight: 600;
-  color: #666;
   width: 50%;
+  color: #666;
+  font-weight: 600;
   cursor: default;
 }
 
 .param-value {
-  font-weight: 400;
-  color: #000;
-  text-align: right;
-  flex: 1;
   display: flex;
-  justify-content: end;
-  align-items: center;
+  flex: 1;
   min-width: 0;
-}
-
-.param-value :deep(input[type="text"]) {
-  width: 60%;
+  align-items: center;
+  justify-content: flex-end;
+  color: #000;
+  font-weight: 400;
   text-align: right;
-  padding: 0px 10px;
 }
 
+.param-value :deep(input[type="text"]),
 .param-value :deep(input[type="number"]) {
   width: 60%;
   text-align: right;
-  padding: 0px 0px;
 }
 
 .param-value :deep(.code-value-input) {
@@ -553,12 +520,12 @@ watchEffect(() => {
 }
 
 .complexTypeSelector {
+  max-width: 125px;
+  height: 18px;
+  padding: 0 1px;
+  border-radius: 4px;
   background: #e0dbf6;
   font-size: 0.8rem;
-  padding: 0px 1px;
-  border-radius: 4px;
-  max-width: 65px;
-  height: 16px;
 }
 
 .grayed-parameter {
@@ -566,8 +533,8 @@ watchEffect(() => {
 }
 
 .columnParamRow {
-  flex-direction: column;
   position: relative;
+  flex-direction: column;
 }
 
 .columnParamRow .param-value {
@@ -581,13 +548,8 @@ watchEffect(() => {
 }
 
 .noInteraction {
-  pointer-events: none;
   opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.param-value :deep(input::placeholder) {
-  font-size: 0.85em;
+  pointer-events: none;
 }
 
 .unknown-type-indicator {
@@ -596,9 +558,17 @@ watchEffect(() => {
   color: #f00;
 }
 
-.variable-assignment {
+.variable-assignment,
+.variable-assignment-control {
   display: flex;
   width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.variable-assignment-selector {
+  display: flex;
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
@@ -612,10 +582,10 @@ watchEffect(() => {
 }
 
 .variable-binding-control {
-  flex: 0 0 25px;
+  display: inline-flex;
   width: 25px;
   height: 25px;
-  display: inline-flex;
+  flex: 0 0 25px;
 }
 
 .variable-binding-button {
@@ -648,5 +618,10 @@ watchEffect(() => {
   margin: 0;
   color: var(--app-color-text-muted);
   font-size: 0.85rem;
+}
+
+.unsupported-parameter-value {
+  color: var(--app-color-text-muted);
+  font-size: 0.8rem;
 }
 </style>

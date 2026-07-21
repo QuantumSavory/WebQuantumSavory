@@ -1,5 +1,5 @@
 """Find a parser exception embedded in Julia's `:error`/`:incomplete` AST."""
-function _function_source_parse_error(parsed)
+function _complete_source_parse_error(parsed)
     parsed isa Expr || return nothing
     if parsed.head in (:error, :incomplete)
         exception = findfirst(argument -> argument isa Exception, parsed.args)
@@ -7,16 +7,16 @@ function _function_source_parse_error(parsed)
     end
 
     for argument in parsed.args
-        exception = _function_source_parse_error(argument)
+        exception = _complete_source_parse_error(argument)
         exception === nothing || return exception
     end
     return nothing
 end
 
-"""Parse all expressions in a custom-function source as one scoped block."""
-function _parse_function_source(source::AbstractString)
+"""Parse every statement in Julia source and return one scoped expression."""
+function _parse_complete_source(source::AbstractString)
     parsed = Meta.parseall(String(source))
-    parse_error = _function_source_parse_error(parsed)
+    parse_error = _complete_source_parse_error(parsed)
     parse_error === nothing || throw(parse_error)
 
     if !(parsed isa Expr && parsed.head === :toplevel)
@@ -39,6 +39,21 @@ function _parse_function_source(source::AbstractString)
 end
 
 """
+Evaluate complete Julia source in a fresh-module-compatible scope.
+
+`transform` may wrap the parsed block in assignment-specific lexical context.
+Callers remain responsible for enforcing their result contract.
+"""
+function _evaluate_complete_source(
+    source::AbstractString;
+    evaluation_module::Module=Module(),
+    transform::Function=identity,
+)
+    parsed = _parse_complete_source(source)
+    return Base.eval(evaluation_module, transform(parsed))
+end
+
+"""
 Evaluate custom-function source and require the resulting value to satisfy the
 `Function` contract used by QuantumSavory protocol parameters.
 
@@ -50,8 +65,11 @@ function _evaluate_function_source(
     evaluation_module::Module=Module(),
     transform::Function=identity,
 )
-    parsed = _parse_function_source(source)
-    value = Base.eval(evaluation_module, transform(parsed))
+    value = _evaluate_complete_source(
+        source;
+        evaluation_module,
+        transform,
+    )
 
     if !(value isa Function)
         throw(ArgumentError(
@@ -82,6 +100,40 @@ end
 """A reference from a protocol parameter to a global [`Variable`](@ref)."""
 struct VariableReference
     id::String
+end
+
+"""A persisted Julia numeric expression with an authoritative base numeric type."""
+struct NumericExpression
+    source::String
+end
+
+const NUMERIC_EXPRESSION_KIND = "numeric_expression"
+const NUMERIC_EXPRESSION_TARGETS = ("Float64", "Int64")
+const NUMERIC_EXPRESSION_PLACEMENTS = ("node", "edge", "floating", "variable")
+
+"""Parse the exact persisted numeric-expression tag, if present."""
+function _parse_numeric_expression(value; context::String="Value")
+    _is_object_like(value) || return nothing
+    get(value, "kind", nothing) == NUMERIC_EXPRESSION_KIND || return nothing
+
+    fields = Set(string(key) for key in keys(value))
+    expected = Set(("kind", "source"))
+    fields == expected || throw(validation_error(
+        "$context numeric expression must contain exactly 'kind' and 'source'",
+        Dict{String,Any}(
+            "expected_fields" => sort!(collect(expected)),
+            "received_fields" => sort!(collect(fields)),
+        ),
+    ))
+
+    source = get(value, "source", nothing)
+    source isa AbstractString || throw(validation_error(
+        "$context numeric expression field 'source' must be a string",
+    ))
+    isempty(strip(source)) && throw(validation_error(
+        "$context numeric expression field 'source' must not be blank",
+    ))
+    return NumericExpression(String(source))
 end
 
 """
@@ -129,75 +181,211 @@ struct _EdgeFunctionContext
     node_b::Int
 end
 
+const _ALL_NUMERIC_CONTEXT_BINDINGS = Set((
+    :nodeid,
+    :self,
+    :length,
+    :delay,
+    :refractive_index,
+    :node_a,
+    :node_b,
+))
+
+function _lowering_error(expression::Expr)
+    detail = isempty(expression.args) ? "Julia lowering failed" : first(expression.args)
+    detail isa Exception && throw(detail)
+    throw(ErrorException(string(detail)))
+end
+
+"""
+Collect assignment-context globals resolved by Julia's lowering pass.
+
+This inspects only globals belonging to the fresh evaluation module. Local
+bindings, keyword labels, property names, and hygienic macro identifiers have
+already been resolved by Julia. `@isdefined` lowers to `Core.isdefinedglobal`
+without a separate `GlobalRef` for the queried name, so recognize that call
+explicitly. A lowered error is never accepted as a deferred expression.
+"""
+function _lowered_numeric_context_bindings(lowered, evaluation_module::Module)
+    references = Set{Symbol}()
+    children(expression) = expression isa Core.CodeInfo ? expression.code :
+        expression isa Expr ? expression.args : ()
+    quoted_symbol(value) = value isa QuoteNode ? value.value : value
+
+    function assigned_global(expression)
+        expression isa Expr || return nothing
+        if expression.head === :call && length(expression.args) >= 3 &&
+           first(expression.args) === GlobalRef(Base, :setglobal!) &&
+           expression.args[2] === evaluation_module
+            name = quoted_symbol(expression.args[3])
+            return name isa Symbol ? name : nothing
+        end
+        target = expression.head in (:const, :method) && !isempty(expression.args) ?
+            first(expression.args) : nothing
+        return target isa GlobalRef && target.mod === evaluation_module ? target.name : nothing
+    end
+
+    assigned = Set{Symbol}()
+    function collect_assignments(expression)
+        name = assigned_global(expression)
+        name === nothing || push!(assigned, name)
+        foreach(collect_assignments, children(expression))
+    end
+    collect_assignments(lowered)
+
+    function visit(expression)
+        if expression isa GlobalRef
+            expression.mod === evaluation_module &&
+                expression.name in _ALL_NUMERIC_CONTEXT_BINDINGS &&
+                !(expression.name in assigned) &&
+                push!(references, expression.name)
+        elseif expression isa Expr
+            expression.head === :error && _lowering_error(expression)
+            if expression.head === :call && length(expression.args) >= 3 &&
+               first(expression.args) === GlobalRef(Core, :isdefinedglobal) &&
+               expression.args[2] === evaluation_module
+                name = quoted_symbol(expression.args[3])
+                name isa Symbol && name in _ALL_NUMERIC_CONTEXT_BINDINGS &&
+                    !(name in assigned) &&
+                    push!(references, name)
+            end
+        end
+        foreach(visit, children(expression))
+    end
+
+    visit(lowered)
+    return references
+end
+
 """Build the shared one-based node-name lookup from validated node order."""
 function _node_name_to_index(nodes)::Dict{String,Int}
     return Dict{String,Int}(
-        string(node["name"]) => index for (index, node) in enumerate(nodes)
+        (node isa AbstractString ? String(node) : string(node["name"])) => index
+        for (index, node) in enumerate(nodes)
     )
 end
 
 """Create the strictly typed `nodeid` lookup captured by a custom function."""
-function _nodeid_resolver(node_name_to_index::Dict{String,Int})
-    function nodeid(name::String)::Int
-        return node_name_to_index[name]
-    end
+_nodeid_resolver(node_name_to_index::Dict{String,Int}) =
+    (name::String) -> node_name_to_index[name]
 
-    return nodeid
-end
-
-"""Wrap parsed function code around the supplied lexical context bindings."""
-function _function_context_expression(
+"""Wrap parsed Julia source around the supplied lexical context bindings."""
+function _source_context_expression(
     parsed,
-    nodeid::Function,
+    nodeid::Union{Nothing,Function},
     self_node_index::Union{Nothing,Int},
     edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
 )
-    if edge_context === nothing && self_node_index === nothing
-        return :(let nodeid = $(QuoteNode(nodeid))
-            $parsed
-        end)
-    elseif edge_context === nothing
-        return :(let nodeid = $(QuoteNode(nodeid)), self = $self_node_index
-            $parsed
-        end)
-    elseif self_node_index === nothing
-        return :(let
-            nodeid = $(QuoteNode(nodeid))
+    has_assignment_context = edge_context !== nothing || self_node_index !== nothing
+    nodeid === nothing && !has_assignment_context && return parsed
+    if nodeid === nothing
+        throw(ArgumentError("Numeric-expression context values require a nodeid resolver"))
+    end
+
+    body = parsed
+    if edge_context !== nothing
+        body = :(let
             length = $(edge_context.distance_meters)
             delay = $(edge_context.delay_seconds)
             refractive_index = $(edge_context.refractive_index)
             node_a = $(edge_context.node_a)
             node_b = $(edge_context.node_b)
-            $parsed
+            $body
         end)
     end
-
-    return :(let
-        nodeid = $(QuoteNode(nodeid))
-        self = $self_node_index
-        length = $(edge_context.distance_meters)
-        delay = $(edge_context.delay_seconds)
-        refractive_index = $(edge_context.refractive_index)
-        node_a = $(edge_context.node_a)
-        node_b = $(edge_context.node_b)
-        $parsed
-    end)
+    self_node_index === nothing || (body = :(let self = $self_node_index; $body; end))
+    return :(let nodeid = $(QuoteNode(nodeid)); $body; end)
 end
 
-"""Wrap parsed function code in its supported lexical runtime context."""
-function _contextual_function_expression(
-    parsed,
-    node_name_to_index::Dict{String,Int},
-    self_node_index::Union{Nothing,Int},
-    edge_context::Union{Nothing,_EdgeFunctionContext},
+"""Return stable lexical values for validation before concrete assignment."""
+function _representative_source_context(placement::AbstractString)
+    placement = String(placement)
+    placement in ("node", "edge", "floating", "variable") ||
+        throw(ArgumentError(
+            "Source placement must be 'node', 'edge', 'floating', or 'variable'",
+        ))
+
+    representative_nodeid(::String)::Int = 1
+    self_node_index = placement in ("node", "variable") ? 1 : nothing
+    edge_context = placement in ("edge", "variable") ?
+        _EdgeFunctionContext(1.0, 2.0, 1.5, 1, 2) : nothing
+    return (; nodeid=representative_nodeid, self_node_index, edge_context)
+end
+
+"""Return the one authoritative numeric target represented by a Julia type."""
+function _numeric_expression_target(raw_type)
+    members = try
+        Base.uniontypes(raw_type)
+    catch
+        Any[raw_type]
+    end
+    targets = unique(filter(
+        target -> target in NUMERIC_EXPRESSION_TARGETS,
+        string.(members),
+    ))
+    return length(targets) == 1 ? only(targets) : nothing
+end
+
+function _cast_numeric_expression_result(
+    value,
+    target_type::AbstractString;
+    minimum=nothing,
+    maximum=nothing,
 )
-    return _function_context_expression(
-        parsed,
-        _nodeid_resolver(node_name_to_index),
-        self_node_index,
-        edge_context,
+    target = String(target_type)
+    target in NUMERIC_EXPRESSION_TARGETS || throw(ArgumentError(
+        "Numeric expression target type must be 'Float64' or 'Int64'",
+    ))
+    value isa Real && !(value isa Bool) || throw(ArgumentError(
+        "Numeric expression must evaluate to a real number; got $(typeof(value))",
+    ))
+
+    cast_value = target == "Float64" ? Float64(value) : Int64(value)
+    if cast_value isa AbstractFloat && !isfinite(cast_value)
+        throw(ArgumentError("Numeric expression must evaluate to a finite Float64"))
+    end
+    if minimum !== nothing && cast_value < minimum
+        throw(ArgumentError("Numeric expression result must be at least $minimum"))
+    end
+    if maximum !== nothing && cast_value > maximum
+        throw(ArgumentError("Numeric expression result must be at most $maximum"))
+    end
+    return cast_value
+end
+
+"""Evaluate and cast numeric source in the assignment's fresh lexical context."""
+function _evaluate_numeric_expression_source(
+    source::AbstractString,
+    target_type::AbstractString;
+    node_name_to_index::Union{Nothing,Dict{String,Int}}=nothing,
+    self_node_index::Union{Nothing,Int}=nothing,
+    edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
+    minimum=nothing,
+    maximum=nothing,
+)
+    require_unsafe_code_evaluation()
+    parsed = _parse_complete_source(source)
+    transform = if node_name_to_index === nothing
+        identity
+    else
+        parsed -> _source_context_expression(
+            parsed,
+            _nodeid_resolver(node_name_to_index),
+            self_node_index,
+            edge_context,
+        )
+    end
+    value = Base.eval(Module(), transform(parsed))
+    return _cast_numeric_expression_result(
+        value,
+        target_type;
+        minimum,
+        maximum,
     )
 end
+
+"""Serialize a cast numeric result without JSON number precision loss."""
+_numeric_expression_result_string(value::Union{Float64,Int64}) = repr(value)
 
 """
 Create a Lambda from a string representation in a temporary module.
@@ -219,9 +407,9 @@ function create_lambda(
     try
         value = _evaluate_function_source(
             lambda_string;
-            transform=parsed -> _contextual_function_expression(
+            transform=parsed -> _source_context_expression(
                 parsed,
-                node_name_to_index,
+                _nodeid_resolver(node_name_to_index),
                 self_node_index,
                 edge_context,
             ),

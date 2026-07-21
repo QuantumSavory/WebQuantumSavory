@@ -123,6 +123,7 @@
               :protocol="entanglerProtocol"
               category="edge"
               :variables="variables"
+              template
             />
           </div>
         </div>
@@ -192,6 +193,7 @@
                 category="node"
                 :variables="variables"
                 :controlled-parameters="controlledSwapperParameters"
+                template
               />
             </div>
           </template>
@@ -224,6 +226,7 @@
               :protocol="trackerProtocol"
               category="node"
               :variables="variables"
+              template
               empty-text="This protocol currently has no configurable constructor parameters."
             />
           </div>
@@ -418,23 +421,7 @@ function currentOptions() {
 }
 
 const generatorValidation = computed(() => validateRepeaterChain(net.value, currentOptions()))
-const constructorError = computed(() => {
-  const enabledProtocols = [
-    form.replaceEntangler ? entanglerProtocol.value : null,
-    form.replaceSwapper ? swapperProtocol.value : null,
-    form.replaceTracker ? trackerProtocol.value : null
-  ].filter(Boolean)
-  return enabledProtocols.some(protocol => (
-    protocol.parameters?.some(parameter => !!parameter.error)
-  ))
-    ? 'Resolve the constructor validation error before generating the chain.'
-    : ''
-})
-const validation = computed(() => (
-  constructorError.value
-    ? { valid: false, error: constructorError.value }
-    : generatorValidation.value
-))
+const validation = computed(() => generatorValidation.value)
 const validationMessage = computed(() => {
   const started = form.startNodeId
     || form.endNodeId

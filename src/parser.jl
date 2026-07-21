@@ -255,6 +255,118 @@ function _required_nonempty_string(object, field::String, context::String)
   return value
 end
 
+function _require_exact_object_fields(
+  object,
+  required_fields,
+  optional_fields=();
+  context::String,
+)
+  _is_object_like(object) || throw(validation_error("$context must be an object"))
+  received = Set(string(key) for key in keys(object))
+  required = Set(String.(required_fields))
+  allowed = union(required, Set(String.(optional_fields)))
+  issubset(required, received) && issubset(received, allowed) ||
+    throw(validation_error("$context fields do not match the request schema"))
+  return object
+end
+
+function _numeric_context_node_names(context_object, context::String)
+  raw_names = context_object["node_names"]
+  raw_names isa AbstractVector && all(name -> name isa AbstractString, raw_names) ||
+    throw(validation_error(
+      "$context field 'node_names' must be an array of strings",
+    ))
+  return String.(raw_names)
+end
+
+function _numeric_context_node_index(
+  context_object,
+  field::String,
+  node_names,
+  context::String,
+)
+  raw_value = context_object[field]
+  raw_value isa Integer && !(raw_value isa Bool) || throw(validation_error(
+    "$context field '$field' must be a one-based integer node index",
+  ))
+  value = try
+    Int(raw_value)
+  catch
+    throw(validation_error(
+      "$context field '$field' must be representable as an integer node index",
+    ))
+  end
+  1 <= value <= length(node_names) || throw(validation_error(
+    "$context field '$field' must refer to an entry in 'node_names'",
+  ))
+  return value
+end
+
+"""
+Validate the optional concrete context accepted by `/test_numeric_expression`.
+
+Omitted context identifies a template validation request. Variables never
+accept concrete context because their assignment placement is not yet known.
+"""
+function _parse_numeric_expression_test_request(payload)
+  _require_exact_object_fields(
+    payload,
+    ("expression", "target_type", "placement"),
+    ("context",);
+    context="Numeric expression request",
+  )
+  expression = _required_nonempty_string(payload, "expression", "Numeric expression request")
+  target_type = _required_nonempty_string(payload, "target_type", "Numeric expression request")
+  target_type in NUMERIC_EXPRESSION_TARGETS || throw(validation_error(
+    "Field 'target_type' must be 'Float64' or 'Int64'",
+  ))
+  placement = _required_nonempty_string(payload, "placement", "Numeric expression request")
+  placement in NUMERIC_EXPRESSION_PLACEMENTS || throw(validation_error(
+    "Field 'placement' must be 'node', 'edge', 'floating', or 'variable'",
+  ))
+
+  haskey(payload, "context") || return (; expression, target_type, placement, context=nothing)
+  placement == "variable" && throw(validation_error(
+    "Field 'context' must be omitted for variable numeric expressions",
+  ))
+  raw_context = payload["context"]
+  context_name = "$(uppercasefirst(placement)) numeric expression context"
+  fields = placement == "floating" ? ("node_names",) :
+    placement == "node" ? ("node_names", "self") :
+    ("node_names", "length", "delay", "refractive_index", "node_a", "node_b")
+  _require_exact_object_fields(
+    raw_context,
+    fields;
+    context=context_name,
+  )
+  node_names = _numeric_context_node_names(raw_context, context_name)
+  placement == "floating" &&
+    return (; expression, target_type, placement, context=(; node_names))
+  if placement == "node"
+    self = _numeric_context_node_index(raw_context, "self", node_names, context_name)
+    return (; expression, target_type, placement, context=(; node_names, self))
+  end
+
+  node_a = _numeric_context_node_index(raw_context, "node_a", node_names, context_name)
+  node_b = _numeric_context_node_index(raw_context, "node_b", node_names, context_name)
+  distance_meters = _physical_edge_number(raw_context, "length", "field 'length'", context_name)
+  delay_seconds = _physical_edge_number(raw_context, "delay", "field 'delay'", context_name)
+  refractive_index = _physical_edge_number(
+    raw_context, "refractive_index", "field 'refractive_index'", context_name;
+    positive=true,
+  )
+  physical_values = (distance_meters, delay_seconds, refractive_index)
+  all(value -> value === nothing, physical_values) ||
+    all(value -> value !== nothing, physical_values) ||
+    throw(validation_error(
+      "$context_name physical fields must either all be numbers or all be null",
+    ))
+  edge_context = _EdgeFunctionContext(
+    distance_meters, delay_seconds, refractive_index, node_a, node_b,
+  )
+  return (; expression, target_type, placement, context=(; node_names, edge_context))
+end
+
 """
 Parse and validate top-level simulation variable definitions.
 
@@ -300,6 +412,14 @@ function _parse_variables(payload)
       "$context field 'value' must not be null for type '$variable_type'",
       Dict{String,Any}("variable_id" => id, "variable_type" => variable_type),
     ))
+    numeric_expression = _parse_numeric_expression(value; context=context)
+    if numeric_expression !== nothing &&
+       !(variable_type in NUMERIC_EXPRESSION_TARGETS)
+      throw(validation_error(
+        "$context numeric expression requires variable type 'Float64' or 'Int64'",
+        Dict{String,Any}("variable_id" => id, "variable_type" => variable_type),
+      ))
+    end
 
     variables[id] = Variable(id, name, variable_type, value)
     push!(variable_names, name)
@@ -363,13 +483,39 @@ function _validate_variable_references(payload, variables)
     _is_object_like(protocol) || continue
     parameters = get(protocol, "parameters", Any[])
     parameters isa AbstractVector || continue
+    raw_protocol_type = get(protocol, "type", nothing)
+    protocol_type = raw_protocol_type isa AbstractString ?
+      _resolve_protocol_type_from_string(raw_protocol_type) : nothing
+    declared_parameter_types = protocol_type === nothing ?
+      Dict{String,Any}() : _protocol_constructor_parameter_types(protocol_type)
 
     for parameter in parameters
       _is_object_like(parameter) || continue
       haskey(parameter, "value") || continue
       parameter_name = string(get(parameter, "name", "unknown"))
       context = "$location parameter '$parameter_name'"
-      reference = _parse_variable_reference(parameter["value"]; context=context)
+      constructor_name = get(PROTOCOL_KEYWORD_MAPPINGS, parameter_name, parameter_name)
+      declared_type = get(declared_parameter_types, constructor_name, nothing)
+      value = parameter["value"]
+
+      numeric_expression = _parse_numeric_expression(value; context=context)
+      if numeric_expression !== nothing
+        target = declared_type === nothing ? nothing :
+          _numeric_expression_target_for_parameter(
+            declared_type,
+            get(parameter, "type", nothing),
+          )
+        target === nothing && throw(validation_error(
+          "$context does not accept a numeric expression",
+          Dict{String,Any}(
+            "parameter_name" => parameter_name,
+            "protocol_type" => string(raw_protocol_type),
+          ),
+        ))
+        continue
+      end
+
+      reference = _parse_variable_reference(value; context=context)
       reference === nothing && continue
       haskey(variables, reference.id) || throw(validation_error(
         "Unknown variable reference: '$(reference.id)'",
@@ -379,6 +525,23 @@ function _validate_variable_references(payload, variables)
           "location" => location,
         ),
       ))
+      variable = variables[reference.id]
+      variable_expression = _parse_numeric_expression(
+        variable.value;
+        context="Variable '$(variable.name)'",
+      )
+      if variable_expression !== nothing
+        target = declared_type === nothing ? nothing :
+          _numeric_expression_target_for_parameter(declared_type, variable.type)
+        target == variable.type || throw(validation_error(
+          "Variable '$(variable.name)' numeric expression is incompatible with $context",
+          Dict{String,Any}(
+            "variable_id" => variable.id,
+            "variable_type" => variable.type,
+            "parameter_name" => parameter_name,
+          ),
+        ))
+      end
     end
   end
 
@@ -466,6 +629,53 @@ function _protocol_constructor_parameter_types(protocol_type)
     haskey(reflected_fields, keyword) && (declared[keyword] = reflected_fields[keyword])
   end
   return declared
+end
+
+"""Return documented constructor metadata keyed by the accepted wire keyword."""
+function _protocol_constructor_parameter_metadata(protocol_type)
+  metadata = Dict(
+    string(parameter.field) => parameter
+    for parameter in QuantumSavory.constructor_metadata(protocol_type)
+  )
+  for (wire_name, constructor_name) in PROTOCOL_KEYWORD_MAPPINGS
+    haskey(metadata, wire_name) &&
+      !haskey(metadata, constructor_name) &&
+      (metadata[constructor_name] = metadata[wire_name])
+  end
+  return metadata
+end
+
+function _constructor_numeric_bound(metadata, field::Symbol)
+  metadata === nothing && return nothing
+  field in propertynames(metadata) || return nothing
+  value = getproperty(metadata, field)
+  value === nothing && return nothing
+  value isa Real && !(value isa Bool) || throw(server_error(
+    "Protocol constructor numeric bound is not a real number",
+    Dict{String,Any}("field" => string(field), "value_type" => string(typeof(value))),
+  ))
+  number = Float64(value)
+  isfinite(number) || throw(server_error(
+    "Protocol constructor numeric bound must be finite",
+    Dict{String,Any}("field" => string(field)),
+  ))
+  return number
+end
+
+function _numeric_expression_target_for_parameter(declared_type, client_type=nothing)
+  members = try
+    Base.uniontypes(declared_type)
+  catch
+    Any[declared_type]
+  end
+  member_targets = Set(
+    string(member) for member in members
+    if string(member) in NUMERIC_EXPRESSION_TARGETS
+  )
+  if client_type isa AbstractString && String(client_type) in member_targets
+    return String(client_type)
+  end
+  return length(member_targets) == 1 ? only(member_targets) : nothing
 end
 
 """Choose a value-compatible member while staying inside an authoritative union type."""
@@ -962,6 +1172,14 @@ function _instantiate_noise(noise_def)
         @warn "Noise parameter has no value, skipping" parameter_name=name
         continue
       end
+      numeric_expression = _parse_numeric_expression(
+        value;
+        context="Background noise parameter '$original_name'",
+      )
+      numeric_expression === nothing || throw(validation_error(
+        "Background noise parameter '$original_name' does not support numeric expressions",
+        Dict{String,Any}("parameter_name" => original_name),
+      ))
 
       ptype = get(param_types, original_name, "Any")
 
@@ -1148,6 +1366,43 @@ function _handle_symbolic_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, val
   return false
 end
 
+function _handle_numeric_expression_parameter!(
+  kwargs::Dict{Symbol,Any},
+  name::Symbol,
+  target_type::String,
+  expression::NumericExpression,
+  ctx;
+  minimum=nothing,
+  maximum=nothing,
+)
+  node_name_to_index = get(
+    ctx,
+    NODE_NAME_TO_INDEX_CONTEXT_KEY,
+    Dict{String,Int}(),
+  )
+  try
+    kwargs[name] = _evaluate_numeric_expression_source(
+      expression.source,
+      target_type;
+      node_name_to_index,
+      self_node_index=get(ctx, :node, nothing),
+      edge_context=get(ctx, EDGE_FUNCTION_CONTEXT_KEY, nothing),
+      minimum,
+      maximum,
+    )
+    return true
+  catch error
+    error isa APIError && rethrow(error)
+    throw(validation_error(
+      "Failed to evaluate numeric expression for parameter '$(name)'",
+      evaluation_failure_details(error, Dict{String,Any}(
+        "parameter_name" => string(name),
+        "target_type" => target_type,
+      )),
+    ))
+  end
+end
+
 """
 Handle regular parameter conversion
 """
@@ -1156,6 +1411,16 @@ function _handle_regular_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, ptyp
   if ok
     kwargs[name] = converted
     return true
+  end
+
+  # Numeric Julia source is accepted only through the explicit tagged
+  # representation. Untagged strings remain numeric literals and never enter
+  # the fallback evaluator.
+  if ptype in NUMERIC_EXPRESSION_TARGETS || (
+    startswith(ptype, "Union{") &&
+    occursin(r"(^|[,{ ])(Float64|Int64)([}, ]|$)", ptype)
+  )
+    return false
   end
   
   # For complex types, try eval with value::type pattern
@@ -1187,7 +1452,15 @@ function _special_parameter_type(p_raw_type)
 end
 
 """Convert and assign one concrete typed value to a protocol keyword."""
-function _handle_typed_parameter!(kwargs, name, p_raw_type, value, ctx, state=nothing)
+function _handle_typed_parameter!(
+  kwargs,
+  name,
+  p_raw_type,
+  value,
+  ctx,
+  state=nothing;
+  constructor_metadata=nothing,
+)
   ptype = p_raw_type === nothing ? "Any" : string(p_raw_type)
   special_type = _special_parameter_type(p_raw_type)
 
@@ -1197,6 +1470,26 @@ function _handle_typed_parameter!(kwargs, name, p_raw_type, value, ctx, state=no
       @log_event state Logging.Debug debug_msg
     else
       @debug debug_msg
+    end
+
+    numeric_expression = _parse_numeric_expression(
+      value;
+      context="Protocol parameter '$(name)'",
+    )
+    if numeric_expression !== nothing
+      target_type = _numeric_expression_target(p_raw_type)
+      target_type === nothing && throw(validation_error(
+        "Protocol parameter '$(name)' does not authoritatively accept a Float64 or Int64 expression",
+      ))
+      return _handle_numeric_expression_parameter!(
+        kwargs,
+        name,
+        target_type,
+        numeric_expression,
+        ctx;
+        minimum=_constructor_numeric_bound(constructor_metadata, :min),
+        maximum=_constructor_numeric_bound(constructor_metadata, :max),
+      )
     end
 
     if p_raw_type isa Type && value isa p_raw_type
@@ -1250,6 +1543,7 @@ function _instantiate_protocol(
   T === nothing && return nothing
 
   declared_parameter_types = _protocol_constructor_parameter_types(T)
+  constructor_parameter_metadata = _protocol_constructor_parameter_metadata(T)
 
   params = Vector{Any}(get(prot_def, "parameters", Any[]))
 
@@ -1295,6 +1589,7 @@ function _instantiate_protocol(
       ),
     ))
     declared_type = declared_parameter_types[constructor_name]
+    parameter_metadata = get(constructor_parameter_metadata, constructor_name, nothing)
     named_tag_semantics = _named_tag_parameter_semantics(declared_type)
 
     # AbstractTag type fields are a safe, catalog-backed protocol contract.
@@ -1339,7 +1634,34 @@ function _instantiate_protocol(
       )
       uses_default && continue
 
-      converted = _handle_typed_parameter!(kwargs, name, variable.type, variable.value, ctx, state)
+      variable_expression = _parse_numeric_expression(
+        variable.value;
+        context="Variable '$(variable.name)'",
+      )
+      if variable_expression !== nothing
+        target_type = _numeric_expression_target_for_parameter(
+          declared_type,
+          variable.type,
+        )
+        target_type == variable.type || throw(validation_error(
+          "Variable '$(variable.name)' numeric expression is incompatible with parameter '$original_name'",
+          Dict{String,Any}(
+            "variable_id" => variable.id,
+            "variable_type" => variable.type,
+            "parameter_name" => original_name,
+          ),
+        ))
+      end
+
+      converted = _handle_typed_parameter!(
+        kwargs,
+        name,
+        variable.type,
+        variable.value,
+        ctx,
+        state;
+        constructor_metadata=parameter_metadata,
+      )
       converted || throw(validation_error(
         "Failed to convert variable '$(variable.name)' for parameter '$original_name'",
         Dict{String,Any}(
@@ -1364,7 +1686,15 @@ function _instantiate_protocol(
       get(p, "type", nothing),
       value,
     )
-    _handle_typed_parameter!(kwargs, name, handling_type, value, ctx, state)
+    _handle_typed_parameter!(
+      kwargs,
+      name,
+      handling_type,
+      value,
+      ctx,
+      state;
+      constructor_metadata=parameter_metadata,
+    )
   end
 
   # Instantiate with all keyword arguments

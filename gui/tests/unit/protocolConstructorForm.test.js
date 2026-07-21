@@ -98,9 +98,8 @@ describe('ProtocolConstructorForm', () => {
       category: 'node'
     })
 
-    expect(wrapper.get('.param-name').attributes('data-tooltip')).toBe(
-      'Number of rounds.\n\n**Unsupported:** `UnknownType`'
-    )
+    expect(wrapper.get('.param-name').attributes('data-tooltip')).toBe('Number of rounds.')
+    expect(wrapper.find('.unknown-type-indicator').exists()).toBe(false)
   })
 
   it('renders an explicit empty constructor panel when no configurable fields remain', () => {
@@ -136,13 +135,14 @@ describe('ProtocolConstructorForm', () => {
       'Default',
       'QuantumSavory.Wildcard',
       'Int64',
-      'Predefined function',
-      'Custom function'
+      'Int64 Expression',
+      'Predefined Function',
+      'Custom Function'
     ])
 
     await typeSelector.setValue('Function')
     expect(wrapper.get('.functionSelector').findAll('option').map(option => option.text())).toEqual([
-      'Default',
+      'Select a function',
       'identity',
       '<(self)',
       '>(self)'
@@ -150,7 +150,7 @@ describe('ProtocolConstructorForm', () => {
 
     await wrapper.setProps({ category: 'edge' })
     expect(wrapper.get('.functionSelector').findAll('option').map(option => option.text())).toEqual([
-      'Default',
+      'Select a function',
       'identity'
     ])
 
@@ -185,6 +185,123 @@ describe('ProtocolConstructorForm', () => {
     await wrapper.get('[aria-label="Use a direct value for rounds"]').trigger('click')
     expect(parameter.value).toBe(7)
     expect(wrapper.get('input[type="number"]').element.value).toBe('7')
+  })
+
+  it('links a semantic Symbolic variable through the authoritative Julia descriptor', async () => {
+    const symbolicType = 'SymbolicUtils.Symbolic{Real}'
+    api._config.value = {
+      protocolTypes: {
+        node: [{
+          type: PROTOCOL_TYPE,
+          group: 'node',
+          parameters: [{
+            field: 'observable',
+            type: symbolicType,
+            doc: 'A symbolic observable.',
+          }],
+        }],
+        edge: [],
+        floating: [],
+      },
+    }
+    const parameter = {
+      name: 'observable',
+      type: symbolicType,
+      selectedType: 'default',
+      value: null,
+    }
+    const variable = {
+      id: 'variable-state',
+      name: 'state',
+      type: 'Symbolic',
+      selectedType: 'Symbolic',
+      value: 'rho',
+    }
+    const wrapper = mountForm({
+      protocol: { type: PROTOCOL_TYPE, parameters: [parameter] },
+      category: 'node',
+      variables: [variable],
+    })
+
+    await wrapper.get('[aria-label="Set observable from a variable"]').trigger('click')
+    await wrapper.get('.variable-selector').setValue(variable.id)
+
+    expect(parameter.selectedType).toBe(symbolicType)
+    expect(parameter.value).toBeInstanceOf(VariableReference)
+  })
+
+  it('keeps a linked numeric parameter synchronized with the Variable input mode', async () => {
+    const parameter = {
+      name: 'rounds',
+      type: 'Int64',
+      selectedType: 'Int64',
+      value: new VariableReference('variable-rounds'),
+    }
+    const variable = {
+      id: 'variable-rounds',
+      name: 'rounds',
+      type: 'Int64',
+      selectedType: 'Int64',
+      value: 2,
+    }
+    const wrapper = mountForm({
+      protocol: { type: PROTOCOL_TYPE, parameters: [parameter] },
+      category: 'node',
+      variables: [variable],
+    })
+
+    await wrapper.setProps({
+      variables: [{
+        ...variable,
+        selectedType: 'expression:Int64',
+        value: { kind: 'numeric_expression', source: 'self + 1' },
+      }],
+    })
+    await nextTick()
+
+    expect(parameter.selectedType).toBe('expression:Int64')
+    expect(wrapper.get('[aria-label="Input option for rounds"]').element.value)
+      .toBe('expression:Int64')
+  })
+
+  it('restores a direct value after the authoritative linked draft is replaced', async () => {
+    const variable = { id: 'variable-rounds', name: 'rounds', type: 'Int64' }
+    const wrapper = mountForm({
+      protocol: {
+        type: PROTOCOL_TYPE,
+        parameters: [{ name: 'rounds', type: 'Int64', selectedType: 'Int64', value: 7 }],
+      },
+      category: 'node',
+      variables: [variable],
+    })
+
+    await wrapper.get('[aria-label="Set rounds from a variable"]').trigger('click')
+    await wrapper.get('.variable-selector').setValue(variable.id)
+    await wrapper.setProps({
+      protocol: {
+        type: PROTOCOL_TYPE,
+        parameters: [{
+          name: 'rounds',
+          type: 'Int64',
+          selectedType: 'Int64',
+          value: new VariableReference(variable.id),
+        }],
+      },
+      variables: [{
+        ...variable,
+        type: 'String',
+        selectedType: 'String',
+        value: 'incompatible',
+      }],
+    })
+    await nextTick()
+
+    expect(wrapper.get('.variable-selector').text()).toContain('Incompatible variable')
+    await wrapper.get('[aria-label="Use a direct value for rounds"]').trigger('click')
+    expect(wrapper.props('protocol').parameters[0]).toMatchObject({
+      selectedType: 'Int64',
+      value: 7,
+    })
   })
 
   it('visibly identifies strategy-controlled fields and disables every editing path', async () => {
@@ -296,31 +413,16 @@ describe('ProtocolConstructorForm', () => {
       parameterName: 'tag'
     })
 
-    const refreshedParameter = {
-      ...parameter,
-      selectedType: 'DataType',
-      value: null
-    }
+    const refreshedParameter = { ...parameter, selectedType: 'DataType', value: null }
     await wrapper.setProps({
       protocol: { type: ENTANGLER_TYPE, parameters: [refreshedParameter] }
     })
     await nextTick()
-    control = wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' })
     expect(refreshedParameter.selectedType).toBe('DataType')
-
-    control.vm.$emit('update:modelValue', NAMED_TAG_ID)
-    await nextTick()
-    expect(refreshedParameter.value).toBe(NAMED_TAG_ID)
-    expect(refreshedParameter.type).toEqual(['Nothing', 'DataType'])
-
-    await wrapper.setProps({ editingLocked: true })
-    expect(control.props('disabled')).toBe(true)
-    control.vm.$emit('update:modelValue', 'Example.Other.Tag')
-    await nextTick()
-    expect(refreshedParameter.value).toBe(NAMED_TAG_ID)
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
   })
 
-  it('keeps the old nullable-tag Default representation backward compatible', () => {
+  it('preserves an explicit empty nullable-tag branch for validation', () => {
     api._config.value = {
       protocolTypes: {
         node: [],
@@ -350,12 +452,12 @@ describe('ProtocolConstructorForm', () => {
       stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
     })
 
-    expect(parameter.selectedType).toBe('default')
-    expect(wrapper.get('.complexTypeSelector').element.value).toBe('default')
-    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
+    expect(parameter.selectedType).toBe('DataType')
+    expect(wrapper.get('.complexTypeSelector').element.value).toBe('DataType')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
   })
 
-  it('does not carry an empty Tag branch into another protocol with the same field name', async () => {
+  it('preserves an explicit empty Tag branch across protocol refreshes', async () => {
     const otherProtocolType = 'Example.OtherTagProtocol'
     const nullableTagParameter = {
       field: 'tag',
@@ -400,9 +502,9 @@ describe('ProtocolConstructorForm', () => {
     })
     await nextTick()
 
-    expect(otherParameter.selectedType).toBe('default')
-    expect(wrapper.get('.complexTypeSelector').element.value).toBe('default')
-    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(false)
+    expect(otherParameter.selectedType).toBe('DataType')
+    expect(wrapper.get('.complexTypeSelector').element.value).toBe('DataType')
+    expect(wrapper.findComponent({ name: 'NamedTagTypeAutocomplete' }).exists()).toBe(true)
   })
 
   it('uses non-nullable live Consumer metadata instead of a saved Any type', () => {
@@ -433,9 +535,11 @@ describe('ProtocolConstructorForm', () => {
       stubs: { NamedTagTypeAutocomplete: NamedTagTypeAutocompleteStub }
     })
 
-    expect(wrapper.find('.complexTypeSelector').exists()).toBe(false)
+    expect(wrapper.find('.complexTypeSelector').exists()).toBe(true)
+    expect(wrapper.get('.complexTypeSelector').findAll('option').map(option => option.text()))
+      .toEqual(['Default', 'Tag'])
     expect(wrapper.getComponent({ name: 'NamedTagTypeAutocomplete' }).props('includeDefault'))
-      .toBe(true)
+      .toBe(false)
     expect(wrapper.get('.param-item-row').classes()).not.toContain('grayed-parameter')
     expect(wrapper.find('.unknown-type-indicator').exists()).toBe(false)
   })
@@ -545,6 +649,24 @@ describe('ProtocolConstructorForm', () => {
 })
 
 describe('TypedValueInput disabled code values', () => {
+  it('does not commit empty explicit literal inputs', async () => {
+    const textParameter = { name: 'label', value: null }
+    const text = mount(TypedValueInput, {
+      props: { parameter: textParameter, type: 'String' }
+    })
+    await text.get('input[type="text"]').setValue('')
+    await text.get('input[type="text"]').trigger('change')
+    expect(text.emitted('commit')).toBeUndefined()
+
+    const numericParameter = { name: 'rounds', value: null }
+    const numeric = mount(TypedValueInput, {
+      props: { parameter: numericParameter, type: 'Int64' }
+    })
+    await numeric.get('input[type="number"]').setValue('')
+    await numeric.get('input[type="number"]').trigger('change')
+    expect(numeric.emitted('commit')).toBeUndefined()
+  })
+
   it('allows decimal Float64 constructor values without native step mismatch', async () => {
     const parameter = { name: 'success_prob', value: 0.35 }
     const wrapper = mount(TypedValueInput, {
@@ -635,6 +757,44 @@ describe('TypedValueInput disabled code values', () => {
     await wrapper.get('.validate-code-stub').trigger('click')
     await flushPromises()
     expect(parameter.error).toBe('```\n<transport> & "down"\n```')
+  })
+
+  it('blocks dirty and pending custom code until successful validation commits', async () => {
+    vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
+    let resolveValidation
+    vi.spyOn(api, 'validateFunction').mockImplementation(() => (
+      new Promise(resolve => { resolveValidation = resolve })
+    ))
+    const parameter = { name: 'nodeL', value: 'x -> true' }
+    const wrapper = mount(TypedValueInput, {
+      props: { parameter, type: 'Lambda', category: 'node' },
+      global: {
+        stubs: {
+          CodeEditorWithSymbols: {
+            props: ['modelValue', 'errorMessage'],
+            emits: ['update:modelValue', 'validate'],
+            template: `
+              <div>
+                <button class="edit-code-stub" @click="$emit('update:modelValue', 'x -> x < self')">Edit</button>
+                <button class="validate-code-stub" @click="$emit('validate')">Validate</button>
+              </div>
+            `
+          }
+        }
+      }
+    })
+
+    await wrapper.get('.edit-code-stub').trigger('click')
+    expect(parameter.value).toBe('x -> x < self')
+    expect(parameter.error).toBe('```\nValidate this code before continuing.\n```')
+    expect(wrapper.emitted('commit')).toBeUndefined()
+
+    await wrapper.get('.validate-code-stub').trigger('click')
+    expect(parameter.error).toBe('```\nCode validation is in progress.\n```')
+    resolveValidation({ success: true, results: {} })
+    await flushPromises()
+    expect(parameter).not.toHaveProperty('error')
+    expect(wrapper.emitted('commit')).toHaveLength(1)
   })
 })
 

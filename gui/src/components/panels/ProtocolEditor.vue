@@ -31,6 +31,7 @@
         :category="category"
         :variables="variables"
         :editing-locked="editingLocked"
+        :numeric-expression-context="numericExpressionContext"
         empty-text=""
         @commit="commitDraft"
       />
@@ -73,6 +74,10 @@ const props = defineProps({
   variables: {
     type: Array,
     default: () => []
+  },
+  numericExpressionContext: {
+    type: Object,
+    default: undefined
   }
 })
 const emit = defineEmits(['select', 'delete', 'update'])
