@@ -1185,13 +1185,13 @@ describe('DesignCommandService', () => {
         value: {
           name: 'contextual',
           type: 'Lambda',
-          value: 'values -> self + node_a + node_b + length + Base.length(values)',
+          value: 'values -> self + node_a + node_b + distance + length(values)',
         },
       }],
     })
     expect(validateCodeValue).toHaveBeenLastCalledWith(
       'Lambda',
-      'values -> self + node_a + node_b + length + Base.length(values)',
+      'values -> self + node_a + node_b + distance + length(values)',
       { placement: 'variable' },
     )
 
@@ -1199,12 +1199,12 @@ describe('DesignCommandService', () => {
       operations: [{
         kind: 'variables.update',
         variable_id: 'variable_context',
-        value: { value: 'values -> delay + refractive_index + Base.length(values)' },
+        value: { value: 'values -> delay + refractive_index + length(values)' },
       }],
     })
     expect(validateCodeValue).toHaveBeenLastCalledWith(
       'Lambda',
-      'values -> delay + refractive_index + Base.length(values)',
+      'values -> delay + refractive_index + length(values)',
       { placement: 'variable' },
     )
   })

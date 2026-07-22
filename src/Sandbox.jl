@@ -1,169 +1,260 @@
 module Sandbox
 
 using Latexify
-using Base
 using QuantumSavory
-using QuantumSavory.ProtocolZoo
-using ResumableFunctions
-using ConcurrentSim
-using ..WebQuantumSavory: NUMERIC_EXPRESSION_PLACEMENTS,
+using ..WebQuantumSavory: APIError,
+                          COMPARISON_CURRY_OPERATORS,
+                          EDGE_CONTEXT_DESCRIPTORS,
+                          EDGE_ENDPOINT_CONTEXT_DESCRIPTORS,
+                          NUMERIC_EXPRESSION_PLACEMENTS,
                           NUMERIC_EXPRESSION_TARGETS,
+                          SYMBOLIC_LATEX_MAX_BYTES,
+                          ValidatedExpression,
+                          _EdgeFunctionContext,
                           _cast_numeric_expression_result,
-                          _evaluate_function_source,
-                          _lowered_numeric_context_bindings,
                           _node_name_to_index,
                           _nodeid_resolver,
                           _numeric_expression_result_string,
-                          _parse_complete_source,
                           _representative_source_context,
-                          _source_context_expression,
-                          require_unsafe_code_evaluation
+                          _source_capability_value,
+                          require_unsafe_code_evaluation,
+                          validate_source_expression
 
-import Base: Meta
+const _NONBINDING_CAPABILITIES = Set{Symbol}((:&&, :||, :ternary))
 
-function _undefined_function_global(expression, evaluation_module::Module)
-    if expression isa GlobalRef
-        if expression.mod === evaluation_module &&
-           !isdefined(evaluation_module, expression.name)
-            return expression.name
-        end
-    elseif expression isa Expr
-        for argument in expression.args
-            undefined_name = _undefined_function_global(argument, evaluation_module)
-            undefined_name === nothing || return undefined_name
-        end
-    end
-
-    return nothing
-end
-
-"""Reject globals that a query predicate would fail to resolve when invoked."""
-function _validate_query_function_globals(
-    function_value::Function,
-    evaluation_module::Module,
+function _source_context_bindings(
+    nodeid::Union{Nothing,Function},
+    self_node_index::Union{Nothing,Int},
+    edge_context::Union{Nothing,_EdgeFunctionContext},
 )
-    for method in methods(function_value)
-        method.module === evaluation_module || continue
-        code_info = Base.uncompressed_ast(method)
-        for statement in code_info.code
-            undefined_name = _undefined_function_global(statement, evaluation_module)
-            undefined_name === nothing || throw(UndefVarError(undefined_name))
+    bindings = Dict{Symbol,Any}()
+    nodeid === nothing || (bindings[:nodeid] = nodeid)
+    self_node_index === nothing || (bindings[:self] = self_node_index)
+    if edge_context !== nothing
+        for descriptor in (EDGE_CONTEXT_DESCRIPTORS..., EDGE_ENDPOINT_CONTEXT_DESCRIPTORS...)
+            bindings[descriptor.binding] = getfield(edge_context, descriptor.field)
         end
     end
-
-    return function_value
+    return bindings
 end
 
 """
-Test Julia custom-function code in a fresh module.
+The sole server-process boundary for evaluating validated user source.
 
-This executes code in the server process. A fresh module isolates names; it is
-not a security sandbox. `placement` supplies representative lexical context;
-omitting it uses the edge/floating context where `nodeid` is available and
-`self` and edge-assignment values are not. The `variable` placement supplies
-both node and edge bindings because a variable's assignments are deferred. The
-`query` placement validates tag-query predicates without injecting protocol
-context, matching their runtime evaluation path.
+The validated expression subtree is embedded unchanged in a server-owned
+lexical wrapper. The fresh module receives no imports or user-controlled global
+bindings, and `Core.eval` is called exactly once.
+"""
+function _evaluate_validated_expression(
+    validated::ValidatedExpression;
+    context::Dict{Symbol,Any}=Dict{Symbol,Any}(),
+)
+    require_unsafe_code_evaluation()
+    evaluation_module = Module(gensym(:WQSRestricted), false, false)
+    function_name = validated.function_name
+    function_name === nothing || !isdefined(evaluation_module, function_name) ||
+        error("Fresh restricted module unexpectedly contains '$function_name'")
 
-Returns a tuple of (success::Bool, results::Dict, error::Union{Nothing, Exception})
+    assignments = Any[]
+    for capability in validated.referenced_capabilities
+        capability in _NONBINDING_CAPABILITIES && continue
+        value = _source_capability_value(validated, capability)
+        push!(assignments, Expr(:(=), capability, QuoteNode(value)))
+    end
+    for name in validated.referenced_contexts
+        haskey(context, name) || throw(ArgumentError(
+            "Validated source requires missing context binding '$name'",
+        ))
+        push!(assignments, Expr(:(=), name, QuoteNode(context[name])))
+    end
+
+    wrapper = Expr(:let, Expr(:block, assignments...), validated.expression)
+    value = Core.eval(evaluation_module, wrapper)
+    function_name === nothing || !isdefined(evaluation_module, function_name) ||
+        error("Restricted short-form definition escaped its lexical scope")
+    return value
+end
+
+function _function_result(value)
+    value isa Function || throw(ArgumentError(
+        "Custom Function source must evaluate to a Julia Function; got $(typeof(value))",
+    ))
+    return value
+end
+
+function _symbolic_result(value)
+    root = QuantumSavory.SymQObj
+    value isa root || throw(ArgumentError(
+        "Symbolic source must evaluate to an authoritative QuantumSavory SymQObj; got $(typeof(value))",
+    ))
+    return value
+end
+
+function _placement_context(
+    placement::AbstractString;
+    nodeid::Union{Nothing,Function}=nothing,
+    self_node_index::Union{Nothing,Int}=nothing,
+    edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
+)
+    placement = String(placement)
+    if placement == "query"
+        return Dict{Symbol,Any}()
+    end
+    return _source_context_bindings(nodeid, self_node_index, edge_context)
+end
+
+"""Evaluate one Custom Function using concrete assignment context."""
+function evaluate_function_expression(
+    source::AbstractString;
+    placement::AbstractString="floating",
+    nodeid::Union{Nothing,Function}=nothing,
+    self_node_index::Union{Nothing,Int}=nothing,
+    edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
+)
+    require_unsafe_code_evaluation()
+    validated = validate_source_expression(
+        source;
+        profile=:custom_function,
+        placement,
+    )
+    value = _evaluate_validated_expression(
+        validated;
+        context=_placement_context(
+            placement;
+            nodeid,
+            self_node_index,
+            edge_context,
+        ),
+    )
+    return _function_result(value), validated
+end
+
+"""Evaluate one custom tag-query predicate without protocol context."""
+function evaluate_query_expression(source::AbstractString)
+    require_unsafe_code_evaluation()
+    validated = validate_source_expression(
+        source;
+        profile=:query_predicate,
+        placement="query",
+    )
+    value = _evaluate_validated_expression(validated)
+    return _function_result(value), validated
+end
+
+"""
+Validate and evaluate one function-valued source using representative context.
+
+Validation failures are raised as `VALIDATION_ERROR`; only failures after the
+validated subtree reaches `Core.eval` are returned as evaluation failures.
 """
 function test_code(code_string::String; placement::Union{Nothing,String}=nothing)
     require_unsafe_code_evaluation()
-
-    # Create isolated module
-    sandbox = Module()
+    effective_placement = placement === nothing ? "floating" : String(placement)
+    effective_placement in ("node", "edge", "floating", "variable", "query") ||
+        throw(ArgumentError(
+            "Custom Function placement must be 'node', 'edge', 'floating', 'variable', or 'query'",
+        ))
+    profile = effective_placement == "query" ? :query_predicate : :custom_function
+    validated = validate_source_expression(
+        code_string;
+        profile,
+        placement=effective_placement,
+    )
 
     try
-        # Get names that exist before evaluation (default functions)
-        default_names = @invokelatest names(sandbox, all=true)
-
-        # Use the same complete-source parser and Function contract as runtime
-        # Lambda creation. Protocol validation has no concrete assignment yet,
-        # so contextual names use stable representative values while preserving
-        # placement availability. Query validation uses no context wrapper.
-        effective_placement = placement === nothing ? "floating" : placement
-        effective_placement in ("node", "edge", "floating", "variable", "query") ||
-          throw(ArgumentError(
-            "Custom function placement must be 'node', 'edge', 'floating', 'variable', or 'query'",
-        ))
-        if effective_placement == "query"
-            function_value = _evaluate_function_source(
-                code_string;
-                evaluation_module=sandbox,
-            )
-            _validate_query_function_globals(function_value, sandbox)
+        context = if effective_placement == "query"
+            Dict{Symbol,Any}()
         else
             representative = _representative_source_context(effective_placement)
-            transform = parsed -> _source_context_expression(
-                parsed,
+            _source_context_bindings(
                 representative.nodeid,
                 representative.self_node_index,
                 representative.edge_context,
             )
-            _evaluate_function_source(
-                code_string;
-                evaluation_module=sandbox,
-                transform=transform,
-            )
         end
-
-        # Get names that exist after evaluation
-        all_names = @invokelatest names(sandbox, all=true)
-
-        @info "All names" all_names=all_names
-
-        # Find newly created names by filtering
-        created_names = Symbol[]
-        for name in all_names
-            if !(name in default_names)
-                push!(created_names, name)
-            end
-        end
-
-        # @info "Created names" created_names=created_names
-
-        # Separate functions from other values
-        functions = String[]
-        variables = Dict{String, Any}()
-
-        for name in created_names
-            name_str = string(name)
-            @info "Name" name=name name_str=name_str
-            # Skip internal Julia names
-            if !startswith(name_str, "#") && !startswith(name_str, "@")
-                # Julia 1.12 tightened world-age checks for bindings created by
-                # the immediately preceding eval.
-                value = Base.invokelatest(getfield, sandbox, name)
-                if value isa Function
-                    push!(functions, name_str)
-                else
-                    variables[name_str] = value
-                end
-            end
-        end
-
-        results = Dict(
-            :functions => functions,
-            :variables => variables
+        _function_result(_evaluate_validated_expression(validated; context))
+        results = Dict{Symbol,Any}(
+            :root_form => string(validated.root_form),
+            :arity => length(validated.arguments),
+            :required_context => string.(validated.referenced_contexts),
         )
-
-        return (true, results, nothing)
-
-    catch e
-        return (false, nothing, e)
+        validated.function_name === nothing ||
+            (results[:function_name] = string(validated.function_name))
+        return true, results, nothing
+    catch error
+        error isa APIError && rethrow()
+        return false, nothing, error
     end
 end
 
-"""
-Validate or evaluate one typed Julia numeric expression.
+function _numeric_context(
+    placement::AbstractString,
+    context,
+)
+    if context === nothing
+        representative = _representative_source_context(placement)
+        return _source_context_bindings(
+            representative.nodeid,
+            representative.self_node_index,
+            representative.edge_context,
+        )
+    end
+    if hasproperty(context, :node_names)
+        nodeid = _nodeid_resolver(_node_name_to_index(context.node_names))
+        return _source_context_bindings(
+            nodeid,
+            hasproperty(context, :self) ? context.self : nothing,
+            hasproperty(context, :edge_context) ? context.edge_context : nothing,
+        )
+    end
+    if hasproperty(context, :nodeid)
+        return _source_context_bindings(
+            context.nodeid,
+            context.self_node_index,
+            context.edge_context,
+        )
+    end
+    throw(ArgumentError("Numeric-expression context has an unsupported shape"))
+end
 
-Template protocol validation omits `context`, evaluates once with stable
-representative values, and returns that cast value with `deferred=true`.
-Variable validation lowers once; expressions whose resolved globals include an
-assignment binding are deferred without executing their body, while other
-Variables evaluate that same lowered form. Concrete requests evaluate once in
-the supplied lexical assignment context.
-"""
+"""Evaluate and cast numeric source in one concrete lexical context."""
+function evaluate_numeric_expression(
+    expression::AbstractString,
+    target_type::AbstractString;
+    placement::AbstractString,
+    context=nothing,
+    minimum=nothing,
+    maximum=nothing,
+)
+    require_unsafe_code_evaluation()
+    target_type = String(target_type)
+    placement = String(placement)
+    target_type in NUMERIC_EXPRESSION_TARGETS || throw(ArgumentError(
+        "Numeric expression target type must be 'Float64' or 'Int64'",
+    ))
+    placement in NUMERIC_EXPRESSION_PLACEMENTS || throw(ArgumentError(
+        "Numeric expression placement must be 'node', 'edge', 'floating', or 'variable'",
+    ))
+    validated = validate_source_expression(
+        expression;
+        profile=:numeric_expression,
+        placement,
+    )
+    placement == "variable" && !isempty(validated.referenced_contexts) &&
+        throw(ArgumentError("A contextual Variable requires a concrete assignment"))
+    value = _evaluate_validated_expression(
+        validated;
+        context=_numeric_context(placement, context),
+    )
+    return _cast_numeric_expression_result(
+        value,
+        target_type;
+        minimum,
+        maximum,
+    )
+end
+
+"""Validate or evaluate one typed Julia numeric expression."""
 function test_numeric_expression(
     expression::AbstractString,
     target_type::AbstractString,
@@ -171,117 +262,72 @@ function test_numeric_expression(
     context=nothing,
 )
     require_unsafe_code_evaluation()
+    target_type = String(target_type)
+    placement = String(placement)
+    target_type in NUMERIC_EXPRESSION_TARGETS || throw(ArgumentError(
+        "Numeric expression target type must be 'Float64' or 'Int64'",
+    ))
+    placement in NUMERIC_EXPRESSION_PLACEMENTS || throw(ArgumentError(
+        "Numeric expression placement must be 'node', 'edge', 'floating', or 'variable'",
+    ))
+    validated = validate_source_expression(
+        expression;
+        profile=:numeric_expression,
+        placement,
+    )
+    results = Dict{Symbol,Any}(:target_type => target_type)
+    if placement == "variable" && !isempty(validated.referenced_contexts)
+        results[:deferred] = true
+        results[:required_context] = string.(validated.referenced_contexts)
+        return true, results, nothing
+    end
 
     try
-        expression = String(expression)
-        target_type = String(target_type)
-        placement = String(placement)
-        target_type in NUMERIC_EXPRESSION_TARGETS || throw(ArgumentError(
-            "Numeric expression target type must be 'Float64' or 'Int64'",
-        ))
-        placement in NUMERIC_EXPRESSION_PLACEMENTS || throw(ArgumentError(
-            "Numeric expression placement must be 'node', 'edge', 'floating', or 'variable'",
-        ))
-
-        evaluation_module = Module()
-        parsed = _parse_complete_source(expression)
-        results = Dict{Symbol,Any}(:target_type => target_type)
-
-        value = if placement == "variable"
-            lowered = Meta.lower(evaluation_module, parsed)
-            references = _lowered_numeric_context_bindings(lowered, evaluation_module)
-            if !isempty(references)
-                results[:deferred] = true
-                return true, results, nothing
-            end
-            results[:deferred] = false
-            Base.eval(evaluation_module, lowered)
-        else
-            source_context = if context === nothing
-                _representative_source_context(placement)
-            else
-                node_name_to_index = _node_name_to_index(context.node_names)
-                (
-                    nodeid=_nodeid_resolver(node_name_to_index),
-                    self_node_index=placement == "node" ? context.self : nothing,
-                    edge_context=placement == "edge" ? context.edge_context : nothing,
-                )
-            end
-            results[:deferred] = context === nothing
-            Base.eval(evaluation_module, _source_context_expression(
-                parsed,
-                source_context.nodeid,
-                source_context.self_node_index,
-                source_context.edge_context,
-            ))
-        end
+        value = _evaluate_validated_expression(
+            validated;
+            context=_numeric_context(placement, context),
+        )
         cast_value = _cast_numeric_expression_result(value, target_type)
+        results[:deferred] = context === nothing && placement != "variable"
         results[:value] = _numeric_expression_result_string(cast_value)
+        results[:required_context] = string.(validated.referenced_contexts)
         return true, results, nothing
     catch error
+        error isa APIError && rethrow()
         return false, nothing, error
     end
 end
 
-
-"""
-Evaluate a symbolic expression in a temporary module preloaded with
-QuantumSavory-related namespaces. This is namespace isolation, not a security
-sandbox. Returns a tuple of
-(success::Bool, value::Any, error::Union{Nothing,Exception}).
-If successful, `value` is the actual evaluated symbolic object.
-"""
+"""Evaluate validated Symbolic source and return its authoritative object."""
 function evaluate_symbolic_expression(expr::String)
     require_unsafe_code_evaluation()
-
-    # Create isolated module and load required namespaces
-    tempmod = Module()
-
+    validated = validate_source_expression(
+        expr;
+        profile=:symbolic_expression,
+        placement="symbolic",
+    )
     try
-        # Load the required packages into the temp module's scope
-        Base.eval(tempmod, :(using QuantumSavory))
-        Base.eval(tempmod, :(using QuantumSavory.ProtocolZoo))
-        Base.eval(tempmod, :(using ResumableFunctions))
-        Base.eval(tempmod, :(using ConcurrentSim))
-        Base.eval(tempmod, :(using Latexify))
-
-        # Parse incoming expression
-        parsed = Meta.parse(expr)
-
-        # Evaluate within the temporary module to resolve symbols like Z₁, Z₂, ⊗, √, etc
-        value = Base.eval(tempmod, parsed)
-
-
-
+        value = _symbolic_result(_evaluate_validated_expression(validated))
         return true, value, nothing
-    catch e
-        return false, nothing, e
+    catch error
+        error isa APIError && rethrow()
+        return false, nothing, error
     end
 end
 
-
-"""
-Test and validate a symbolic expression, returning both the evaluated value and LaTeX representation.
-Uses `evaluate_symbolic_expression` internally for evaluation. Returns a tuple of
-(success::Bool, results::Union{Dict,Nothing}, error::Union{Nothing,Exception}).
-If successful, `results` is a Dict with keys `:value` (stringified value) and
-`:latex` (LaTeX string from `Latexify.latexify`).
-"""
+"""Validate Symbolic source and return its rendered value and bounded LaTeX."""
 function test_symbolic_expression(expr::String)
     success, value, error = evaluate_symbolic_expression(expr)
-    if !success
-        return false, nothing, error
+    success || return false, nothing, error
+    try
+        latex = String(Latexify.latexify(value))
+        ncodeunits(latex) <= SYMBOLIC_LATEX_MAX_BYTES || throw(ArgumentError(
+            "Symbolic LaTeX output exceeds $(SYMBOLIC_LATEX_MAX_BYTES) bytes",
+        ))
+        return true, Dict(:value => string(value), :latex => latex), nothing
+    catch render_error
+        return false, nothing, render_error
     end
-
-    # Convert to LaTeX string
-    latex_str = String(Latexify.latexify(value))
-
-    results = Dict(
-        :value => string(value),
-        :latex => latex_str,
-    )
-
-    return true, results, nothing
 end
 
 end

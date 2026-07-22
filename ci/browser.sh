@@ -16,5 +16,6 @@ fi
 
 export CI=true
 export WEBQUANTUMSAVORY_ENABLE_MCP=true
+export WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true
 export WEBQUANTUMSAVORY_MOCK_BROKEN=true
 exec "$app_root/ci/run-with-server.sh" gui npm test

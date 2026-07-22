@@ -118,7 +118,7 @@
 - Declare component props and emitted events explicitly. Preserve object identity where map markers, selected items, and edge endpoint references depend on it.
 - Keep the custom-function and Symbolic editor lifecycle in the shared typed-value components: protocol parameters start compact, newly selected variables start open, only successful validation collapses to static source or the rendered symbolic result, and clicking that result reopens editing. Failed validation must remain editable, with a warning whose tooltip contains the backend diagnostic; transient open/closed state must not be added to serialized parameters or variables.
 - Keep protocol constructor parameters in the shared constructor form used by both ordinary protocol editors and layout automation. Union selection, Function/Symbolic validation, variable binding, metadata documentation, and contextual `self`/`nodeid` behavior must not be reimplemented in generator dialogs.
-- Keep custom-function contextual-keyword help centralized in `src/utils/customFunctionContext.js` and render its compact, viewport-safe helper popup from the Nodes list and the shared custom-function editor so protocol and Variables-tab Lambdas stay aligned. `nodeid("Node name")` is available for every protocol placement and `self` only for node protocols. Edge protocols also receive `length` (meters), `delay` (seconds), dimensionless `refractive_index`, `loss` (dB/km), zero-through-one dimensionless `transmissivity`, and one-based source/target `node_a`/`node_b`; virtual-edge physical values are `nothing`, and help must warn that `length` shadows `Base.length`. Manual transmissivity keeps numeric loss available in protocol context. These are backend-provided lexical bindings, so never serialize contextual values or node-name maps in stored project data.
+- Fetch `/source_language` during API initialization and render its validator-generated catalogs through the one shared profile-aware Markdown helper. Keep the compact popup available to Custom Functions, numeric expressions, Symbolic source, and custom tag predicates. `nodeid("Node name")` is available for every protocol placement and `self` only for node protocols. Edge protocols also receive `distance` (meters), `delay` (seconds), dimensionless `refractive_index`, `loss` (dB/km), zero-through-one dimensionless `transmissivity`, and one-based source/target `node_a`/`node_b`; virtual-edge physical values are `nothing`. `length(value)` remains an ordinary allowlisted collection function. Manual transmissivity keeps numeric loss available in protocol context. These are backend-provided lexical bindings, so never serialize contextual values or node-name maps in stored project data.
 - Reuse that context catalog and source lifecycle for numeric expressions.
   Context-free Variable expressions show a validation result; contextual
   Variables defer without a value and show “Evaluated when assigned.” Direct
@@ -128,13 +128,11 @@
   Ordinary installed constructors build one concrete preview context from
   canonical project state and pass it explicitly; invalidate or abort stale
   previews whenever source, target, placement, node ordering/names, endpoints,
-  or physical-edge values change. Edge context shadows unqualified `length`,
-  while `Base.length` remains available and node/floating contexts do not
-  shadow it.
-- Variable dependency detection is backend-owned Julia lowering and may expand
-  macros only while unsafe evaluation is enabled. Generated-script export is
-  parse-only and must not lower, macro-expand, or execute numeric source in the
-  server.
+  or physical-edge values change. `distance` is the only edge-distance context
+  identifier; `length(value)` remains the ordinary collection function.
+- Variable dependency detection is backend-owned AST whitelist validation.
+  Neither runtime validation nor generated-script export may lower,
+  macro-expand, or execute source during pure validation.
 - Direct numeric expressions show their source and actual cast result. Linked
   expression Variables show the source and their concrete assignment result
   below the variable picker. Keep saved source visible when unsafe evaluation
@@ -178,7 +176,7 @@ npm run test:headed
 - `npm run dev` starts Vite at `http://localhost:5173`; it does not start the backend.
 - `npm run test:unit` runs the Vitest suite once in jsdom; `npm run test:unit:watch` keeps it active for local iteration.
 - `npm run build` synchronizes `package.json`'s version from the root `Project.toml`, cleans the generated asset directory, and writes the production bundle to `../public/`.
-- `npm test` and `npm run test:headless` run all Playwright specs headlessly in Chromium. Playwright starts Vite but expects the backend to already be available at `http://localhost:8000`.
+- `npm test` and `npm run test:headless` run all Playwright specs headlessly in Chromium. Playwright starts Vite but expects a test-mode backend with `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true` to already be available at `http://localhost:8000`.
 - `npm run test:headed` runs the Chromium suite with a visible browser for local debugging. On a host without an attached display, run it under Xvfb: `xvfb-run -a npm run test:headed`.
 - CI provisions Node.js 24. The repository-root `ci/frontend-build.sh` installs dependencies, runs `npm run test:unit`, and then runs the production build; backend integration and `ci/browser.sh` reuse that entry point. GitHub Actions and Buildkite install Chromium's Linux packages during the browser job; Buildkite's remaining host requirements are described in `../README.md`.
 

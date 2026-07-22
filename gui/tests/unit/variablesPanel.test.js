@@ -39,7 +39,7 @@ describe('VariablesPanel', () => {
       id: 'variable_context',
       name: 'contextual',
       type: 'Lambda',
-      value: 'values -> length + Base.length(values)',
+      value: 'values -> distance + length(values)',
     }))
 
     const wrapper = shallowMount(VariablesPanel, {

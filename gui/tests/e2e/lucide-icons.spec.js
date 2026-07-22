@@ -15,6 +15,11 @@ async function mockBackend(page) {
     const requestPath = new URL(route.request().url()).pathname
     const responses = {
       '/known_functions': { known_functions: [] },
+      '/source_language': {
+        schema_version: 1,
+        function_forms: [],
+        contexts: {},
+      },
       '/background_types': { background_types: [] },
       '/protocol_types': { protocol_types: [] },
       '/states_zoo_types': { states_zoo_types: [] },

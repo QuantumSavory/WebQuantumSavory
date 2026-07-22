@@ -40,7 +40,7 @@ export const PHYSICAL_PARAMETER_DESCRIPTORS = Object.freeze({
     controlId: 'edge-distance-meters',
     overrideField: 'distanceMeters',
     resolvedField: 'distanceMeters',
-    contextBinding: 'length',
+    contextBinding: 'distance',
     unit: PHYSICAL_UNITS.meters,
     minimum: 0,
     dormantWhen: 'manualDelay',

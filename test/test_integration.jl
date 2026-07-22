@@ -995,7 +995,7 @@
         @test Set(context_schemas[2]["required"]) == Set(["node_names", "self"])
         @test Set(context_schemas[3]["required"]) == Set([
           "node_names",
-          "length",
+          "distance",
           "delay",
           "refractive_index",
           "loss",
@@ -1003,7 +1003,7 @@
           "node_a",
           "node_b",
         ])
-        @test context_schemas[3]["properties"]["length"]["nullable"] == true
+        @test context_schemas[3]["properties"]["distance"]["nullable"] == true
         @test context_schemas[3]["properties"]["delay"]["nullable"] == true
         @test context_schemas[3]["properties"]["refractive_index"]["nullable"] == true
         @test context_schemas[3]["properties"]["loss"]["nullable"] == true
@@ -1013,13 +1013,44 @@
       end
   end
 
+  @testset "Source Language Endpoint" begin
+      response = make_request("GET", "/source_language")
+      @test response.status == 200
+      catalog = parse_response(response)
+      @test catalog["schema_version"] == 1
+      @test catalog["unsafe_evaluation"] == unsafe_evaluation_enabled
+      @test [form["id"] for form in catalog["function_forms"]] == [
+        "anonymous_lambda",
+        "short_form_definition",
+        "comparison_curry",
+      ]
+      @test catalog["comparison_currying"]["operators"] ==
+        ["==", "!=", "<", "<=", ">", ">=", "≠", "≤", "≥"]
+      edge_context = [entry["name"] for entry in catalog["contexts"]["edge"]]
+      @test "distance" in edge_context
+      @test !("length" in edge_context)
+      @test only(
+        entry["syntax"] for entry in catalog["contexts"]["edge"]
+        if entry["name"] == "nodeid"
+      ) == "nodeid(\"Node name\")"
+      operations = [entry["name"] for entry in catalog["operations"]["ordinary"]]
+      @test "length" in operations
+      @test only(
+        entry["syntax"] for entry in catalog["operations"]["ordinary"]
+        if entry["name"] == "length"
+      ) == "length(value)"
+      @test all(name -> name in operations, ["isfinite", "isinf", "isnan"])
+      @test [constant["name"] for constant in catalog["constants"]] ==
+        ["nothing", "π", "Inf", "NaN"]
+  end
+
   @testset "Test Code Endpoint" begin
       # The same contract supports default-enabled test servers and explicit
       # disabled-policy integration runs.
       accepted_sources = (
-        "<(1)",
+        "x -> x + 1",
         "f(x) = x + 1",
-        "f(x) = x + 1\nf\n# trailing comment",
+        "<(self)",
       )
       for source in accepted_sources
         response = make_request(
@@ -1032,6 +1063,9 @@
           @test response.status == 200
           @test data["success"] == true
           @test haskey(data, "results")
+          @test haskey(data["results"], "root_form")
+          @test haskey(data["results"], "arity")
+          @test haskey(data["results"], "required_context")
         else
           @test response.status == 403
           @test data["success"] == false
@@ -1058,27 +1092,17 @@
       @test occursin("Field 'placement'", invalid_placement_data["error"])
 
       if unsafe_evaluation_enabled
-        for (source, placement, expected_success) in (
-          ("<(self)", "node", true),
-          ("==(nodeid(\"Amherst\"))", "edge", true),
+        for (source, placement) in (
+          ("<(self)", "node"),
+          ("==(nodeid(\"Amherst\"))", "edge"),
           (
-            "values -> length > 0 && delay >= 0 && refractive_index > 0 && " *
+            "values -> distance > 0 && delay >= 0 && refractive_index > 0 && " *
             "loss >= 0 && 0 <= transmissivity <= 1 && " *
-            "node_a == 1 && node_b == 2 && Base.length(values) > 0",
+            "node_a == 1 && node_b == 2 && length(values) > 0",
             "edge",
-            true,
           ),
-          ("<(self)", "edge", false),
-          ("value -> value == self && node_a < node_b", "variable", true),
-          ("x -> x > 1", "query", true),
-          (
-            "candidate -> let nodeid = _ -> 1; candidate == nodeid(\"Amherst\"); end",
-            "query",
-            true,
-          ),
-          ("==(nodeid(\"Amherst\"))", "query", false),
-          ("candidate -> candidate == nodeid(\"Amherst\")", "query", false),
-          ("<(self)", "query", false),
+          ("value -> value == self && node_a < node_b", "variable"),
+          ("x -> x > 1", "query"),
         )
           contextual_response = make_request(
             "POST",
@@ -1087,21 +1111,45 @@
           )
           @test contextual_response.status == 200
           contextual_data = parse_response(contextual_response)
-          @test contextual_data["success"] == expected_success
+          @test contextual_data["success"] == true
+        end
+
+        for (source, placement) in (
+          ("<(self)", "edge"),
+          ("==(nodeid(\"Amherst\"))", "query"),
+          ("candidate -> candidate == nodeid(\"Amherst\")", "query"),
+          ("<(self)", "query"),
+          ("values -> length", "edge"),
+          ("function f(x)\n x\nend", "floating"),
+        )
+          invalid_response = make_request(
+            "POST",
+            "/test_code",
+            body=Dict("code" => source, "placement" => placement),
+          )
+          invalid_data = parse_response(invalid_response)
+          @test invalid_response.status == 400
+          @test invalid_data["success"] == false
+          @test invalid_data["error_code"] == "VALIDATION_ERROR"
         end
 
         invalid_response = make_request(
           "POST",
           "/test_code",
-          body=Dict("code" => "invalid("),
+          body=Dict("code" => "==(first([]))"),
         )
         @test invalid_response.status == 200
         invalid_data = parse_response(invalid_response)
         @test invalid_data["success"] == false
         @test invalid_data["error_code"] == "EVALUATION_FAILED"
-        @test startswith(invalid_data["error"], "ParseError:")
-        @test occursin("Expected `)` or `,`", invalid_data["error"])
-        @test !occursin("Base.Meta.ParseError(", invalid_data["error"])
+
+        syntax_response = make_request(
+          "POST",
+          "/test_code",
+          body=Dict("code" => "invalid("),
+        )
+        @test syntax_response.status == 400
+        @test parse_response(syntax_response)["error_code"] == "VALIDATION_ERROR"
       end
   end
 
@@ -1112,7 +1160,7 @@
         "placement" => "edge",
         "context" => Dict(
           "node_names" => ["Alice", "Bob"],
-          "length" => 100.0,
+          "distance" => 100.0,
           "delay" => 5.0e-7,
           "refractive_index" => 1.5,
           "loss" => 0.2,
@@ -1135,6 +1183,7 @@
             "deferred" => false,
             "target_type" => "Float64",
             "value" => "2.5e-7",
+            "required_context" => ["delay"],
           ),
         )
 
@@ -1152,13 +1201,14 @@
           "deferred" => true,
           "target_type" => "Float64",
           "value" => "0.5",
+          "required_context" => [],
         )
 
         variable_response = make_request(
           "POST",
           "/test_numeric_expression";
           body=Dict(
-            "expression" => "x = 3\nx // 1",
+            "expression" => "3",
             "target_type" => "Int64",
             "placement" => "variable",
           ),
@@ -1168,6 +1218,7 @@
           "deferred" => false,
           "target_type" => "Int64",
           "value" => "3",
+          "required_context" => [],
         )
 
         contextual_variable_response = make_request(
@@ -1183,13 +1234,24 @@
         @test parse_response(contextual_variable_response)["results"] == Dict(
           "deferred" => true,
           "target_type" => "Int64",
+          "required_context" => ["nodeid", "self"],
         )
+
+        inf_response = make_request(
+          "POST",
+          "/test_numeric_expression";
+          body=Dict(
+            "expression" => "Inf",
+            "target_type" => "Float64",
+            "placement" => "variable",
+          ),
+        )
+        @test inf_response.status == 200
+        @test parse_response(inf_response)["results"]["value"] == "Inf"
 
         for failing_request in (
           merge(edge_request, Dict("expression" => "1 / 2", "target_type" => "Int64")),
-          merge(edge_request, Dict("expression" => "Inf")),
-          merge(edge_request, Dict("expression" => "invalid(")),
-          merge(edge_request, Dict("expression" => "self")),
+          merge(edge_request, Dict("expression" => "Inf", "target_type" => "Int64")),
         )
           failing_response = make_request(
             "POST",
@@ -1200,6 +1262,17 @@
           failing_data = parse_response(failing_response)
           @test failing_data["success"] == false
           @test failing_data["error_code"] == "EVALUATION_FAILED"
+        end
+
+        for invalid_expression in ("invalid(", "self", "Base.length([1, 2])")
+          invalid_request = merge(edge_request, Dict("expression" => invalid_expression))
+          invalid_response = make_request(
+            "POST",
+            "/test_numeric_expression";
+            body=invalid_request,
+          )
+          @test invalid_response.status == 400
+          @test parse_response(invalid_response)["error_code"] == "VALIDATION_ERROR"
         end
       else
         @test response.status == 403
@@ -1262,12 +1335,12 @@
       @test occursin("Missing required field 'expr'", data2["error"])
 
       if unsafe_evaluation_enabled
-        # Execution error (bad expression)
+        # Parser/whitelist failures are validation errors.
         response3 = make_request("POST", "/test_symbolic_expression", body=Dict("expr" => "(Z₁⊗Z₁+"))
-        @test response3.status == 400 || response3.status == 200  # server wraps as 400 via handler; allow either in case of internal mapping
+        @test response3.status == 400
         data3 = parse_response(response3)
         @test data3["success"] == false
-        @test data3["error_code"] == "EVALUATION_FAILED"
+        @test data3["error_code"] == "VALIDATION_ERROR"
       end
   end
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.11.0
+
+- Added a default-deny Julia source validator for Custom Functions, tag-query
+  predicates, numeric expressions, and Symbolic source, followed by one gated
+  `Core.eval` boundary over the exact validated AST in a fresh bare module.
+- Restricted function source to anonymous lambdas, local nonrecursive
+  short-form definitions, and root-only comparison currying with Julia `Fix2`
+  direction, static complexity limits, runtime value checks, and generated
+  source-language help.
+- Made server-side source evaluation require the explicit
+  `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true` opt-in in every environment,
+  while keeping pure validation for Script Export and structured/predefined
+  values available without it.
+- Allowed IEEE `Inf` and `NaN` in unconstrained `Float64` expressions and
+  Custom Functions, while retaining authoritative integer, finite, physical,
+  States Zoo, and metadata-bound constraints.
+- Defined `distance` as the sole edge-distance source context across runtime,
+  numeric previews, generated scripts, API metadata, and GUI help; `length`
+  remains an ordinary allowlisted collection function.
+
 ## 1.10.1
 
 - Added descriptor-driven physical quantities and unit metadata for global and

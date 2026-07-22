@@ -24,9 +24,7 @@ const CUSTOM_FUNCTION_PROTOCOL_TYPE = {
   }],
 }
 
-const VALID_FUNCTION_SOURCE = `valid_callback = function (value)
-  return value + 1
-end`
+const VALID_FUNCTION_SOURCE = 'valid_callback(value) = value + 1'
 
 const INVALID_FUNCTION_ERROR = [
   'ParseError:',
@@ -249,7 +247,8 @@ async function expectCustomFunctionValidationLifecycle(
   await expect(contextHelp).toContainText('refractive_index')
   await expect(contextHelp).toContainText('loss')
   await expect(contextHelp).toContainText('transmissivity')
-  await expect(contextHelp).toContainText('Base.length(collection)')
+  await expect(contextHelp).toContainText('distance')
+  await expect(contextHelp).toContainText('length')
   await page.keyboard.press('Escape')
   await expect(contextHelp).toHaveCount(0)
   await expect(contextTrigger).toBeFocused()

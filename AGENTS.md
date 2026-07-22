@@ -32,7 +32,7 @@
 - `src/script_export.jl` translates validated project payloads into standalone, pedagogical QuantumSavory Julia scripts without creating server-side simulation state.
 - `src/tag_metadata.jl` owns runtime discovery of QuantumSavory tag converters and signatures, the allowlisted tag/query codec, live-register target resolution, entry serialization, and tag/message mutation helpers.
 - `src/startup_warmup.jl` owns the synchronous, one-per-process non-test startup workload that exercises the latest bundled demo, simulator, protocol/state renderers, and GUI-default States Zoo preview before requests are accepted.
-- `src/errors.jl` standardizes `APIError` responses. `evaluation_policy.jl` gates unsafe server-process evaluation, `Logger.jl` captures per-simulation events, `Sandbox.jl` evaluates user expressions, `types.jl` implements lambda/symbolic adapters, and `services.jl` manages idle simulations.
+- `src/errors.jl` standardizes `APIError` responses. `evaluation_policy.jl` gates unsafe server-process evaluation, `source_validation.jl` owns the restricted Julia AST profiles and language metadata, `Sandbox.jl` is the sole user-source `Core.eval` boundary, `Logger.jl` captures per-simulation events, `types.jl` implements lambda/symbolic adapters, and `services.jl` manages idle simulations.
 - `config/env/` contains Genie settings for dev, test, and production. `public/index.html` and `public/assets/` are generated from `gui/` at launch.
 
 ## Simulation flow and invariants
@@ -60,7 +60,7 @@ The normal lifecycle is:
 
 - Always validate a raw project payload before calling `parse_network_graph`; the parser expects the validation result containing `data` and `graph_info`.
 - Preserve node ordering. The payload array position is the user-visible, 1-based simulator node ID; durable external string IDs are translated through that order to Julia register indices, and edge protocol `nodeA`/`nodeB` roles follow the submitted source/target IDs under that mapping.
-- Custom-function context is backend-owned and lexical. Build the node-name-to-1-based-index mapping once from the ordered validated nodes for each protocol launch, pass it through node, edge, and floating conversion, and derive physical payload validation, supported numeric-expression globals, representative values, runtime `let` bindings, and generated-script bindings from the one ordered edge-context descriptor definition; keep endpoint bindings separate. `nodeid(name::String)` is available to every custom Lambda, while `self` is bound only for node protocols. Edge protocols additionally bind `length` in meters, `delay` in seconds, dimensionless `refractive_index`, `loss` in dB/km, dimensionless zero-through-one `transmissivity`, and the source/target one-based IDs as `node_a`/`node_b`; the five physical values are `nothing` on virtual edges, and `length` intentionally shadows `Base.length`. Manual transmissivity does not hide the resolved numeric `loss` from protocol code, matching the existing manual-delay context behavior. Lambda variables remain raw and are instantiated separately at each assignment. Duplicate node names intentionally use `Dict` last-name-wins semantics, and an unknown `nodeid` lookup fails with the ordinary Julia `KeyError` when the function runs.
+- Custom-function context is backend-owned and lexical. Build the node-name-to-1-based-index mapping once from the ordered validated nodes for each protocol launch, pass it through node, edge, and floating conversion, and derive physical payload validation, source dependency detection, representative values, runtime `let` bindings, generated-script bindings, API metadata, and help from the one ordered context registry; keep endpoint bindings separate. `nodeid(name::String)` is available to every custom Lambda, while `self` is bound only for node protocols. Edge protocols additionally bind `distance` in meters, `delay` in seconds, dimensionless `refractive_index`, `loss` in dB/km, dimensionless zero-through-one `transmissivity`, and the source/target one-based IDs as `node_a`/`node_b`; the five physical values are `nothing` on virtual edges. `length(value)` remains an ordinary allowlisted collection call. Manual transmissivity does not hide the resolved numeric `loss` from protocol code, matching the existing manual-delay context behavior. Lambda variables remain raw and are instantiated separately at each assignment. Duplicate node names intentionally use `Dict` last-name-wins semantics, and an unknown `nodeid` lookup fails with the ordinary Julia `KeyError` when the function runs.
 - Keep Custom Function validation and runtime construction on the shared complete-source parser, context wrapper, and evaluator. The GUI sends the protocol placement to validation so representative `nodeid` and node-only `self` bindings cover eager curried expressions before a concrete assignment exists. Sources may contain curried expressions or named definitions, but their final value must satisfy QuantumSavory's `Function` contract; format user-facing Julia failures with `showerror` while retaining production redaction.
 - Protocol placement is part of the API contract: node protocols live under each node's `data.protocols`, edge protocols under each edge's `data.protocols`, and floating protocols under `net.protocols`.
 - Physical edges alone define the simulator's `SimpleGraph`. Reject duplicate unordered physical endpoint pairs; validate resolved nonnegative finite `data.distanceMeters`, `data.propagationDelaySeconds`, and `data.lossDbPerKm`, positive finite `data.refractiveIndex`, and finite zero-through-one `data.transmissivity`; do not recompute or cross-check frontend-resolved formulas. Pass the symmetric delay lookup as both `classical_delay` and `quantum_delay` to `RegisterNet`. Missing distance/index/loss/transmissivity remain `nothing` for legacy payloads, while missing legacy delay retains the established zero default. Virtual edges remain in validated edge metadata only so protocols whose catalog type permits virtual placement can still be constructed; reject other virtual-edge protocols.
@@ -101,27 +101,25 @@ The normal lifecycle is:
 - Starting a new target clears previously captured simulation logs; resuming a paused target preserves them. `GET /logs/:name` purges returned logs by default, so tests and callers which need repeat reads must request otherwise.
 - `Logger.CapturingLogger` preserves Julia's standard log-record `group` field in each structured event. Keep the simulator-group catalog behind `GET /simulation_log_groups` and derive it directly from exported `QuantumSavory.LOG_GROUPS`; never duplicate the upstream group vocabulary in this repository. `ResumableFunctions` may hygienically rename `_group` to `_group_N` before a nested logging macro expands, so keep the narrow Logger-owned recovery limited to reserved `_group`/`_group_<digits>` keys whose values are in that authoritative catalog, while retaining the original keyword in Raw JSON.
 - Do not remove `InteractiveUtils`, `REPL`, or `CairoMakie` from `src/WebQuantumSavory.jl` as apparently unused imports. They activate QuantumSavory metadata and MIME-rendering extensions used by the API.
-- `Sandbox` creates a fresh module but evaluates Julia code with `Base.eval`; this is namespace isolation, not a security boundary. Treat code, lambda, symbolic, and fallback parameter evaluation as unsafe for untrusted input.
+- Restricted source is parsed completely and validated as Julia `Expr` syntax before `Sandbox` embeds that same validated subtree in a server-owned lexical wrapper and calls `Core.eval` once in `Module(gensym(:WQSRestricted), false, false)`. Do not lower, macro-expand, import into the module, accept caller-created `Expr` values, or add another user-controlled eval boundary. The whitelist is risk reduction, not a security boundary.
 - Numeric expressions share the complete-source parser, fresh-module
   evaluator, lexical assignment context, and unsafe-evaluation policy with
   Custom Functions. Validation casts through the authoritative `Float64` or
-  `Int64` target, rejects non-finite floats and inexact/overflowing integers,
-  and then applies field ranges. Do not silently replace an invalid expression
-  with a constructor default.
+  `Int64` target, permits non-finite unconstrained `Float64` results, rejects
+  non-finite integer conversions and non-finite metadata-bounded results, and
+  then applies existing field ranges. Do not silently replace an invalid
+  expression with a constructor default.
 - Numeric-expression validation has four modes. Concrete node, edge, and
   floating fields evaluate once in their actual lexical context. Templates
   evaluate once with stable representative placement values and return both a
-  representative value and `deferred=true`. Context-free Variables lower once
-  and evaluate that same lowered form; context-dependent Variables detect
-  resolved assignment-module `GlobalRef`s and defer without executing the body
-  or casting it. Only this unsafe Variables path may lower or macro-expand
-  source. Reject lowering errors even when a contextual reference is present.
-- Edge context intentionally shadows unqualified `length`; `Base.length`
-  always remains the collection function, and node/floating context does not
-  shadow it. Variables conservatively treat unqualified `length` as
-  assignment-dependent. Runtime evaluation uses the actual lexical context as
-  authority and must not reintroduce static source-name scans.
-- `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` is the sole unsafe-evaluation override and accepts only `true` or `false`. Without it, evaluation is enabled only in `dev` and `test`; production and unknown environments deny it.
+  representative value and `deferred=true`. Context-free Variables evaluate
+  once; context-dependent Variables detect validated free context identifiers
+  and defer without executing or casting. Concrete assignment reparses and
+  revalidates independently. Never lower or macro-expand user source.
+- `distance` is the only edge-distance context identifier. Do not add an alias,
+  migration, warning, or special diagnostic. `length(value)` is available only
+  as the ordinary collection function and is not a free context value.
+- `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` is the sole unsafe-evaluation opt-in and accepts only `true` or `false`. Evaluation is disabled in every environment unless its value is explicitly `true`.
 
 ## API changes
 
@@ -161,14 +159,14 @@ The server launcher requires Node.js 18 or newer and npm. It runs `npm ci` and `
 The backend test runner is working-directory-sensitive. Run targeted unit tests from `test/`:
 
 ```sh
-(cd test && julia --project=. runtests.jl test_unit)
+(cd test && WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true julia --project=. runtests.jl test_unit)
 ```
 
 Running `runtests.jl` without a test name also includes integration tests. Those require a separate test-mode server on port 8000 and a built UI:
 
 ```sh
 (cd gui && npm ci && npm run test:unit && npm run build)
-GENIE_ENV=test julia --project=. -e 'using WebQuantumSavory; WebQuantumSavory.main(); WebQuantumSavory.up(async=false)'
+GENIE_ENV=test WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true julia --project=. -e 'using WebQuantumSavory; WebQuantumSavory.main(); WebQuantumSavory.up(async=false)'
 (cd test && julia --project=. runtests.jl test_integration)
 ```
 

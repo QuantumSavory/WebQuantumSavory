@@ -1854,11 +1854,12 @@ end
 @swagger """
 /test_code:
   post:
-    summary: Test Julia code in a fresh module
+    summary: Validate and evaluate a restricted Julia Function expression
     description: |
-      Execute Julia code in the server process and return the results. The
-      fresh module isolates names but is not a security sandbox. This endpoint
-      is available only when unsafe code evaluation is enabled.
+      Applies the default-deny source-language validator, then evaluates that
+      exact parsed subtree once inside a trusted lexical wrapper and fresh bare
+      module. The whitelist reduces risk but is not a security boundary. This
+      endpoint is available only when unsafe evaluation is explicitly enabled.
     requestBody:
       required: true
       content:
@@ -1868,8 +1869,8 @@ end
             properties:
               code:
                 type: string
-                description: Julia code to execute
-                example: "function add(a, b)\nreturn a + b\nend"
+                description: Anonymous lambda, short-form definition, or root comparison curry
+                example: "f(x) = x + 1"
               placement:
                 type: string
                 enum: [node, edge, floating, variable, query]
@@ -1878,7 +1879,7 @@ end
               - code
     responses:
       '200':
-        description: Code executed successfully
+        description: Restricted Function expression evaluated successfully
         content:
           application/json:
             schema:
@@ -1892,20 +1893,22 @@ end
                   example: "Code executed successfully"
                 results:
                   type: object
-                  description: Functions and variables defined in the code
+                  required: [root_form, arity, required_context]
                   properties:
-                    functions:
+                    root_form:
+                      type: string
+                      enum: [anonymous_lambda, short_form_definition, comparison_curry]
+                    function_name:
+                      type: string
+                      description: Present only for a short-form definition.
+                    arity:
+                      type: integer
+                    required_context:
                       type: array
                       items:
                         type: string
-                      description: Names of functions created
-                      example: ["add", "multiply"]
-                    variables:
-                      type: object
-                      description: Variables and constants defined
-                      example: {"PI": 3.14159}
       '400':
-        description: Code execution failed
+        description: Request or restricted-source validation failed with VALIDATION_ERROR
         content:
           application/json:
             schema:
@@ -1946,7 +1949,7 @@ route("/test_code", method="POST") do
     throw(validation_error("Missing required field 'code'", Dict("required_field" => "code")))
   end
 
-  code_string = payload["code"]
+  code_string = _required_nonempty_source(payload, "code", "Custom Function request")
   placement = get(payload, "placement", nothing)
   if placement !== nothing && !(
     placement isa AbstractString &&
@@ -1957,9 +1960,6 @@ route("/test_code", method="POST") do
       Dict("field" => "placement"),
     ))
   end
-  require_unsafe_code_evaluation()
-
-  # Evaluate in a fresh namespace; Sandbox also enforces the policy for direct callers.
   success, results, error = Sandbox.test_code(
     code_string;
     placement=placement === nothing ? nothing : String(placement),
@@ -1983,15 +1983,15 @@ end
   post:
     summary: Validate or evaluate a typed Julia numeric expression
     description: |
-      Parses complete Julia source and casts its final value to Float64 or
-      Int64. Concrete node, edge, and floating requests evaluate with the
+      Validates one restricted expression and casts its evaluated result to
+      Float64 or Int64. Concrete node, edge, and floating requests evaluate with the
       supplied lexical assignment context. Omit context only for explicit
       templates and Variables. Templates evaluate once with stable
       representative values and return that value with deferred=true. Variable
-      requests lower once and are deferred without executing the expression
-      body when resolved assignment globals are referenced. This endpoint
-      executes trusted Julia code in the server process and is available only
-      when unsafe evaluation is enabled.
+      requests are deferred without evaluation when free assignment-context
+      identifiers are referenced. No lowering or macro expansion is performed.
+      The exact validated subtree is evaluated once only when unsafe evaluation
+      is explicitly enabled.
     requestBody:
       required: true
       content:
@@ -2037,13 +2037,13 @@ end
                   - type: object
                     title: Edge protocol context
                     additionalProperties: false
-                    required: [node_names, length, delay, refractive_index, loss, transmissivity, node_a, node_b]
+                    required: [node_names, distance, delay, refractive_index, loss, transmissivity, node_a, node_b]
                     properties:
                       node_names:
                         type: array
                         items:
                           type: string
-                      length:
+                      distance:
                         type: number
                         nullable: true
                         minimum: 0
@@ -2097,7 +2097,7 @@ end
                   type: string
                   enum: [EVALUATION_FAILED]
       '400':
-        description: Malformed request DTO
+        description: Request or restricted-source validation failed with VALIDATION_ERROR
       '403':
         description: Unsafe Julia code evaluation is disabled
 """
@@ -2123,12 +2123,12 @@ end
 @swagger """
 /test_symbolic_expression:
   post:
-    summary: Evaluate a symbolic expression and return its LaTeX form
+    summary: Validate and evaluate a restricted Symbolic expression
     description: |
-      Parses and evaluates a symbolic expression in the server process, in a
-      fresh module with QuantumSavory preloaded. The module is not a security
-      sandbox. This endpoint is available only when unsafe code evaluation is
-      enabled.
+      Validates atoms, eligible constructors, and explicitly supported Symbolic
+      operations, then evaluates that exact subtree in a fresh bare module and
+      returns bounded LaTeX. This endpoint requires the explicit unsafe-
+      evaluation opt-in.
     requestBody:
       required: true
       content:
@@ -2164,7 +2164,7 @@ end
                       type: string
                       description: LaTeX representation of the evaluated expression
       '400':
-        description: Evaluation failed
+        description: Request or restricted-source validation failed with VALIDATION_ERROR
         content:
           application/json:
             schema:
@@ -2203,8 +2203,7 @@ route("/test_symbolic_expression", method="POST") do
     throw(validation_error("Missing required field 'expr'", Dict("required_field" => "expr")))
   end
 
-  expr = payload["expr"]
-  require_unsafe_code_evaluation()
+  expr = _required_nonempty_source(payload, "expr", "Symbolic expression request")
 
   success, results, error = Sandbox.test_symbolic_expression(expr)
 
@@ -2289,6 +2288,26 @@ end
 """
 route("/platform_info") do
   json(WebQuantumSavory.get_platform_info())
+end
+
+########################################################
+
+@swagger """
+/source_language:
+  get:
+    summary: Describe the restricted Julia source language
+    description: Returns validator-generated function forms, operations, constants, lexical contexts and units, limits, result contracts, forbidden syntax, Symbolic entries, non-finite Float64 behavior, and the current unsafe-evaluation state. Pure language metadata is available even while evaluation is disabled.
+    responses:
+      '200':
+        description: Restricted source-language metadata
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [schema_version, unsafe_evaluation, function_forms, comparison_currying, operations, constants, contexts, limits, result_contracts, forbidden_syntax, symbolic]
+"""
+route("/source_language", method="GET") do
+  json(source_language_catalog())
 end
 
 ########################################################

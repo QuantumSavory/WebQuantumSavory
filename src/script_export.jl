@@ -329,10 +329,6 @@ function _script_literal(value, context::String)
   elseif value isa Integer
     return string(value)
   elseif value isa AbstractFloat
-    isfinite(value) || throw(validation_error(
-      "$context must be finite",
-      Dict{String,Any}("value" => string(value)),
-    ))
     return repr(value)
   elseif value isa AbstractString
     return repr(String(value))
@@ -346,32 +342,22 @@ function _script_literal(value, context::String)
   ))
 end
 
-function _script_raw_expression(value, context::String)
-  if !(value isa AbstractString)
-    return _script_literal(value, context)
-  end
-
-  source = strip(String(value))
-  isempty(source) && throw(validation_error("$context must not be blank"))
-  _script_validate_source(source, context; complete=false)
-  return "(" * source * ")"
-end
-
-"""Parse user source for export without lowering, macro expansion, or execution."""
+"""Whitelist user source for export without lowering, expansion, or execution."""
 function _script_validate_source(
   source::AbstractString,
   context::String;
-  complete::Bool=true,
+  profile::Symbol,
+  placement::AbstractString,
 )
   try
-    complete ? _parse_complete_source(source) : Meta.parse(source; raise=true)
+    return validate_source_expression(source; profile, placement)
   catch error
+    error isa APIError || rethrow(error)
     throw(validation_error(
-      "$context is not valid Julia syntax",
-      Dict{String,Any}("parse_error" => sprint(showerror, error)),
+      "$context is not valid restricted Julia source: $(error.message)",
+      error.details,
     ))
   end
-  return nothing
 end
 
 function _script_declared_types(raw_type)
@@ -422,20 +408,32 @@ function _script_assignment_bindings(node_index, edge_context; capture_nodeid::B
   return bindings
 end
 
+_script_source_placement(node_index, edge_context) =
+  edge_context === nothing ? (node_index === nothing ? "floating" : "node") : "edge"
+
 function _script_custom_function_expression(
   source::AbstractString,
   node_index,
   context::String;
   edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
 )
-  source = strip(String(source))
-  isempty(source) && throw(validation_error("$context must not be blank"))
-  _script_validate_source(source, context)
+  source = String(source)
+  _script_validate_source(
+    source,
+    context;
+    profile=:custom_function,
+    placement=_script_source_placement(node_index, edge_context),
+  )
 
-  indented = replace(source, "\n" => "\n        ")
-  context_bindings = _script_assignment_bindings(node_index, edge_context)
+  context_bindings = _script_assignment_bindings(
+    node_index,
+    edge_context;
+    capture_nodeid=true,
+  )
   return "(let\n" * context_bindings * "    function_value = let\n" *
-    "        $indented\n" *
+    "# WebQuantumSavory validated source begins\n" *
+    source * "\n" *
+    "# WebQuantumSavory validated source ends\n" *
     "    end\n" *
     "    function_value isa Core.Function || Base.throw(Base.ArgumentError(\"Custom function source must evaluate to a Julia Function\"))\n" *
     "    function_value\n" *
@@ -453,20 +451,21 @@ function _script_function_expression(
     "$context must be a function name or Julia function expression",
     Dict{String,Any}("received_type" => string(typeof(value))),
   ))
-  source = strip(String(value))
+  raw_source = String(value)
+  source = strip(raw_source)
 
   source == "default" && return nothing
-  resolve_function_reference(source) !== nothing && return source
-
-  self_function = _script_self_function(source, node_index, context)
-  self_function !== nothing && return self_function
-
-  special_type == "Lambda" || throw(validation_error(
-    "$context is not an allowlisted function reference",
-    Dict{String,Any}("value" => source),
-  ))
+  if special_type == "Function"
+    resolve_function_reference(source) !== nothing && return source
+    self_function = _script_self_function(source, node_index, context)
+    self_function !== nothing && return self_function
+    throw(validation_error(
+      "$context is not an allowlisted function reference",
+      Dict{String,Any}("value" => source),
+    ))
+  end
   return _script_custom_function_expression(
-    source,
+    raw_source,
     node_index,
     context;
     edge_context=edge_context,
@@ -486,9 +485,13 @@ function _script_numeric_expression(
   expression === nothing && throw(validation_error(
     "$context must use the numeric-expression tagged representation",
   ))
-  _script_validate_source(expression.source, context)
+  _script_validate_source(
+    expression.source,
+    context;
+    profile=:numeric_expression,
+    placement=_script_source_placement(node_index, edge_context),
+  )
 
-  indented = replace(expression.source, "\n" => "\n        ")
   # A same-named local initializer (`nodeid = nodeid`) resolves its right-hand
   # side as the new local in Julia's hard scope. Capture the generated script's
   # global resolver explicitly before exposing the lexical expression binding.
@@ -503,10 +506,10 @@ function _script_numeric_expression(
     "    expression_value isa Base.Real && !(expression_value isa Base.Bool) || " *
     "Base.throw(Base.ArgumentError(\"Numeric expression must evaluate to a real number\"))\n" *
     "    cast_value = $target_constructor(expression_value)\n"
-  if target_type == "Float64"
+  if target_type == "Float64" && (minimum !== nothing || maximum !== nothing)
     checks *=
       "    Base.isfinite(cast_value) || Base.throw(Base.ArgumentError(" *
-      "\"Numeric expression must evaluate to a finite Float64\"))\n"
+      "\"A metadata-bounded numeric expression must evaluate to a finite Float64\"))\n"
   end
   if minimum !== nothing
     checks *=
@@ -521,7 +524,9 @@ function _script_numeric_expression(
 
   return "(let\n" * context_bindings *
     "    expression_value = let\n" *
-    "        $indented\n" *
+    "# WebQuantumSavory validated numeric source begins\n" *
+    expression.source * "\n" *
+    "# WebQuantumSavory validated numeric source ends\n" *
     "    end\n" *
     checks *
     "    cast_value\n" *
@@ -529,10 +534,13 @@ function _script_numeric_expression(
 end
 
 function _script_validate_deferred_lambda(value, context::String)
-  # `node_index = nothing` would reject node-only `self` before a deferred
-  # Lambda has an assignment; validate in a representative node context, then
-  # discard this expression and rebuild it with the actual assignment context.
-  _script_function_expression(value, "Lambda", 1, context)
+  value isa AbstractString || throw(validation_error("$context must be Julia function source"))
+  _script_validate_source(
+    String(value),
+    context;
+    profile=:custom_function,
+    placement="variable",
+  )
   return nothing
 end
 
@@ -541,7 +549,12 @@ function _script_validate_deferred_numeric_expression(value, context::String)
   expression === nothing && throw(validation_error(
     "$context must use the numeric-expression tagged representation",
   ))
-  _script_validate_source(expression.source, context)
+  _script_validate_source(
+    expression.source,
+    context;
+    profile=:numeric_expression,
+    placement="variable",
+  )
   return nothing
 end
 
@@ -582,7 +595,18 @@ function _script_symbolic_expression(
   if _states_zoo_object_like(value) && get(value, "kind", nothing) == "states_zoo"
     return _script_states_zoo_expression(value, context; imports)
   elseif value isa AbstractString
-    return _script_raw_expression(value, context)
+    source = String(value)
+    _script_validate_source(
+      source,
+      context;
+      profile=:symbolic_expression,
+      placement="symbolic",
+    )
+    return "(let\n" *
+      "# WebQuantumSavory validated Symbolic source begins\n" *
+      source * "\n" *
+      "# WebQuantumSavory validated Symbolic source ends\n" *
+      "end)"
   end
   throw(validation_error(
     "$context must be Julia symbolic source or a States Zoo recipe",
@@ -613,12 +637,6 @@ function _script_regular_expression(
     ))
   end
 
-  # The normal parser's final fallback interprets complex values as Julia. The
-  # exporter preserves that local-script capability but only parses the source;
-  # it never evaluates it in the web-server process.
-  if value isa AbstractString || value isa Number || value isa AbstractVector
-    return _script_raw_expression(value, context)
-  end
   throw(validation_error(
     "$context with declared type '$declared_type' cannot be translated",
     Dict{String,Any}("received_type" => string(typeof(value))),

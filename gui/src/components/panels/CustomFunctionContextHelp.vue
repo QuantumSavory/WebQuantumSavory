@@ -34,26 +34,19 @@
             <X :size="15" aria-hidden="true" />
           </button>
         </header>
-        <dl>
-          <template v-for="keyword in SOURCE_CONTEXT_KEYWORDS" :key="keyword.id">
-            <dt><code>{{ keyword.syntax }}</code></dt>
-            <dd>
-              {{ keyword.description }}
-              {{ keyword.availability }}
-              <span v-if="keyword.recommendation">{{ keyword.recommendation }}</span>
-            </dd>
-          </template>
-        </dl>
+        <MarkdownContent :content="helpMarkdown" />
       </section>
     </Popover>
   </div>
 </template>
 
 <script setup>
-import { ref, useId } from 'vue'
+import { computed, ref, useId } from 'vue'
 import { CircleHelp, X } from '@lucide/vue'
 import Popover from 'primevue/popover'
-import { SOURCE_CONTEXT_KEYWORDS } from '../../utils/customFunctionContext'
+import { api } from '../../utils/ApiConnector.js'
+import { sourceLanguageHelpMarkdown } from '../../utils/sourceLanguageHelp.js'
+import MarkdownContent from '../ui/MarkdownContent.vue'
 
 const props = defineProps({
   label: {
@@ -64,19 +57,31 @@ const props = defineProps({
     type: String,
     default: 'custom functions',
   },
+  profile: {
+    type: String,
+    default: 'custom_function',
+  },
 })
 
 const popover = ref(null)
 const trigger = ref(null)
 const popoverVisible = ref(false)
 const popoverId = `custom-function-context-${useId()}`
+const helpMarkdown = computed(() => sourceLanguageHelpMarkdown(
+  api.config.value.sourceLanguage,
+  props.profile,
+))
+const profileTestIds = Object.freeze({
+  custom_function: 'custom-function-context-help',
+  numeric_expression: 'numeric-expression-context-help',
+  symbolic_expression: 'symbolic-expression-context-help',
+  query_predicate: 'query-predicate-context-help',
+})
 const popoverPassThrough = {
   root: {
     id: popoverId,
     'aria-label': props.label,
-    'data-testid': props.label === 'Custom function context'
-      ? 'custom-function-context-help'
-      : 'numeric-expression-context-help',
+    'data-testid': profileTestIds[props.profile] || 'source-language-context-help',
     class: 'custom-function-context-overlay',
   },
   content: {
@@ -155,20 +160,8 @@ function closePopover() {
   color: var(--app-color-primary);
 }
 
-dl {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: var(--app-space-1) var(--app-space-2);
-  margin: 0;
-}
-
-dt,
-dd {
-  margin: 0;
-}
-
-code {
-  color: var(--app-color-text);
+.custom-function-context-popup :deep(.markdown-content) {
+  padding: 0;
   font-size: inherit;
 }
 </style>

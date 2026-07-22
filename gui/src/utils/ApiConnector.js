@@ -100,6 +100,29 @@ export class ApiConnector {
     this.known_functions.value = responseObject.known_functions
   }
 
+  async fetchSourceLanguage({ signal, force = false } = {}) {
+    const cached = this._config.value.sourceLanguage
+    if (!force && cached) return cached
+    const res = await fetch(`${this.baseUrl}/source_language`, {
+      headers: this.requestHeaders,
+      signal,
+    })
+    const catalog = await readJsonResponse(res, 'Source-language metadata fetch failed')
+    if (
+      !catalog
+      || catalog.schema_version !== 1
+      || !Array.isArray(catalog.function_forms)
+      || typeof catalog.contexts !== 'object'
+    ) {
+      throw new Error('Source-language metadata response is invalid')
+    }
+    this._config.value = {
+      ...this._config.value,
+      sourceLanguage: catalog,
+    }
+    return catalog
+  }
+
   async fetchStatesZooTypes({ signal, force = false } = {}) {
     const cachedTypes = this._config.value.statesZooTypes
     if (!force && Array.isArray(cachedTypes)) return cachedTypes
@@ -332,6 +355,7 @@ export class ApiConnector {
       await Promise.all([
         this.fetchKnownFunctions(),
         this.fetchStatesZooTypes(),
+        this.fetchSourceLanguage(),
       ])
       // Get background noise types
       const res = await fetch(`${this.baseUrl}/background_types`, {

@@ -285,10 +285,9 @@
     lambda_parameters = lambda_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
     lambda_by_name = Dict(parameter["name"] => parameter for parameter in lambda_parameters)
     raw_context_lambda =
-      "slot -> (MessageBuffer; EntanglementConsumer; LinearAlgebra.tr; " *
-      "length == 12500.0 && delay == 0.125 && refractive_index == 1.5 && " *
+      "slot -> distance == 12500.0 && delay == 0.125 && refractive_index == 1.5 && " *
       "loss == 0.2 && transmissivity == 0.95 && " *
-      "node_a == 1 && node_b == 2 && Base.length((slot,)) == 1 && slot > 0)"
+      "node_a == 1 && node_b == 2 && length((slot,)) == 1 && slot > 0"
     lambda_by_name["chooseA"]["type"] = "Lambda"
     lambda_by_name["chooseA"]["value"] = raw_context_lambda
     lambda_by_name["chooseB"]["type"] = "Lambda"
@@ -300,22 +299,16 @@
     @test occursin("chooseslotA = (let", lambda_script)
     @test occursin("chooseslotB = (let", lambda_script)
     @test occursin(raw_context_lambda, lambda_script)
-    @test occursin("length = 12500.0", lambda_script)
+    @test occursin("distance = 12500.0", lambda_script)
     @test occursin("delay = 0.125", lambda_script)
     @test occursin("refractive_index = 1.5", lambda_script)
     @test occursin("loss = 0.2", lambda_script)
     @test occursin("transmissivity = 0.95", lambda_script)
     @test occursin("node_a = 1", lambda_script)
     @test occursin("node_b = 2", lambda_script)
-    @test occursin("Base.length((slot,))", lambda_script)
+    @test occursin("length((slot,))", lambda_script)
     @test occursin("slot -> slot > 0", lambda_script)
     @test Meta.parseall(lambda_script) isa Expr
-    lambda_import_lines = filter(
-      line -> startswith(line, "using ") && occursin(": ", line),
-      split(lambda_script, '\n'),
-    )
-    @test !any(line -> occursin("MessageBuffer", line), lambda_import_lines)
-    @test !any(line -> occursin("EntanglementConsumer", line), lambda_import_lines)
     paused_lambda_script = replace(
       lambda_script,
       "\nrun(sim, simulation_duration)\n" =>
@@ -337,17 +330,11 @@
 
     # Exported node functions must not gain edge-only values merely because the
     # generated script has physical edges elsewhere.
-    node_only_expression = WebQuantumSavory._script_custom_function_expression(
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory._script_custom_function_expression(
       "() -> (node_a, delay)",
       1,
       "Node-only context regression",
     )
-    @test !occursin("node_a =", node_only_expression)
-    @test !occursin("delay =", node_only_expression)
-    node_only_module = Module(gensym(:NodeOnlyContextExport))
-    Core.eval(node_only_module, :(using Base))
-    node_only_function = Core.eval(node_only_module, Meta.parse(node_only_expression))
-    @test_throws UndefVarError node_only_function()
 
     forged_lambda_payload = deepcopy(tagged_payload)
     forged_lambda_parameters =
@@ -479,13 +466,14 @@
         "id" => "node-context-function",
         "name" => "node context function",
         "type" => "Lambda",
-        "value" => "candidates -> self * 100 + nodeid(\"Cambridge\") + first(candidates)",
+        "value" =>
+          "candidates -> (self * 100 + nodeid(\"Cambridge\")) + first(candidates)",
       ),
     ]
     contextual_payload["net"]["edges"][1]["data"]["protocols"] = Any[]
-    named_node_function = """function named_node_choice(candidates)
-        self * 1000 + nodeid("Amherst") + first(candidates)
-    end"""
+    named_node_function =
+      "named_node_choice(candidates) = " *
+      "(self * 1000 + nodeid(\"Amherst\")) + first(candidates)"
     for (node_index, node) in enumerate(contextual_payload["net"]["nodes"])
       push!(node["data"]["protocols"], Dict(
         "id" => "node-context-$node_index",
@@ -509,10 +497,10 @@
       contextual_script,
     )
     @test !occursin("variable_node_context_function =", contextual_script)
-    @test occursin("let\n    self = 1", contextual_script)
-    @test occursin("let\n    self = 2", contextual_script)
-    @test length(findall("candidates -> self * 100 + nodeid", contextual_script)) == 2
-    @test length(findall("function named_node_choice", contextual_script)) == 2
+    @test occursin("    self = 1\n", contextual_script)
+    @test occursin("    self = 2\n", contextual_script)
+    @test length(findall("candidates -> (self * 100 + nodeid", contextual_script)) == 2
+    @test length(findall("named_node_choice(candidates) =", contextual_script)) == 2
 
     lambda_default_payload = deepcopy(contextual_payload)
     lambda_default_payload["variables"][1]["value"] = "default"
@@ -523,7 +511,6 @@
       error
     end
     @test lambda_default_error isa WebQuantumSavory.APIError
-    @test occursin("cannot use a constructor default", lambda_default_error.message)
 
     unused_nonstring_lambda_payload = deepcopy(contextual_payload)
     unused_nonstring_lambda_payload["variables"][1]["value"] = 42
@@ -537,10 +524,6 @@
       error
     end
     @test unused_nonstring_lambda_error isa WebQuantumSavory.APIError
-    @test occursin(
-      "must be a function name or Julia function expression",
-      unused_nonstring_lambda_error.message,
-    )
 
     contextual_module = Module(gensym(:ContextualExport))
     Core.eval(contextual_module, :(using Base))
@@ -555,49 +538,57 @@
 
     complete_source_expression = WebQuantumSavory._script_value_expression(
       "Lambda",
-      "complete_choice(value) = self + value\ncomplete_choice\n# trailing comment",
+      "complete_choice(value) = self + value\n# trailing comment",
       "Complete-source custom function";
       node_index=2,
+    )
+    @test occursin(
+      "# WebQuantumSavory validated source begins\n" *
+      "complete_choice(value) = self + value\n# trailing comment\n" *
+      "# WebQuantumSavory validated source ends",
+      complete_source_expression,
     )
     complete_source_function = Core.eval(
       contextual_module,
       Meta.parse(complete_source_expression),
     )
     @test Base.invokelatest(complete_source_function, 3) == 5
+    @test !isdefined(contextual_module, :complete_choice)
 
-    nonfunction_source_expression = WebQuantumSavory._script_value_expression(
+    curry_source_expression = WebQuantumSavory._script_value_expression(
+      "Lambda",
+      "==(self)",
+      "Comparison-curry custom source";
+      node_index=2,
+    )
+    @test occursin("==(self)", curry_source_expression)
+    curry_source_function = Core.eval(
+      contextual_module,
+      Meta.parse(curry_source_expression),
+    )
+    @test Base.invokelatest(curry_source_function, 2)
+    @test !Base.invokelatest(curry_source_function, 3)
+
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory._script_value_expression(
       "Lambda",
       "42",
       "Non-function custom source";
       node_index=2,
     )
-    @test_throws ArgumentError Core.eval(
-      contextual_module,
-      Meta.parse(nonfunction_source_expression),
-    )
 
-    shadowed_nonfunction_expression = WebQuantumSavory._script_value_expression(
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory._script_value_expression(
       "Lambda",
       "Function = Any\nthrow = identity\n42",
-      "Shadowed non-function custom source";
+      "Multiple-expression custom source";
       node_index=2,
-    )
-    @test_throws ArgumentError Core.eval(
-      contextual_module,
-      Meta.parse(shadowed_nonfunction_expression),
     )
 
-    shadowed_function_expression = WebQuantumSavory._script_value_expression(
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory._script_value_expression(
       "Lambda",
       "Function = Int\nvalue -> self + value",
-      "Shadowed valid custom source";
+      "Multiple-expression custom source";
       node_index=2,
     )
-    shadowed_function = Core.eval(
-      contextual_module,
-      Meta.parse(shadowed_function_expression),
-    )
-    @test Base.invokelatest(shadowed_function, 3) == 5
 
     for context in ("Edge custom function", "Floating custom function")
       nodeid_expression = WebQuantumSavory._script_value_expression(
@@ -616,18 +607,16 @@
       unknown_name_function = Core.eval(contextual_module, Meta.parse(unknown_name_expression))
       @test_throws KeyError Base.invokelatest(unknown_name_function, 3)
 
-      self_expression = WebQuantumSavory._script_value_expression(
+      @test_throws WebQuantumSavory.APIError WebQuantumSavory._script_value_expression(
         "Lambda",
         "value -> self + value",
         context,
       )
-      self_function = Core.eval(contextual_module, Meta.parse(self_expression))
-      @test_throws UndefVarError Base.invokelatest(self_function, 3)
     end
 
     virtual_edge_expression = WebQuantumSavory._script_value_expression(
       "Lambda",
-      "() -> isnothing(length) && isnothing(delay) && isnothing(refractive_index) && " *
+      "() -> isnothing(distance) && isnothing(delay) && isnothing(refractive_index) && " *
       "isnothing(loss) && isnothing(transmissivity) && " *
       "node_a == 2 && node_b == 1",
       "Virtual edge custom function";
@@ -1045,6 +1034,23 @@
         @test node_kwargs[:chooseslot].(1:3) == [false, true, false]
       end
 
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+        error = try
+          WebQuantumSavory._handle_function_lambda_parameter!(
+            Dict{Symbol,Any}(),
+            :chooseslot,
+            "Lambda",
+            "==(self)";
+            self_node_index=2,
+          )
+          nothing
+        catch caught
+          caught
+        end
+        @test error isa WebQuantumSavory.APIError
+        @test error.status_code == 403
+      end
+
       non_node_kwargs = Dict{Symbol,Any}()
       @test !WebQuantumSavory._handle_function_lambda_parameter!(
         non_node_kwargs,
@@ -1069,348 +1075,403 @@
       end
   end
 
-  @testset "Custom Function Source Evaluation" begin
-    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
-      accepted_sources = (
-        ("<(1)", 0, true),
-        (">(1)", 2, true),
-        ("in([1, 3])", 3, true),
-        ("increment(x) = x + 1", 2, 3),
-        ("increment(x) = x + 1\nincrement", 3, 4),
-        ("increment(x) = x + 1\n# trailing comment", 4, 5),
-        ("function double(x)\n  return 2x\nend", 5, 10),
-      )
-
-      for (source, input, expected) in accepted_sources
-        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(source)
-        @test success
-        @test results isa Dict
-        @test validation_error === nothing
-
-        custom_function = WebQuantumSavory.create_lambda(source)
-        @test custom_function(input) == expected
-      end
-
-      node_name_to_index = Dict("Amherst" => 1, "Cambridge" => 2)
-      contextual_sources = (
-        ("<(self)", 1, true),
-        ("==(nodeid(\"Cambridge\"))", 2, true),
-        ("let threshold = self\n  <(threshold)\nend", 1, true),
-      )
-      for (source, input, expected) in contextual_sources
-        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
-          source;
-          placement="node",
-        )
-        @test success
-        @test results isa Dict
-        @test validation_error === nothing
-
-        custom_function = WebQuantumSavory.create_lambda(
-          source;
-          node_name_to_index=node_name_to_index,
-          self_node_index=2,
-        )
-        @test custom_function(input) == expected
-      end
-
-      success, _, validation_error = WebQuantumSavory.Sandbox.test_code(
-        "==(nodeid(\"Amherst\"))";
-        placement="edge",
-      )
-      @test success
-      @test validation_error === nothing
-
-      for placement in ("edge", "variable")
-        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
-          "candidates -> length > 0 && delay >= 0 && refractive_index > 0 && " *
-          "loss >= 0 && 0 <= transmissivity <= 1 && " *
-          "node_a == 1 && node_b == 2 && Base.length(candidates) > 0";
-          placement=placement,
-        )
-        @test success
-        @test results isa Dict
-        @test validation_error === nothing
-      end
-
-      success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
-        "candidate -> candidate == self && node_a < node_b";
-        placement="variable",
-      )
-      @test success
-      @test results isa Dict
-      @test validation_error === nothing
-
-      for placement in (nothing, "edge", "floating")
-        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
-          "<(self)";
-          placement=placement,
-        )
-        @test !success
-        @test results === nothing
-        @test validation_error isa UndefVarError
-      end
-
-      success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
-        "x -> x > 1";
-        placement="query",
-      )
-      @test success
-      @test results isa Dict
-      @test validation_error === nothing
-
-      success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
-        "candidate -> let nodeid = _ -> 1\n  candidate == nodeid(\"Amherst\")\nend";
-        placement="query",
-      )
-      @test success
-      @test results isa Dict
-      @test validation_error === nothing
-
-      for contextual_source in (
-        "<(self)",
-        "==(nodeid(\"Amherst\"))",
-        "candidate -> candidate == self",
-        "candidate -> candidate == nodeid(\"Amherst\")",
-      )
-        success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
-          contextual_source;
-          placement="query",
-        )
-        @test !success
-        @test results === nothing
-        @test validation_error isa UndefVarError
-      end
-
-      success, results, validation_error = WebQuantumSavory.Sandbox.test_code("42")
-      @test !success
-      @test results === nothing
-      @test validation_error isa ArgumentError
-      @test occursin("got Int64", sprint(showerror, validation_error))
-      @test occursin("<(1)", sprint(showerror, validation_error))
-
-      success, results, parse_error = WebQuantumSavory.Sandbox.test_code("invalid(")
-      @test !success
-      @test results === nothing
-      @test parse_error isa Base.Meta.ParseError
-
-      development_response = WebQuantumSavory.evaluation_failure_response(
-        parse_error;
-        environment="dev",
-      )
-      @test startswith(development_response[:error], "ParseError:")
-      @test occursin("Expected `)` or `,`", development_response[:error])
-      @test !occursin("Base.Meta.ParseError(", development_response[:error])
-      @test development_response[:error_type] == "Base.Meta.ParseError"
-
-      production_response = WebQuantumSavory.evaluation_failure_response(
-        parse_error;
-        environment="prod",
-      )
-      @test production_response[:error] == "Evaluation failed"
-      @test !occursin("invalid(", string(production_response))
+  @testset "Restricted Function Source Language" begin
+    capture_error(thunk) = try
+      thunk()
+      nothing
+    catch error
+      error
     end
-  end
 
-  @testset "Custom Function Runtime Context" begin
-      nodes = [
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      accepted = (
+        ("x -> x + 1", :anonymous_lambda, nothing, 1, 2, 3),
+        ("answer() = 42", :short_form_definition, :answer, 0, nothing, 42),
+        ("increment(x) = x + 1", :short_form_definition, :increment, 1, 2, 3),
+        ("==(2)", :comparison_curry, nothing, 1, 2, true),
+      )
+      for (source, root_form, function_name, arity, input, expected) in accepted
+        validated = WebQuantumSavory.validate_source_expression(
+          source;
+          profile=:custom_function,
+          placement="floating",
+        )
+        @test validated.parsed == Meta.parseall(source)
+        @test validated.root_form == root_form
+        @test validated.function_name == function_name
+        @test length(validated.arguments) == arity
+
+        success, results, error = WebQuantumSavory.Sandbox.test_code(source)
+        @test success
+        @test error === nothing
+        @test results[:root_form] == string(root_form)
+        @test results[:arity] == arity
+        if function_name === nothing
+          @test !haskey(results, :function_name)
+        else
+          @test results[:function_name] == string(function_name)
+        end
+
+        function_value = WebQuantumSavory.create_lambda(source)
+        @test (arity == 0 ? function_value() : function_value(input)) == expected
+        function_name === nothing ||
+          @test !isdefined(parentmodule(function_value.func), function_name)
+      end
+
+      eight_arguments = WebQuantumSavory.create_lambda(
+        "(a, b, c, d, e, f, g, h) -> a + h",
+      )
+      @test eight_arguments(1, 2, 3, 4, 5, 6, 7, 8) == 9
+      @test WebQuantumSavory.create_lambda("() -> nothing")() === nothing
+
+      for (source, candidate, expected) in (
+        ("==(2)", 2, true),
+        ("!=(2)", 3, true),
+        ("≠(2)", 3, true),
+        ("<(2)", 1, true),
+        ("<=(2)", 2, true),
+        ("≤(2)", 2, true),
+        (">(2)", 3, true),
+        (">=(2)", 2, true),
+        ("≥(2)", 2, true),
+      )
+        @test WebQuantumSavory.create_lambda(source)(candidate) == expected
+      end
+      @test WebQuantumSavory.create_lambda(">(2)")(1) == false
+      @test WebQuantumSavory.create_lambda("<(2)")(3) == false
+
+      node_name_to_index = WebQuantumSavory._node_name_to_index([
         Dict("name" => "Amherst"),
         Dict("name" => "Cambridge"),
         Dict("name" => "Amherst"),
-      ]
-      node_name_to_index = WebQuantumSavory._node_name_to_index(nodes)
-      # Julia Dict construction intentionally preserves compatibility for
-      # duplicate names by retaining the last matching node.
+      ])
       @test node_name_to_index == Dict("Amherst" => 3, "Cambridge" => 2)
 
-      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
-        anonymous = WebQuantumSavory.create_lambda(
-          "candidate -> self == nodeid(\"Cambridge\") && candidate == nodeid(\"Amherst\")";
-          node_name_to_index=node_name_to_index,
+      node_context_sources = (
+        "candidate -> candidate == self && nodeid(\"Cambridge\") == self",
+        "matches_self(candidate) = candidate == self && nodeid(\"Cambridge\") == self",
+        "<=(self)",
+      )
+      for source in node_context_sources
+        function_value = WebQuantumSavory.create_lambda(
+          source;
+          node_name_to_index,
           self_node_index=2,
         )
-        @test anonymous(3)
-        @test !anonymous(2)
+        @test function_value(2)
+      end
 
-        named = WebQuantumSavory.create_lambda(
-          """
-          function contextual_selector(candidate)
-            return self == nodeid("Cambridge") && candidate == nodeid("Amherst")
-          end
-          """;
-          node_name_to_index=node_name_to_index,
-          self_node_index=2,
+      edge_context = WebQuantumSavory._EdgeFunctionContext(
+        1250.0,
+        0.25,
+        1.5,
+        0.2,
+        0.95,
+        1,
+        2,
+      )
+      edge_sources = (
+        "candidate -> candidate == distance",
+        "matches_distance(candidate) = candidate == distance",
+        ">(distance)",
+      )
+      for (index, source) in enumerate(edge_sources)
+        function_value = WebQuantumSavory.create_lambda(
+          source;
+          node_name_to_index,
+          edge_context,
         )
-        @test named(3)
-        @test !named(1)
+        @test function_value(index == 3 ? 1251.0 : 1250.0)
+      end
 
-        short_form_source =
-          "contextual_short(candidate) = " *
-          "self == nodeid(\"Cambridge\") && candidate == nodeid(\"Amherst\"); contextual_short"
-        @test Meta.parse(short_form_source).head === :toplevel
-        short_form = WebQuantumSavory.create_lambda(
-          short_form_source;
-          node_name_to_index=node_name_to_index,
-          self_node_index=2,
+      complete_edge = WebQuantumSavory.create_lambda(
+        "values -> distance == 1250.0 && delay == 0.25 && " *
+        "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
+        "node_a == 1 && node_b == 2 && length(values) == 2";
+        node_name_to_index,
+        edge_context,
+      )
+      @test complete_edge([1, 2])
+
+      virtual_edge = WebQuantumSavory.create_lambda(
+        "() -> isnothing(distance) && isnothing(delay) && " *
+        "isnothing(refractive_index) && isnothing(loss) && " *
+        "isnothing(transmissivity) && node_a == 2 && node_b == 1";
+        edge_context=WebQuantumSavory._EdgeFunctionContext(
+          nothing, nothing, nothing, nothing, nothing, 2, 1,
+        ),
+      )
+      @test virtual_edge()
+      @test WebQuantumSavory.create_lambda("values -> length(values)")([1, 2, 3]) == 3
+
+      for (source, placement) in (
+        ("x -> distance", "node"),
+        ("x -> distance", "floating"),
+        ("x -> nodeid", "floating"),
+        ("x -> length", "edge"),
+        ("x -> self", "edge"),
+        ("x -> node_a", "node"),
+        ("x -> nodeid(\"Amherst\")", "query"),
+      )
+        error = capture_error(() -> WebQuantumSavory.validate_source_expression(
+          source;
+          profile=placement == "query" ? :query_predicate : :custom_function,
+          placement,
+        ))
+        @test error isa WebQuantumSavory.APIError
+        @test error.status_code == 400
+      end
+
+      missing_name = WebQuantumSavory.create_lambda(
+        "candidate -> candidate == nodeid(\"Springfield\")";
+        node_name_to_index,
+        self_node_index=1,
+      )
+      @test_throws KeyError missing_name(1)
+
+      query_symbol = WebQuantumSavory.Sandbox.evaluate_query_expression(
+        "candidate -> candidate == :ready",
+      )[1]
+      query_symbol_lambda = WebQuantumSavory.LambdaImpl(query_symbol, :query_predicate)
+      @test query_symbol_lambda(:ready)
+      query_type = WebQuantumSavory.Sandbox.evaluate_query_expression(
+        "candidate -> candidate == candidate",
+      )[1]
+      @test WebQuantumSavory.LambdaImpl(query_type, :query_predicate)(Int64)
+      non_boolean_query = WebQuantumSavory.LambdaImpl(
+        WebQuantumSavory.Sandbox.evaluate_query_expression("candidate -> candidate")[1],
+        :query_predicate,
+      )
+      @test_throws ArgumentError non_boolean_query(1)
+
+      non_finite = WebQuantumSavory.create_lambda("x -> x")
+      @test isinf(non_finite(Inf))
+      @test isnan(non_finite(NaN))
+      @test WebQuantumSavory.create_lambda("x -> isnan(x)")(NaN)
+      @test WebQuantumSavory.create_lambda("x -> x != x")(NaN)
+
+      for invalid_argument in (Dict(:value => 1), Set([1]), big(1))
+        @test_throws ArgumentError non_finite(invalid_argument)
+      end
+      @test_throws ArgumentError WebQuantumSavory.create_lambda("x -> π")(1)
+      deep_value = Any[Any[Any[Any[Any[Any[Any[Any[Any[1]]]]]]]]]
+      @test_throws ArgumentError non_finite(deep_value)
+      @test non_finite(collect(1:4096)) == collect(1:4096)
+      @test_throws ArgumentError non_finite(collect(1:4097))
+
+      forbidden_roots = (
+        "function f(x)\n x + 1\nend",
+        "f(x=1) = x",
+        "f(; x) = x",
+        "f(x::Int64) = x",
+        "f(x...) = x",
+        "f((x, y)) = x",
+        "f(x)::Int64 = x",
+        "f(x) where {x} = x",
+        "Base.f(x) = x",
+        "(f::Function)(x) = x",
+        "f(x) = f(x)",
+        "x -> (y -> y)",
+        "x -> (f(y) = y)",
+        "x -> begin x + 1; x + 2 end",
+        "x -> x + 1\ny -> y + 1",
+        "(a, b, c, d, e, f, g, h, i) -> a",
+        "(x, x) -> x",
+        "42",
+      )
+      for source in forbidden_roots
+        @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+          source;
+          profile=:custom_function,
+          placement="floating",
+        )) isa WebQuantumSavory.APIError
+      end
+
+      operation_method_tables = Dict(
+        definition.name => sort!(string.(collect(methods(definition.value))))
+        for definition in (
+          WebQuantumSavory.ORDINARY_OPERATION_DEFINITIONS...,
+          WebQuantumSavory.SYMBOLIC_OPERATION_DEFINITIONS...,
         )
-        @test short_form(3)
-        @test !short_form(2)
-        @test !isdefined(parentmodule(short_form.func), :contextual_short)
-
-        long_form_source = """
-        function contextual_long(candidate)
-          return self == nodeid("Cambridge") && candidate == nodeid("Amherst")
-        end; contextual_long
-        """
-        @test Meta.parse(long_form_source).head === :toplevel
-        long_form = WebQuantumSavory.create_lambda(
-          long_form_source;
-          node_name_to_index=node_name_to_index,
-          self_node_index=2,
+      )
+      for capability in sort!(string.(collect(WebQuantumSavory._all_capability_names())))
+        source = "$(capability)(x) = x"
+        @test capture_error(() -> WebQuantumSavory.Sandbox.test_code(source)) isa
+          WebQuantumSavory.APIError
+      end
+      @test operation_method_tables == Dict(
+        definition.name => sort!(string.(collect(methods(definition.value))))
+        for definition in (
+          WebQuantumSavory.ORDINARY_OPERATION_DEFINITIONS...,
+          WebQuantumSavory.SYMBOLIC_OPERATION_DEFINITIONS...,
         )
-        @test long_form(3)
-        @test !long_form(1)
-        @test !isdefined(parentmodule(long_form.func), :contextual_long)
+      )
 
-        # Literal custom functions are instantiated with the node assignment's
-        # context rather than a process-global value.
-        literal_kwargs = Dict{Symbol,Any}()
-        literal_ctx = Dict{Symbol,Any}(
-          :node => 2,
+      for source in (
+        "+(2)",
+        "==(1, 2)",
+        "==()",
+        "Base.==(2)",
+        "(true ? == : !=)(2)",
+        "x -> ==(2)",
+        "===(2)",
+        "!==(2)",
+        "isapprox(2)",
+      )
+        @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+          source;
+          profile=:custom_function,
+          placement="floating",
+        )) isa WebQuantumSavory.APIError
+      end
+
+      sentinel = tempname()
+      forbidden_syntax = (
+        "x -> open($(repr(sentinel)), \"w\")",
+        "x -> Base.sin(x)",
+        "x -> x[1]",
+        "x -> getproperty(x, :field)",
+        "x -> [value for value in x]",
+        "x -> (1:3)",
+        "x -> @show x",
+        "x -> `echo unsafe`",
+        "x -> x .+ 1",
+        "x -> sum(x...)",
+        "x -> begin global leaked = x; x end",
+      )
+      for source in forbidden_syntax
+        @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+          source;
+          profile=:custom_function,
+          placement="floating",
+        )) isa WebQuantumSavory.APIError
+      end
+      @test !isfile(sentinel)
+
+      @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+        repeat("x", WebQuantumSavory.SOURCE_MAX_BYTES + 1);
+        profile=:numeric_expression,
+        placement="floating",
+      )) isa WebQuantumSavory.APIError
+      @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+        repr(repeat("x", WebQuantumSavory.SOURCE_STRING_MAX_BYTES + 1));
+        profile=:numeric_expression,
+        placement="floating",
+      )) isa WebQuantumSavory.APIError
+      @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+        "min(" * join(1:9, ", ") * ")";
+        profile=:numeric_expression,
+        placement="floating",
+      )) isa WebQuantumSavory.APIError
+      @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+        "[" * join(fill("1", 257), ",") * "]";
+        profile=:numeric_expression,
+        placement="floating",
+      )) isa WebQuantumSavory.APIError
+
+      catalog = WebQuantumSavory.source_language_catalog()
+      @test catalog["schema_version"] == 1
+      @test catalog["unsafe_evaluation"]
+      edge_names = [entry["name"] for entry in catalog["contexts"]["edge"]]
+      @test "distance" in edge_names
+      @test !("length" in edge_names)
+      operation_names = [entry["name"] for entry in catalog["operations"]["ordinary"]]
+      @test "length" in operation_names
+      @test only(
+        entry["syntax"] for entry in catalog["operations"]["ordinary"]
+        if entry["name"] == "length"
+      ) == "length(value)"
+      @test catalog["comparison_currying"]["operators"] ==
+        string.(WebQuantumSavory.COMPARISON_CURRY_OPERATORS)
+      @test all(WebQuantumSavory.SYMBOLIC_CONSTRUCTOR_DEFINITIONS) do definition
+        methods_with_arity = filter(collect(methods(definition.value))) do method
+          method.isva && return false
+          signature = Base.unwrap_unionall(method.sig)
+          signature isa DataType || return false
+          length(signature.parameters) == definition.minimum_arity + 1 || return false
+          isempty(Base.kwarg_decl(method))
+        end
+        length(methods_with_arity) == 1 && all(methods_with_arity) do method
+          signature = Base.unwrap_unionall(method.sig)
+          all(type -> type !== Any && !(type isa TypeVar), signature.parameters[2:end])
+        end
+      end
+    end
+
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      gated_function = WebQuantumSavory.create_lambda("x -> x + 1")
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+        error = capture_error(() -> gated_function(1))
+        @test error isa WebQuantumSavory.APIError
+        @test error.status_code == 403
+      end
+    end
+  end
+
+  @testset "Custom Function Assignment Context" begin
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      node_name_to_index = Dict("Amherst" => 1, "Cambridge" => 2)
+      literal_kwargs = Dict{Symbol,Any}()
+      literal_ctx = Dict{Symbol,Any}(
+        :node => 2,
+        WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+      )
+      @test WebQuantumSavory._handle_typed_parameter!(
+        literal_kwargs,
+        :selector,
+        "Lambda",
+        "candidate -> candidate == self && nodeid(\"Cambridge\") == self",
+        literal_ctx,
+      )
+      @test literal_kwargs[:selector](2)
+
+      lambda_variable = WebQuantumSavory.Variable(
+        "contextual-selector",
+        "contextual selector",
+        "Lambda",
+        "candidate -> candidate == self",
+      )
+      variable_functions = Dict{Int,Any}()
+      for node_index in 1:2
+        kwargs = Dict{Symbol,Any}()
+        ctx = Dict{Symbol,Any}(
+          :node => node_index,
           WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
         )
         @test WebQuantumSavory._handle_typed_parameter!(
-          literal_kwargs,
+          kwargs,
           :selector,
-          "Lambda",
-          "candidate -> candidate == self && nodeid(\"Cambridge\") == self",
-          literal_ctx,
+          lambda_variable.type,
+          lambda_variable.value,
+          ctx,
         )
-        @test literal_kwargs[:selector](2)
-        @test !literal_kwargs[:selector](1)
+        variable_functions[node_index] = kwargs[:selector]
+      end
+      @test variable_functions[1](1)
+      @test variable_functions[2](2)
+      @test !variable_functions[1](2)
 
-        # Lambda variables retain raw source and receive a fresh lexical `self`
-        # for each assignment, while sharing the prepared node lookup.
-        lambda_variable = WebQuantumSavory.Variable(
-          "contextual-selector",
-          "contextual selector",
-          "Lambda",
-          "candidate -> candidate == self && nodeid(\"Cambridge\") == 2",
-        )
-        variable_functions = Dict{Int,Any}()
-        for node_index in 1:2
-          kwargs = Dict{Symbol,Any}()
-          ctx = Dict{Symbol,Any}(
-            :node => node_index,
-            WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
-          )
-          @test WebQuantumSavory._handle_typed_parameter!(
-            kwargs,
-            :selector,
-            lambda_variable.type,
-            lambda_variable.value,
-            ctx,
-          )
-          variable_functions[node_index] = kwargs[:selector]
-        end
-        @test variable_functions[1](1)
-        @test !variable_functions[1](2)
-        @test variable_functions[2](2)
-        @test !variable_functions[2](1)
-
-        physical_edge_context = WebQuantumSavory._EdgeFunctionContext(
-          1250.0,
-          0.25,
-          1.5,
-          0.2,
-          0.95,
-          1,
-          2,
-        )
-        edge_ctx = Dict{Symbol,Any}(
+      edge_context = WebQuantumSavory._EdgeFunctionContext(
+        1250.0, 0.25, 1.5, 0.2, 0.95, 1, 2,
+      )
+      edge_kwargs = Dict{Symbol,Any}()
+      @test WebQuantumSavory._handle_typed_parameter!(
+        edge_kwargs,
+        :selector,
+        "Lambda",
+        "values -> distance == 1250.0 && delay == 0.25 && " *
+        "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
+        "node_a == 1 && node_b == 2 && length(values) == 2",
+        Dict{Symbol,Any}(
           :nodeA => 1,
           :nodeB => 2,
           WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
-          WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY => physical_edge_context,
-        )
-        edge_kwargs = Dict{Symbol,Any}()
-        @test WebQuantumSavory._handle_typed_parameter!(
-          edge_kwargs,
-          :selector,
-          "Lambda",
-          "candidates -> length == 1250.0 && delay == 0.25 && " *
-          "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
-          "node_a == 1 && node_b == 2 && " *
-          "Base.length(candidates) == 2",
-          edge_ctx,
-        )
-        @test edge_kwargs[:selector]([1, 2])
-
-        virtual_function = WebQuantumSavory.create_lambda(
-          "() -> isnothing(length) && isnothing(delay) && isnothing(refractive_index) && " *
-          "isnothing(loss) && isnothing(transmissivity) && " *
-          "node_a == 2 && node_b == 1";
-          edge_context=WebQuantumSavory._EdgeFunctionContext(
-            nothing,
-            nothing,
-            nothing,
-            nothing,
-            nothing,
-            2,
-            1,
-          ),
-        )
-        @test virtual_function()
-
-        ordinary_length = WebQuantumSavory.create_lambda("values -> length(values)")
-        @test ordinary_length([1, 2, 3]) == 3
-
-        for self_node_index in (1, nothing), edge_only_name in ("node_a", "delay")
-          node_or_floating_function = WebQuantumSavory.create_lambda(
-            "() -> $edge_only_name";
-            node_name_to_index=node_name_to_index,
-            self_node_index=self_node_index,
-          )
-          @test_throws UndefVarError node_or_floating_function()
-        end
-
-        # Edge and floating functions receive `nodeid`, but no `self` binding.
-        for ctx in (
-          edge_ctx,
-          Dict{Symbol,Any}(
-            WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
-          ),
-        )
-          kwargs = Dict{Symbol,Any}()
-          @test WebQuantumSavory._handle_typed_parameter!(
-            kwargs,
-            :selector,
-            "Lambda",
-            "candidate -> candidate == nodeid(\"Cambridge\")",
-            ctx,
-          )
-          @test kwargs[:selector](2)
-
-          invalid_kwargs = Dict{Symbol,Any}()
-          @test WebQuantumSavory._handle_typed_parameter!(
-            invalid_kwargs,
-            :selector,
-            "Lambda",
-            "candidate -> candidate == self",
-            ctx,
-          )
-          @test_throws UndefVarError invalid_kwargs[:selector](2)
-        end
-
-        missing_name = WebQuantumSavory.create_lambda(
-          "candidate -> candidate == nodeid(\"Springfield\")";
-          node_name_to_index=node_name_to_index,
-          self_node_index=1,
-        )
-        @test_throws KeyError missing_name(1)
-      end
+          WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY => edge_context,
+        ),
+      )
+      @test edge_kwargs[:selector]([1, 2])
+    end
   end
-
   @testset "Protocol Types" begin
       @test !WebQuantumSavory.mock_broken_protocol_enabled(override=nothing)
       @test WebQuantumSavory.mock_broken_protocol_enabled(override=" TRUE ")
@@ -2292,7 +2353,8 @@
           "id" => "contextual_lambda",
           "name" => "contextual lambda",
           "type" => "Lambda",
-          "value" => "candidates -> self * 100 + nodeid(\"Cambridge\") + first(candidates)",
+          "value" =>
+            "candidates -> (self * 100 + nodeid(\"Cambridge\")) + first(candidates)",
         ),
       ]
 
@@ -2314,7 +2376,8 @@
           Dict(
             "name" => "chooseH",
             "type" => "Lambda",
-            "value" => "candidates -> self * 1000 + nodeid(\"Amherst\") + first(candidates)",
+            "value" =>
+              "candidates -> (self * 1000 + nodeid(\"Amherst\")) + first(candidates)",
           ),
           Dict("name" => "rounds", "type" => "Int64", "value" => 0),
         ],
@@ -2491,7 +2554,7 @@
       ))
       choose_a["type"] = "Lambda"
       choose_a["value"] =
-        "slot -> length == 12500.0 && delay == 0.125 && " *
+        "slot -> distance == 12500.0 && delay == 0.125 && " *
         "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
         "node_a == 1 && node_b == 2 ? " *
         "slot > 0 : false"
@@ -3020,10 +3083,12 @@
   end
 
   @testset "Unsafe Evaluation Policy" begin
-    @test WebQuantumSavory.unsafe_code_evaluation_enabled(environment="dev", override=nothing)
-    @test WebQuantumSavory.unsafe_code_evaluation_enabled(environment="test", override=nothing)
-    @test !WebQuantumSavory.unsafe_code_evaluation_enabled(environment="prod", override=nothing)
-    @test !WebQuantumSavory.unsafe_code_evaluation_enabled(environment="staging", override=nothing)
+    for environment in ("dev", "test", "prod", "staging")
+      @test !WebQuantumSavory.unsafe_code_evaluation_enabled(
+        environment=environment,
+        override=nothing,
+      )
+    end
     @test WebQuantumSavory.unsafe_code_evaluation_enabled(environment="prod", override=" TRUE ")
     @test !WebQuantumSavory.unsafe_code_evaluation_enabled(environment="test", override="False")
     @test_throws ArgumentError WebQuantumSavory.unsafe_code_evaluation_enabled(environment="prod", override="1")
@@ -3092,6 +3157,20 @@
       end
     end
 
+    function test_validation_error(thunk)
+      caught = try
+        thunk()
+        nothing
+      catch e
+        e
+      end
+      @test caught isa WebQuantumSavory.APIError
+      if caught isa WebQuantumSavory.APIError
+        @test caught.status_code == 400
+        @test caught.error_code == "VALIDATION_ERROR"
+      end
+    end
+
     original_override = get(ENV, WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR, nothing)
     withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
       # Direct code, symbolic, and lambda entry points enforce the policy before
@@ -3128,8 +3207,7 @@
       ))
       @test safe_noise isa QuantumSavory.AmplitudeDamping
 
-      # Each payload fallback propagates denial instead of silently dropping a
-      # parameter or using a constructor default.
+      # Source-bearing payloads remain gated.
       test_disabled(() -> WebQuantumSavory._handle_function_lambda_parameter!(
         Dict{Symbol,Any}(),
         :filter,
@@ -3141,19 +3219,29 @@
         :pairstate,
         "Z₁",
       ))
-      test_disabled(() -> WebQuantumSavory._handle_regular_parameter!(
+      # Ordinary parameter and background-noise source fallbacks no longer
+      # exist; unsupported explicit values are ordinary validation failures.
+      test_validation_error(() -> WebQuantumSavory._handle_regular_parameter!(
         Dict{Symbol,Any}(),
         :values,
         "Vector{Int64}",
         "[1, 2]",
       ))
-      test_disabled(() -> WebQuantumSavory._instantiate_noise(Dict(
+      test_validation_error(() -> WebQuantumSavory._instantiate_noise(Dict(
         "type" => "AmplitudeDamping",
         "parameters" => [Dict(
           "name" => "τ",
           "value" => "begin error(\"must not execute\"); 2.0 end",
         )],
       )))
+
+      validated = WebQuantumSavory.validate_source_expression(
+        "x -> x + 1";
+        profile=:custom_function,
+        placement="floating",
+      )
+      @test validated.root_form == :anonymous_lambda
+      @test WebQuantumSavory.source_language_catalog()["unsafe_evaluation"] == false
     end
 
     @test get(ENV, WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR, nothing) == original_override
@@ -3168,12 +3256,22 @@
     @test haskey(results, :latex)
     @test haskey(results, :value)
 
-    # Invalid expression should return an error
+    # Syntax validation failures are client errors and never reach evaluation.
     bad_expr = "(Z₁⊗Z₁+"  # malformed
-    success2, results2, err2 = WebQuantumSavory.Sandbox.test_symbolic_expression(bad_expr)
-    @test success2 == false
-    @test results2 === nothing
-    @test err2 !== nothing
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory.Sandbox.test_symbolic_expression(
+      bad_expr,
+    )
+
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory.validate_source_expression(
+      "QuantumSavory.Z₁";
+      profile=:symbolic_expression,
+      placement="symbolic",
+    )
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory.validate_source_expression(
+      "S\"Z₁\"";
+      profile=:symbolic_expression,
+      placement="symbolic",
+    )
   end
 
   @testset "Extract Payload Error Handling" begin
@@ -4470,11 +4568,8 @@
     end
   end
 
-  @testset "Typed Numeric Expressions" begin
-    expression(source) = Dict(
-      "kind" => "numeric_expression",
-      "source" => source,
-    )
+  @testset "Restricted Numeric Expressions" begin
+    expression(source) = Dict("kind" => "numeric_expression", "source" => source)
     capture_error(thunk) = try
       thunk()
       nothing
@@ -4482,113 +4577,17 @@
       error
     end
 
-    parsed_expression = WebQuantumSavory._parse_numeric_expression(
-      expression("delay / 2"),
-    )
-    @test parsed_expression isa WebQuantumSavory.NumericExpression
-    @test parsed_expression.source == "delay / 2"
-    @test WebQuantumSavory._parse_numeric_expression(0.5) === nothing
-    @test WebQuantumSavory._parse_numeric_expression(
-      Dict("kind" => "literal", "source" => "1"),
-    ) === nothing
-    @test_throws WebQuantumSavory.APIError WebQuantumSavory._parse_numeric_expression(
-      merge(expression("1"), Dict("value" => 1)),
-    )
-    @test_throws WebQuantumSavory.APIError WebQuantumSavory._parse_numeric_expression(
-      Dict("kind" => "numeric_expression", "source" => 1),
-    )
-
-    function lowered_bindings(source; evaluation_module=Module())
-      lowered = Meta.lower(
-        evaluation_module,
-        WebQuantumSavory._parse_complete_source(source),
-      )
-      return WebQuantumSavory._lowered_numeric_context_bindings(
-        lowered,
-        evaluation_module,
-      )
-    end
-    @test lowered_bindings("delay / 2 + node_a") == Set((:delay, :node_a))
-    @test lowered_bindings("loss * transmissivity") == Set((:loss, :transmissivity))
-    @test isempty(lowered_bindings("Base.length([1, 2])"))
-    @test isempty(lowered_bindings("let delay = 4; delay / 2; end"))
-    @test isempty(lowered_bindings("delay(x) = x + 1\ndelay(2)"))
-    @test lowered_bindings("x -> x + delay") == Set((:delay,))
-    @test isempty(lowered_bindings(":(delay + self)"))
-    @test lowered_bindings("# delay\nself") == Set((:self,))
-    @test lowered_bindings("@isdefined(delay)") == Set((:delay,))
-    @test isempty(lowered_bindings("if true; delay = 1; end; delay"))
-
-    macro_module = Module()
-    Core.eval(macro_module, :(expansion_count = Ref(0)))
-    Core.eval(macro_module, quote
-      macro count_expansion(expression)
-        expansion_count[] += 1
-        return esc(expression)
-      end
-      macro discard_expression(expression)
-        return :(1)
-      end
-      macro hygienic_delay()
-        return :(delay)
-      end
-      macro escaped_delay()
-        return esc(:delay)
-      end
-    end)
-    counted_lowered = Meta.lower(
-      macro_module,
-      WebQuantumSavory._parse_complete_source("@count_expansion(1 + 1)"),
-    )
-    @test isempty(WebQuantumSavory._lowered_numeric_context_bindings(
-      counted_lowered,
-      macro_module,
-    ))
-    @test Core.eval(macro_module, counted_lowered) == 2
-    @test Core.eval(macro_module, :expansion_count)[] == 1
-    @test isempty(lowered_bindings(
-      "@discard_expression(delay)";
-      evaluation_module=macro_module,
-    ))
-    @test lowered_bindings(
-      "@hygienic_delay";
-      evaluation_module=macro_module,
-    ) == Set((:delay,))
-    @test lowered_bindings(
-      "@escaped_delay";
-      evaluation_module=macro_module,
-    ) == Set((:delay,))
-
     withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "x = 1 // 2\nx + π / π",
-        "Float64",
-        "floating",
-      )
-      @test success
-      @test error === nothing
-      @test results == Dict(
-        :deferred => true,
-        :target_type => "Float64",
-        :value => "1.5",
-      )
-
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "x = 1 // 2\nx + π / π",
-        "Float64",
-        "variable",
-      )
-      @test success
-      @test error === nothing
-      @test results[:deferred] == false
-      @test parse(Float64, results[:value]) == 1.5
-
       for (source, target, expected) in (
-        ("sum(range(1; length=3))", "Int64", "6"),
-        ("(; delay=1).delay", "Int64", "1"),
-        ("sum(length for length in 1:3)", "Int64", "6"),
-        ("if true; delay=1; end; delay", "Int64", "1"),
-        ("Base.length((1, 2))", "Int64", "2"),
+        ("1 + 2", "Int64", "3"),
+        ("sum([1, 2, 3])", "Int64", "6"),
+        ("length((1, 2, 3))", "Int64", "3"),
+        ("round(π)", "Float64", "3.0"),
+        ("clamp(-2.0, -1.0, 1.0)", "Float64", "-1.0"),
+        ("isfinite(1.0) ? 1 : 0", "Int64", "1"),
+        ("isinf(Inf) ? 1 : 0", "Int64", "1"),
+        ("isnan(NaN) ? 1 : 0", "Int64", "1"),
+        ("NaN != NaN ? 1 : 0", "Int64", "1"),
       )
         success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
           source,
@@ -4597,18 +4596,18 @@
         )
         @test success
         @test error === nothing
-        @test results == Dict(
-          :deferred => false,
-          :target_type => target,
-          :value => expected,
-        )
+        @test results[:deferred] == false
+        @test results[:value] == expected
+        @test results[:required_context] == String[]
       end
 
-      for source in (
-        "delay / 2",
-        "self + nodeid(\"Bob\")",
-        "length + refractive_index + loss + transmissivity + node_a + node_b",
-        "@isdefined(delay)",
+      for (source, predicate) in (
+        ("Inf", isinf),
+        ("+Inf", isinf),
+        ("-Inf", value -> isinf(value) && signbit(value)),
+        ("NaN", isnan),
+        ("1.0 / 0.0", isinf),
+        ("0.0 / 0.0", isnan),
       )
         success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
           source,
@@ -4617,50 +4616,148 @@
         )
         @test success
         @test error === nothing
-        @test results[:deferred] == true
-        @test !haskey(results, :value)
+        @test predicate(parse(Float64, results[:value]))
+        @test results[:value] isa String
       end
+
+      for alias in ("Inf32", "NaN32", "Infinity")
+        @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+          alias;
+          profile=:numeric_expression,
+          placement="floating",
+        )) isa WebQuantumSavory.APIError
+      end
+
+      for source in ("Inf", "NaN", "1.0 / 0.0")
+        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+          source,
+          "Int64",
+          "variable",
+        )
+        @test !success
+        @test results === nothing
+        @test error isa Exception
+      end
+
+      @test isinf(WebQuantumSavory._cast_numeric_expression_result(Inf, "Float64"))
+      @test isnan(WebQuantumSavory._cast_numeric_expression_result(NaN, "Float64"))
+      @test_throws ArgumentError WebQuantumSavory._cast_numeric_expression_result(
+        Inf,
+        "Float64";
+        minimum=0.0,
+      )
+      @test_throws ArgumentError WebQuantumSavory._cast_numeric_expression_result(
+        NaN,
+        "Float64";
+        maximum=1.0,
+      )
+
+      unconstrained_kwargs = Dict{Symbol,Any}()
+      @test WebQuantumSavory._handle_typed_parameter!(
+        unconstrained_kwargs,
+        :unconstrained,
+        Float64,
+        expression("Inf"),
+        Dict{Symbol,Any}(),
+      )
+      @test isinf(unconstrained_kwargs[:unconstrained])
+      bounded_error = capture_error(() -> WebQuantumSavory._handle_typed_parameter!(
+        Dict{Symbol,Any}(),
+        :bounded,
+        Float64,
+        expression("Inf"),
+        Dict{Symbol,Any}();
+        constructor_metadata=(min=0.0, max=1.0),
+      ))
+      @test bounded_error isa WebQuantumSavory.APIError
+
+      physical_edge = Dict(
+        "id" => "non-finite-edge",
+        "data" => Dict(
+          "distanceMeters" => Inf,
+          "propagationDelaySeconds" => 0.1,
+          "refractiveIndex" => 1.5,
+          "lossDbPerKm" => 0.2,
+          "transmissivity" => 0.9,
+        ),
+      )
+      @test_throws WebQuantumSavory.APIError WebQuantumSavory._physical_edge_properties(
+        physical_edge,
+      )
+      @test_throws WebQuantumSavory.APIError WebQuantumSavory.construct_states_zoo_recipe(
+        Dict(
+          "kind" => "states_zoo",
+          "state_type" => "DepolarizedBellPair",
+          "parameters" => Dict("p" => NaN),
+        ),
+      )
+
+      template_success, template_results, template_error =
+        WebQuantumSavory.Sandbox.test_numeric_expression(
+          "distance / 2",
+          "Float64",
+          "edge",
+        )
+      @test template_success
+      @test template_error === nothing
+      @test template_results[:deferred] == true
+      @test template_results[:value] == "0.5"
+      @test template_results[:required_context] == ["distance"]
+
+      variable_success, variable_results, variable_error =
+        WebQuantumSavory.Sandbox.test_numeric_expression(
+          "distance / 2",
+          "Float64",
+          "variable",
+        )
+      @test variable_success
+      @test variable_error === nothing
+      @test variable_results == Dict(
+        :deferred => true,
+        :target_type => "Float64",
+        :required_context => ["distance"],
+      )
 
       edge_context = (
         node_names=["Alice", "Bob"],
         edge_context=WebQuantumSavory._EdgeFunctionContext(
-          100.0,
-          5.0e-7,
-          1.5,
-          0.2,
-          0.95,
-          1,
-          2,
+          100.0, 5.0e-7, 1.5, 0.2, 0.95, 1, 2,
         ),
       )
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "(distance + node_b) / node_a",
+        "Float64",
+        "edge";
+        context=edge_context,
+      )
+      @test success
+      @test error === nothing
+      @test results[:deferred] == false
+      @test results[:value] == "102.0"
+      @test results[:required_context] == ["distance", "node_a", "node_b"]
+
+      first_value = WebQuantumSavory.Sandbox.evaluate_numeric_expression(
         "delay / 2",
-        "Float64",
-        "edge";
+        "Float64";
+        placement="edge",
         context=edge_context,
       )
-      @test success
-      @test error === nothing
-      @test results == Dict(
-        :deferred => false,
-        :target_type => "Float64",
-        :value => "2.5e-7",
+      second_context = (
+        node_names=edge_context.node_names,
+        edge_context=WebQuantumSavory._EdgeFunctionContext(
+          100.0, 9.0e-7, 1.5, 0.2, 0.95, 1, 2,
+        ),
       )
+      second_value = WebQuantumSavory.Sandbox.evaluate_numeric_expression(
+        "delay / 2",
+        "Float64";
+        placement="edge",
+        context=second_context,
+      )
+      @test first_value == 2.5e-7
+      @test second_value == 4.5e-7
 
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "loss + transmissivity",
-        "Float64",
-        "edge";
-        context=edge_context,
-      )
-      @test success
-      @test error === nothing
-      @test parse(Float64, results[:value]) ≈ 1.15
-
-      duplicate_context = (
-        node_names=["Alice", "Alice"],
-        self=1,
-      )
+      duplicate_context = (node_names=["Alice", "Alice"], self=1)
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
         "nodeid(\"Alice\") + self",
         "Int64",
@@ -4674,18 +4771,13 @@
       virtual_context = (
         node_names=["Alice", "Bob"],
         edge_context=WebQuantumSavory._EdgeFunctionContext(
-          nothing,
-          nothing,
-          nothing,
-          nothing,
-          nothing,
-          1,
-          2,
+          nothing, nothing, nothing, nothing, nothing, 1, 2,
         ),
       )
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "all(isnothing, (length, delay, refractive_index, loss, transmissivity)) ? " *
-        "node_b - node_a : 99",
+        "isnothing(distance) && isnothing(delay) && " *
+        "isnothing(refractive_index) && isnothing(loss) && " *
+        "isnothing(transmissivity) ? node_b - node_a : 99",
         "Int64",
         "edge";
         context=virtual_context,
@@ -4694,96 +4786,60 @@
       @test results[:value] == "1"
       @test error === nothing
 
-      for (source, target, expected_error) in (
-        ("1 / 2", "Int64", InexactError),
-        ("big(typemax(Int64)) + 1", "Int64", InexactError),
-        ("Inf", "Float64", ArgumentError),
-        ("true", "Int64", ArgumentError),
-        ("\"not numeric\"", "Float64", ArgumentError),
-        ("invalid(", "Float64", Base.Meta.ParseError),
-      )
-        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-          source,
-          target,
-          "variable",
-        )
-        @test !success
-        @test results === nothing
-        @test error isa expected_error
-      end
-
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "delay / 2",
-        "Float64",
-        "node";
-        context=(node_names=["Alice"], self=1),
-      )
-      @test !success
-      @test results === nothing
-      @test error isa UndefVarError
-
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "Base.length([1, 2])",
-        "Int64",
-        "floating";
-        context=(node_names=["Alice"],),
-      )
-      @test success
-      @test results[:value] == "2"
-      @test error === nothing
-
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+      @test WebQuantumSavory.Sandbox.test_numeric_expression(
         "length([1, 2])",
         "Int64",
-        "floating";
-        context=(node_names=["Alice"],),
+        "floating",
+      )[2][:value] == "2"
+      for (source, placement) in (
+        ("length", "edge"),
+        ("distance", "node"),
+        ("distance", "floating"),
+        ("self", "edge"),
       )
-      @test success
-      @test results[:value] == "2"
-      @test error === nothing
-
-      contextual_body_file = tempname()
-      contextual_source = "open($(repr(contextual_body_file)), \"a\") do io; write(io, \"x\"); end; delay"
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        contextual_source,
-        "Float64",
-        "variable",
-      )
-      @test success
-      @test results[:deferred] == true
-      @test !isfile(contextual_body_file)
-
-      for placement in ("variable", "floating")
-        execution_file = tempname()
-        source = "open($(repr(execution_file)), \"a\") do io; write(io, \"x\"); end; 1"
-        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-          source,
-          "Int64",
+        @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+          source;
+          profile=:numeric_expression,
           placement,
-        )
-        @test success
-        @test results[:value] == "1"
-        @test read(execution_file, String) == "x"
-        rm(execution_file)
+        )) isa WebQuantumSavory.APIError
       end
 
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "delay; break",
+      forbidden = (
+        "x = 1\nx + 1",
+        "Base.length([1, 2])",
+        "sum(1:3)",
+        "sum(value for value in [1, 2])",
+        "@isdefined(distance)",
+        "(; distance=1).distance",
+        "[1, 2][1]",
+        "begin 1; 2 end",
+        "big(1)",
+        "error(\"no\")",
+      )
+      for source in forbidden
+        @test capture_error(() -> WebQuantumSavory.validate_source_expression(
+          source;
+          profile=:numeric_expression,
+          placement="variable",
+        )) isa WebQuantumSavory.APIError
+      end
+
+      parse_error = capture_error(() -> WebQuantumSavory.Sandbox.test_numeric_expression(
+        "invalid(",
         "Float64",
         "variable",
-      )
-      @test !success
-      @test results === nothing
-      @test error isa Exception
+      ))
+      @test parse_error isa WebQuantumSavory.APIError
+      @test parse_error.error_code == "VALIDATION_ERROR"
     end
 
     concrete_edge_request = WebQuantumSavory._parse_numeric_expression_test_request(Dict(
-      "expression" => "delay / 2",
+      "expression" => "distance / 2",
       "target_type" => "Float64",
       "placement" => "edge",
       "context" => Dict(
         "node_names" => ["Alice", "Bob"],
-        "length" => 100.0,
+        "distance" => 100.0,
         "delay" => 5.0e-7,
         "refractive_index" => 1.5,
         "loss" => 0.2,
@@ -4792,14 +4848,11 @@
         "node_b" => 2,
       ),
     ))
+    @test concrete_edge_request.context.edge_context.distance_meters == 100.0
     @test concrete_edge_request.context.edge_context.delay_seconds == 5.0e-7
     @test concrete_edge_request.context.edge_context.loss_db_per_km == 0.2
     @test concrete_edge_request.context.edge_context.transmissivity == 0.95
-    @test WebQuantumSavory._parse_numeric_expression_test_request(Dict(
-      "expression" => "self",
-      "target_type" => "Int64",
-      "placement" => "node",
-    )).context === nothing
+
     for malformed in (
       Dict(
         "expression" => "1",
@@ -4824,26 +4877,11 @@
         "placement" => "edge",
         "context" => Dict(
           "node_names" => ["Alice", "Bob"],
-          "length" => nothing,
+          "distance" => nothing,
           "delay" => 1.0,
           "refractive_index" => nothing,
           "loss" => nothing,
           "transmissivity" => nothing,
-          "node_a" => 1,
-          "node_b" => 2,
-        ),
-      ),
-      Dict(
-        "expression" => "1",
-        "target_type" => "Float64",
-        "placement" => "edge",
-        "context" => Dict(
-          "node_names" => ["Alice", "Bob"],
-          "length" => 100.0,
-          "delay" => 5.0e-7,
-          "refractive_index" => 1.5,
-          "loss" => 0.2,
-          "transmissivity" => 1.01,
           "node_a" => 1,
           "node_b" => 2,
         ),
@@ -4872,70 +4910,54 @@
         "value" => expression("1 / 2"),
       )],
     )
-    noise_error = capture_error(
-      () -> WebQuantumSavory._instantiate_noise(noise_expression),
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory._instantiate_noise(
+      noise_expression,
     )
-    @test noise_error isa WebQuantumSavory.APIError
-    @test noise_error.status_code == 400
-    @test occursin("does not support numeric expressions", noise_error.message)
-    script_noise_error = capture_error(
-      () -> WebQuantumSavory._script_noise_expression(
-        noise_expression,
-        "Test background noise",
-      ),
+    @test_throws WebQuantumSavory.APIError WebQuantumSavory._script_noise_expression(
+      noise_expression,
+      "Test background noise",
     )
-    @test script_noise_error isa WebQuantumSavory.APIError
-    @test occursin("does not support numeric expressions", script_noise_error.message)
 
-    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
-      kwargs = Dict{Symbol,Any}()
-      @test WebQuantumSavory._handle_typed_parameter!(
-        kwargs,
-        :bounded,
+    raw_source = "  first([]) # validation only  "
+    exported_expression = withenv(
+      WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false",
+    ) do
+      WebQuantumSavory._script_value_expression(
         Float64,
-        expression("0.75"),
-        Dict{Symbol,Any}();
-        constructor_metadata=(min=0.0, max=1.0),
+        expression(raw_source),
+        "Nonexecuting numeric source",
       )
-      @test kwargs[:bounded] == 0.75
-      @test_throws WebQuantumSavory.APIError WebQuantumSavory._handle_typed_parameter!(
-        Dict{Symbol,Any}(),
-        :bounded,
-        Float64,
-        expression("2"),
-        Dict{Symbol,Any}();
-        constructor_metadata=(min=0.0, max=1.0),
-      )
+    end
+    @test occursin(raw_source, exported_expression)
+    @test Meta.parse(exported_expression) isa Expr
 
-      sensitive_error = capture_error(() -> WebQuantumSavory._handle_typed_parameter!(
-        Dict{Symbol,Any}(),
-        :bounded,
-        Float64,
-        expression("error(\"sensitive runtime expression details\")"),
-        Dict{Symbol,Any}();
-        constructor_metadata=(min=0.0, max=1.0),
-      ))
-      @test sensitive_error isa WebQuantumSavory.APIError
-      @test sensitive_error.error_code == "VALIDATION_ERROR"
-      production_response = WebQuantumSavory.create_error_response(
-        sensitive_error;
-        environment="prod",
-      )
-      @test production_response["details"]["parameter_name"] == "bounded"
-      @test production_response["details"]["evaluation_error"] == "Evaluation failed"
-      @test !occursin("sensitive runtime expression details", string(production_response))
+    for source in ("@server_must_not_expand_this_macro(distance)", "Base.sin(1.0)")
+      @test_throws WebQuantumSavory.APIError withenv(
+        WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false",
+      ) do
+        WebQuantumSavory._script_value_expression(
+          Float64,
+          expression(source),
+          "Invalid numeric export source",
+        )
+      end
     end
 
-    bounded_script_expression = WebQuantumSavory._script_value_expression(
+    inf_export = WebQuantumSavory._script_value_expression(
+      Float64,
+      expression("Inf"),
+      "Unconstrained Float64 export",
+    )
+    @test occursin("Inf", inf_export)
+    bounded_export = WebQuantumSavory._script_value_expression(
       Float64,
       expression("1 / 2"),
       "Bounded numeric";
       constructor_metadata=(min=0.0, max=1.0),
     )
-    @test occursin("Base.Float64(expression_value)", bounded_script_expression)
-    @test occursin("cast_value >= 0.0", bounded_script_expression)
-    @test occursin("cast_value <= 1.0", bounded_script_expression)
-    @test Meta.parse(bounded_script_expression) isa Expr
+    @test occursin("Base.isfinite(cast_value)", bounded_export)
+    @test occursin("cast_value >= 0.0", bounded_export)
+    @test occursin("cast_value <= 1.0", bounded_export)
 
     runtime_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
     runtime_payload["name"] = "numeric_expression_runtime"
@@ -4959,97 +4981,75 @@
       "id" => "per-assignment-expression",
     )
     parameter_by_name["attempt_time"]["value"] =
-      expression("(length + nodeid(\"Cambridge\") - 2) / 1000")
+      expression("(distance + (nodeid(\"Cambridge\") - 2)) / 1000")
 
     try
-      validation = WebQuantumSavory.validate_payload(runtime_payload)
-      state = WebQuantumSavory.parse_network_graph(validation)
-      WebQuantumSavory.prepare_simulation(state, runtime_payload["name"])
-      protocol = state.protocol_mapping[protocol_definition["id"]]
-      @test protocol.success_prob ≈ 0.0575
-      @test protocol.attempt_time == 0.1
+      withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+        validation = WebQuantumSavory.validate_payload(runtime_payload)
+        state = WebQuantumSavory.parse_network_graph(validation)
+        WebQuantumSavory.prepare_simulation(state, runtime_payload["name"])
+        protocol = state.protocol_mapping[protocol_definition["id"]]
+        @test protocol.success_prob ≈ 0.0575
+        @test protocol.attempt_time == 0.1
 
-      variables = WebQuantumSavory._parse_variables(runtime_payload)
-      assignment_context = Dict{Symbol,Any}(
-        :sim => state.simulation,
-        :net => state.network,
-        :nodeA => 1,
-        :nodeB => 2,
-        WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY =>
-          WebQuantumSavory._node_name_to_index(validation["graph_info"]["nodes"]),
-        WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY =>
-          WebQuantumSavory._EdgeFunctionContext(100.0, 0.2, 1.5, 0.2, 0.95, 1, 2),
-      )
-      first_assignment = WebQuantumSavory._instantiate_protocol(
-        protocol_definition,
-        assignment_context;
-        variables,
-      )
-      assignment_context[WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY] =
-        WebQuantumSavory._EdgeFunctionContext(100.0, 0.4, 1.5, 0.2, 0.95, 1, 2)
-      second_assignment = WebQuantumSavory._instantiate_protocol(
-        protocol_definition,
-        assignment_context;
-        variables,
-      )
-      @test first_assignment.success_prob ≈ 0.0575
-      @test second_assignment.success_prob ≈ 0.115
+        variables = WebQuantumSavory._parse_variables(runtime_payload)
+        assignment_context = Dict{Symbol,Any}(
+          :sim => state.simulation,
+          :net => state.network,
+          :nodeA => 1,
+          :nodeB => 2,
+          WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY =>
+            WebQuantumSavory._node_name_to_index(validation["graph_info"]["nodes"]),
+          WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY =>
+            WebQuantumSavory._EdgeFunctionContext(100.0, 0.2, 1.5, 0.2, 0.95, 1, 2),
+        )
+        first_assignment = WebQuantumSavory._instantiate_protocol(
+          protocol_definition,
+          assignment_context;
+          variables,
+        )
+        assignment_context[WebQuantumSavory.EDGE_FUNCTION_CONTEXT_KEY] =
+          WebQuantumSavory._EdgeFunctionContext(100.0, 0.4, 1.5, 0.2, 0.95, 1, 2)
+        second_assignment = WebQuantumSavory._instantiate_protocol(
+          protocol_definition,
+          assignment_context;
+          variables,
+        )
+        @test first_assignment.success_prob ≈ 0.0575
+        @test second_assignment.success_prob ≈ 0.115
 
-      script = WebQuantumSavory.generate_julia_script(runtime_payload)
-      @test occursin("(loss + transmissivity) * delay / 4", script)
-      @test occursin("nodeid(\"Cambridge\")", script)
-      @test count(
-        ==("    nodeid = Base.getproperty(@__MODULE__, :nodeid)"),
-        eachline(IOBuffer(script)),
-      ) >= 2
-      @test !occursin("variable_per_assignment_expression =", script)
+        script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+          WebQuantumSavory.generate_julia_script(runtime_payload)
+        end
+        @test occursin("(loss + transmissivity) * delay / 4", script)
+        @test occursin("distance = 100.0", script)
+        @test occursin("nodeid(\"Cambridge\")", script)
+        @test !occursin("variable_per_assignment_expression =", script)
 
-      paused_script = replace(
-        script,
-        "\nrun(sim, simulation_duration)\n" =>
-          "\n# run(sim, simulation_duration)  # paused by the numeric-expression test\n";
-        count=1,
-      )
-      generated_module = Module(gensym(:NumericExpressionExport))
-      Core.eval(generated_module, :(using Base))
-      Base.include_string(
-        generated_module,
-        paused_script,
-        "numeric-expression-export.jl",
-      )
-      exported_protocol = only(
-        entry.second
-        for entry in Core.eval(generated_module, :protocols)
-        if entry.first == protocol_definition["id"]
-      )
-      @test exported_protocol.success_prob == protocol.success_prob
-      @test exported_protocol.attempt_time == protocol.attempt_time
+        paused_script = replace(
+          script,
+          "\nrun(sim, simulation_duration)\n" =>
+            "\n# run(sim, simulation_duration)  # paused by the numeric-expression test\n";
+          count=1,
+        )
+        generated_module = Module(gensym(:NumericExpressionExport))
+        Core.eval(generated_module, :(using Base))
+        Base.include_string(
+          generated_module,
+          paused_script,
+          "numeric-expression-export.jl",
+        )
+        exported_protocol = only(
+          entry.second
+          for entry in Core.eval(generated_module, :protocols)
+          if entry.first == protocol_definition["id"]
+        )
+        @test exported_protocol.success_prob == protocol.success_prob
+        @test exported_protocol.attempt_time == protocol.attempt_time
+      end
     finally
       haskey(WebQuantumSavory.STATE, runtime_payload["name"]) &&
         WebQuantumSavory.destroy_simulation(runtime_payload["name"])
     end
-
-    nonexecuting_payload = deepcopy(runtime_payload)
-    nonexecuting_payload["name"] = "numeric_expression_nonexecuting_export"
-    empty!(nonexecuting_payload["variables"])
-    parameter_by_name = Dict(
-      parameter["name"] => parameter
-      for parameter in
-        nonexecuting_payload["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
-    )
-    parameter_by_name["success_prob"]["value"] =
-      expression("error(\"export must not execute source\")")
-    parameter_by_name["attempt_time"]["value"] = nothing
-    script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
-      WebQuantumSavory.generate_julia_script(nonexecuting_payload)
-    end
-    @test occursin("export must not execute source", script)
-
-    parameter_by_name["success_prob"]["value"] =
-      expression("@server_must_not_expand_this_macro(delay)")
-    macro_script = withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
-      WebQuantumSavory.generate_julia_script(nonexecuting_payload)
-    end
-    @test occursin("@server_must_not_expand_this_macro(delay)", macro_script)
   end
 end

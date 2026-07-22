@@ -1085,9 +1085,9 @@ function _query_term(raw_term, expected, catalog; context::AbstractString)
   elseif predicate_kind == "custom"
     source = _require_tag_value(raw_term, "source"; context)
     source isa AbstractString || throw(validation_error("Custom predicate source must be a string"))
-    require_unsafe_code_evaluation()
     try
-      return LambdaImpl(_evaluate_function_source(String(source)))
+      function_value, _ = Sandbox.evaluate_query_expression(String(source))
+      return LambdaImpl(function_value, :query_predicate)
     catch error
       error isa APIError && rethrow()
       throw(validation_error(

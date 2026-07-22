@@ -157,7 +157,7 @@
                 :evaluation-enabled="evaluationEnabled"
                 :error-message="field.error || ''"
                 param-type="Function"
-                :show-context-help="false"
+                source-profile="query_predicate"
                 @update:model-value="updateCustomSource(field, $event)"
                 @validate="validateCustomPredicate(field)"
               />

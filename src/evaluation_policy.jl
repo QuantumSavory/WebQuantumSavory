@@ -11,17 +11,16 @@ function _parse_unsafe_evaluation_override(value::AbstractString)
   throw(ArgumentError("$UNSAFE_EVALUATION_ENV_VAR must be 'true' or 'false'"))
 end
 
-"""Return whether server-process Julia evaluation is enabled.
-
-The operator override takes precedence. Without it, evaluation is enabled only
-in Genie's `dev` and `test` environments and disabled in every other environment.
-"""
+"""Return whether server-process Julia evaluation is explicitly enabled."""
 function unsafe_code_evaluation_enabled(;
   environment::AbstractString=Genie.Configuration.env(),
   override::Union{Nothing,AbstractString}=get(ENV, UNSAFE_EVALUATION_ENV_VAR, nothing),
 )
-  override === nothing || return _parse_unsafe_evaluation_override(override)
-  lowercase(strip(environment)) in ("dev", "test")
+  # Keep the environment keyword for callers which report/redact by Genie
+  # environment, but never infer permission from it.
+  environment
+  override === nothing && return false
+  return _parse_unsafe_evaluation_override(override)
 end
 
 function unsafe_evaluation_disabled_error()

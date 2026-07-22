@@ -1,87 +1,3 @@
-"""Find a parser exception embedded in Julia's `:error`/`:incomplete` AST."""
-function _complete_source_parse_error(parsed)
-    parsed isa Expr || return nothing
-    if parsed.head in (:error, :incomplete)
-        exception = findfirst(argument -> argument isa Exception, parsed.args)
-        exception === nothing || return parsed.args[exception]
-    end
-
-    for argument in parsed.args
-        exception = _complete_source_parse_error(argument)
-        exception === nothing || return exception
-    end
-    return nothing
-end
-
-"""Parse every statement in Julia source and return one scoped expression."""
-function _parse_complete_source(source::AbstractString)
-    parsed = Meta.parseall(String(source))
-    parse_error = _complete_source_parse_error(parsed)
-    parse_error === nothing || throw(parse_error)
-
-    if !(parsed isa Expr && parsed.head === :toplevel)
-        return parsed
-    end
-
-    # `Meta.parseall` can nest `:toplevel` expressions when the source itself
-    # contains multiple statements. Flatten only that outer parser structure;
-    # any quoted or function-body expressions remain untouched.
-    scoped_statements = Any[]
-    function append_toplevel!(expression)
-        if expression isa Expr && expression.head === :toplevel
-            foreach(append_toplevel!, expression.args)
-        else
-            push!(scoped_statements, expression)
-        end
-    end
-    append_toplevel!(parsed)
-    return Expr(:block, scoped_statements...)
-end
-
-"""
-Evaluate complete Julia source in a fresh-module-compatible scope.
-
-`transform` may wrap the parsed block in assignment-specific lexical context.
-Callers remain responsible for enforcing their result contract.
-"""
-function _evaluate_complete_source(
-    source::AbstractString;
-    evaluation_module::Module=Module(),
-    transform::Function=identity,
-)
-    parsed = _parse_complete_source(source)
-    return Base.eval(evaluation_module, transform(parsed))
-end
-
-"""
-Evaluate custom-function source and require the resulting value to satisfy the
-`Function` contract used by QuantumSavory protocol parameters.
-
-`transform` can wrap the parsed block in assignment-specific lexical context
-before evaluation.
-"""
-function _evaluate_function_source(
-    source::AbstractString;
-    evaluation_module::Module=Module(),
-    transform::Function=identity,
-)
-    value = _evaluate_complete_source(
-        source;
-        evaluation_module,
-        transform,
-    )
-
-    if !(value isa Function)
-        throw(ArgumentError(
-            "Custom function source must evaluate to a Julia Function; " *
-            "got $(typeof(value)). Try an expression such as `x -> x + 1`, " *
-            "`<(1)`, or `f(x) = x + 1`.",
-        ))
-    end
-
-    return value
-end
-
 """
 A globally-defined, typed simulation variable.
 
@@ -146,15 +62,33 @@ Concrete implementation of Lambda that wraps a Julia function
 """
 struct LambdaImpl <: Lambda
     func::Function
+    profile::Symbol
 end
+
+LambdaImpl(func::Function) = LambdaImpl(func, :custom_function)
 
 # Make LambdaImpl callable
 function (f::LambdaImpl)(args...)
   try
-    # The wrapped function is created with `Base.eval`, so invoke it in the
-    # latest world. This matters when a freshly converted protocol parameter is
-    # called before the surrounding task yields back to top-level evaluation.
+    require_unsafe_code_evaluation()
+    element_count = Ref(0)
+    for argument in args
+      _validate_source_runtime_value(
+        argument;
+        query=f.profile === :query_predicate,
+        element_count,
+      )
+    end
+    # The wrapped function is created at the central `Core.eval` boundary, so
+    # invoke it in the latest world when a protocol calls it immediately.
     result = Base.invokelatest(f.func, args...)
+    if f.profile === :query_predicate
+      result isa Bool || throw(ArgumentError(
+        "Tag-query predicate results must be exactly Bool; got $(typeof(result))",
+      ))
+    else
+      _validate_source_runtime_value(result; element_count=Ref(0))
+    end
     # If the lambda returns nothing and we're expecting something, warn
     if result === nothing
       @warn "Lambda function returned nothing" args=args
@@ -166,228 +100,70 @@ function (f::LambdaImpl)(args...)
   end
 end
 
+function _query_runtime_datatype_allowed(value::DataType)
+  isdefined(@__MODULE__, :_tag_catalog_snapshot) || return value in (Int64, Float64)
+  catalog = _tag_catalog_snapshot()
+  return value in values(catalog.allowed_by_id)
+end
+
+"""Reject custom objects before any allowlisted operation can dispatch on them."""
+function _validate_source_runtime_value(
+  value;
+  query::Bool=false,
+  depth::Int=0,
+  element_count::Base.RefValue{Int}=Ref(0),
+)
+  depth <= SOURCE_RUNTIME_MAX_DEPTH || throw(ArgumentError(
+    "Expression collection depth exceeds $SOURCE_RUNTIME_MAX_DEPTH",
+  ))
+  if depth > 0
+    element_count[] += 1
+    element_count[] <= SOURCE_RUNTIME_MAX_ELEMENTS || throw(ArgumentError(
+      "Expression collections exceed $SOURCE_RUNTIME_MAX_ELEMENTS recursively checked elements",
+    ))
+  end
+
+  if value === nothing || value isa Bool || value isa Int64 || value isa Float64
+    return value
+  elseif value isa String
+    ncodeunits(value) <= SOURCE_STRING_MAX_BYTES || throw(ArgumentError(
+      "Expression string exceeds $SOURCE_STRING_MAX_BYTES bytes",
+    ))
+    return value
+  elseif query && value isa Symbol
+    ncodeunits(string(value)) <= SOURCE_STRING_MAX_BYTES || throw(ArgumentError(
+      "Query Symbol exceeds $SOURCE_STRING_MAX_BYTES bytes",
+    ))
+    return value
+  elseif query && value isa DataType
+    _query_runtime_datatype_allowed(value) || throw(ArgumentError(
+      "Query DataType is not advertised by the tag catalog",
+    ))
+    return value
+  elseif query && (value isa Integer || value isa AbstractFloat) &&
+         isprimitivetype(typeof(value))
+    return value
+  elseif value isa Tuple || value isa Vector
+    for item in value
+      _validate_source_runtime_value(
+        item;
+        query,
+        depth=depth + 1,
+        element_count,
+      )
+    end
+    return value
+  end
+  throw(ArgumentError(
+    "Expression values must be admitted primitives, bounded strings, tuples, or ordinary vectors; got $(typeof(value))",
+  ))
+end
+
 """Protocol-conversion context key containing the shared node-name lookup."""
 const NODE_NAME_TO_INDEX_CONTEXT_KEY = :node_name_to_index
 
 """Protocol-conversion context key containing resolved edge assignment values."""
 const EDGE_FUNCTION_CONTEXT_KEY = :edge_function_context
-
-"""Ordered physical edge bindings shared by validation, evaluation, and export."""
-const EDGE_CONTEXT_DESCRIPTORS = (
-    (
-        binding=:length,
-        field=:distance_meters,
-        payload_key="distanceMeters",
-        payload_label="distance",
-        positive=false,
-        maximum=nothing,
-        payload_default=nothing,
-        payload_nullable=true,
-        representative=1.0,
-        script_label="edge length",
-    ),
-    (
-        binding=:delay,
-        field=:delay_seconds,
-        payload_key="propagationDelaySeconds",
-        payload_label="propagation delay",
-        positive=false,
-        maximum=nothing,
-        payload_default=0.0,
-        payload_nullable=false,
-        representative=2.0,
-        script_label="edge delay",
-    ),
-    (
-        binding=:refractive_index,
-        field=:refractive_index,
-        payload_key="refractiveIndex",
-        payload_label="refractive index",
-        positive=true,
-        maximum=nothing,
-        payload_default=nothing,
-        payload_nullable=true,
-        representative=1.5,
-        script_label="edge refractive index",
-    ),
-    (
-        binding=:loss,
-        field=:loss_db_per_km,
-        payload_key="lossDbPerKm",
-        payload_label="fiber loss",
-        positive=false,
-        maximum=nothing,
-        payload_default=nothing,
-        payload_nullable=true,
-        representative=0.2,
-        script_label="edge fiber loss",
-    ),
-    (
-        binding=:transmissivity,
-        field=:transmissivity,
-        payload_key="transmissivity",
-        payload_label="transmissivity",
-        positive=false,
-        maximum=1.0,
-        payload_default=nothing,
-        payload_nullable=true,
-        representative=0.95,
-        script_label="edge transmissivity",
-    ),
-)
-
-"""Ordered endpoint bindings, intentionally separate from physical values."""
-const EDGE_ENDPOINT_CONTEXT_DESCRIPTORS = (
-    (binding=:node_a, field=:node_a, representative=1),
-    (binding=:node_b, field=:node_b, representative=2),
-)
-
-"""Resolved values captured lexically by custom functions assigned to an edge."""
-struct _EdgeFunctionContext
-    distance_meters::Union{Nothing,Float64}
-    delay_seconds::Union{Nothing,Float64}
-    refractive_index::Union{Nothing,Float64}
-    loss_db_per_km::Union{Nothing,Float64}
-    transmissivity::Union{Nothing,Float64}
-    node_a::Int
-    node_b::Int
-end
-
-const _ALL_NUMERIC_CONTEXT_BINDINGS = Set{Symbol}([
-    :nodeid,
-    :self,
-    (descriptor.binding for descriptor in EDGE_CONTEXT_DESCRIPTORS)...,
-    (descriptor.binding for descriptor in EDGE_ENDPOINT_CONTEXT_DESCRIPTORS)...,
-])
-
-function _lowering_error(expression::Expr)
-    detail = isempty(expression.args) ? "Julia lowering failed" : first(expression.args)
-    detail isa Exception && throw(detail)
-    throw(ErrorException(string(detail)))
-end
-
-"""
-Collect assignment-context globals resolved by Julia's lowering pass.
-
-This inspects only globals belonging to the fresh evaluation module. Local
-bindings, keyword labels, property names, and hygienic macro identifiers have
-already been resolved by Julia. `@isdefined` lowers to `Core.isdefinedglobal`
-without a separate `GlobalRef` for the queried name, so recognize that call
-explicitly. A lowered error is never accepted as a deferred expression.
-"""
-function _lowered_numeric_context_bindings(lowered, evaluation_module::Module)
-    references = Set{Symbol}()
-    children(expression) = expression isa Core.CodeInfo ? expression.code :
-        expression isa Expr ? expression.args : ()
-    quoted_symbol(value) = value isa QuoteNode ? value.value : value
-
-    function assigned_global(expression)
-        expression isa Expr || return nothing
-        if expression.head === :call && length(expression.args) >= 3 &&
-           first(expression.args) === GlobalRef(Base, :setglobal!) &&
-           expression.args[2] === evaluation_module
-            name = quoted_symbol(expression.args[3])
-            return name isa Symbol ? name : nothing
-        end
-        target = expression.head in (:const, :method) && !isempty(expression.args) ?
-            first(expression.args) : nothing
-        return target isa GlobalRef && target.mod === evaluation_module ? target.name : nothing
-    end
-
-    assigned = Set{Symbol}()
-    function collect_assignments(expression)
-        name = assigned_global(expression)
-        name === nothing || push!(assigned, name)
-        foreach(collect_assignments, children(expression))
-    end
-    collect_assignments(lowered)
-
-    function visit(expression)
-        if expression isa GlobalRef
-            expression.mod === evaluation_module &&
-                expression.name in _ALL_NUMERIC_CONTEXT_BINDINGS &&
-                !(expression.name in assigned) &&
-                push!(references, expression.name)
-        elseif expression isa Expr
-            expression.head === :error && _lowering_error(expression)
-            if expression.head === :call && length(expression.args) >= 3 &&
-               first(expression.args) === GlobalRef(Core, :isdefinedglobal) &&
-               expression.args[2] === evaluation_module
-                name = quoted_symbol(expression.args[3])
-                name isa Symbol && name in _ALL_NUMERIC_CONTEXT_BINDINGS &&
-                    !(name in assigned) &&
-                    push!(references, name)
-            end
-        end
-        foreach(visit, children(expression))
-    end
-
-    visit(lowered)
-    return references
-end
-
-"""Build the shared one-based node-name lookup from validated node order."""
-function _node_name_to_index(nodes)::Dict{String,Int}
-    return Dict{String,Int}(
-        (node isa AbstractString ? String(node) : string(node["name"])) => index
-        for (index, node) in enumerate(nodes)
-    )
-end
-
-"""Create the strictly typed `nodeid` lookup captured by a custom function."""
-_nodeid_resolver(node_name_to_index::Dict{String,Int}) =
-    (name::String) -> node_name_to_index[name]
-
-"""Wrap parsed Julia source around the supplied lexical context bindings."""
-function _edge_context_expression(body, edge_context::_EdgeFunctionContext)
-    assignments = [
-        Expr(:(=), descriptor.binding, getfield(edge_context, descriptor.field))
-        for descriptor in (
-            EDGE_CONTEXT_DESCRIPTORS...,
-            EDGE_ENDPOINT_CONTEXT_DESCRIPTORS...,
-        )
-    ]
-    return Expr(:let, Expr(:block, assignments...), body)
-end
-
-function _source_context_expression(
-    parsed,
-    nodeid::Union{Nothing,Function},
-    self_node_index::Union{Nothing,Int},
-    edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
-)
-    has_assignment_context = edge_context !== nothing || self_node_index !== nothing
-    nodeid === nothing && !has_assignment_context && return parsed
-    if nodeid === nothing
-        throw(ArgumentError("Numeric-expression context values require a nodeid resolver"))
-    end
-
-    body = parsed
-    if edge_context !== nothing
-        body = _edge_context_expression(body, edge_context)
-    end
-    self_node_index === nothing || (body = :(let self = $self_node_index; $body; end))
-    return :(let nodeid = $(QuoteNode(nodeid)); $body; end)
-end
-
-"""Return stable lexical values for validation before concrete assignment."""
-function _representative_source_context(placement::AbstractString)
-    placement = String(placement)
-    placement in ("node", "edge", "floating", "variable") ||
-        throw(ArgumentError(
-            "Source placement must be 'node', 'edge', 'floating', or 'variable'",
-        ))
-
-    representative_nodeid(::String)::Int = 1
-    self_node_index = placement in ("node", "variable") ? 1 : nothing
-    edge_context = placement in ("edge", "variable") ?
-        _EdgeFunctionContext(
-            (descriptor.representative for descriptor in EDGE_CONTEXT_DESCRIPTORS)...,
-            (descriptor.representative for descriptor in
-                EDGE_ENDPOINT_CONTEXT_DESCRIPTORS)...,
-        ) : nothing
-    return (; nodeid=representative_nodeid, self_node_index, edge_context)
-end
 
 """Return the one authoritative numeric target represented by a Julia type."""
 function _numeric_expression_target(raw_type)
@@ -418,8 +194,11 @@ function _cast_numeric_expression_result(
     ))
 
     cast_value = target == "Float64" ? Float64(value) : Int64(value)
-    if cast_value isa AbstractFloat && !isfinite(cast_value)
-        throw(ArgumentError("Numeric expression must evaluate to a finite Float64"))
+    if (minimum !== nothing || maximum !== nothing) &&
+       cast_value isa AbstractFloat && !isfinite(cast_value)
+        throw(ArgumentError(
+            "A metadata-bounded numeric expression must evaluate to a finite Float64",
+        ))
     end
     if minimum !== nothing && cast_value < minimum
         throw(ArgumentError("Numeric expression result must be at least $minimum"))
@@ -440,22 +219,19 @@ function _evaluate_numeric_expression_source(
     minimum=nothing,
     maximum=nothing,
 )
-    require_unsafe_code_evaluation()
-    parsed = _parse_complete_source(source)
-    transform = if node_name_to_index === nothing
-        identity
-    else
-        parsed -> _source_context_expression(
-            parsed,
+    placement = edge_context !== nothing ? "edge" :
+        self_node_index !== nothing ? "node" : "floating"
+    context = (
+        nodeid=node_name_to_index === nothing ? nothing :
             _nodeid_resolver(node_name_to_index),
-            self_node_index,
-            edge_context,
-        )
-    end
-    value = Base.eval(Module(), transform(parsed))
-    return _cast_numeric_expression_result(
-        value,
+        self_node_index,
+        edge_context,
+    )
+    return Sandbox.evaluate_numeric_expression(
+        source,
         target_type;
+        placement,
+        context,
         minimum,
         maximum,
     )
@@ -479,20 +255,19 @@ function create_lambda(
     self_node_index::Union{Nothing,Int}=nothing,
     edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
 )
-    require_unsafe_code_evaluation()
-
     try
-        value = _evaluate_function_source(
+        placement = edge_context !== nothing ? "edge" :
+            self_node_index !== nothing ? "node" : "floating"
+        value, _ = Sandbox.evaluate_function_expression(
             lambda_string;
-            transform=parsed -> _source_context_expression(
-                parsed,
-                _nodeid_resolver(node_name_to_index),
-                self_node_index,
-                edge_context,
-            ),
+            placement,
+            nodeid=_nodeid_resolver(node_name_to_index),
+            self_node_index,
+            edge_context,
         )
         return LambdaImpl(value)
     catch e
+        e isa APIError && rethrow(e)
         detail = sprint(showerror, e)
         error("Failed to create lambda from string '$lambda_string': $detail")
     end

@@ -22,7 +22,7 @@ describe('NumericExpressionInput', () => {
     const parameter = { name: 'timeout', value: null }
     const context = {
       node_names: ['Alice', 'Bob'],
-      length: 100,
+      distance: 100,
       delay: 5e-7,
       refractive_index: 1.5,
       node_a: 1,

@@ -35,6 +35,7 @@ include("errors.jl")
 include("evaluation_policy.jl")
 include("mcp_config.jl")
 include("platform_info.jl")
+include("source_validation.jl")
 include("types.jl")
 include("Sandbox.jl")
 include("Logger.jl")
@@ -101,7 +102,7 @@ include("tag_metadata.jl")
 
 function main()
   # Validate an explicit override before Genie starts and handles route-loading
-  # errors internally. Environment-specific defaults are resolved at use time.
+  # errors internally. Evaluation remains disabled when the override is absent.
   unsafe_code_evaluation_enabled(
     environment=get(ENV, "GENIE_ENV", Genie.Configuration.env()),
   )

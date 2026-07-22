@@ -29,7 +29,12 @@
     </button>
 
     <template v-else>
-      <CustomFunctionContextHelp v-if="!showLatex && showContextHelp" />
+      <CustomFunctionContextHelp
+        v-if="showContextHelp"
+        :label="sourceHelpLabel"
+        :subject="sourceHelpSubject"
+        :profile="showLatex ? 'symbolic_expression' : sourceProfile"
+      />
 
       <div
         v-if="!evaluationEnabled"
@@ -37,8 +42,8 @@
         role="status"
         data-testid="evaluation-disabled-notice"
       >
-        Server-side Julia evaluation is disabled. Raw lambda and symbolic
-        validation are unavailable; choose a listed function when supported.
+        Server-side Julia evaluation is disabled. Source validation and
+        execution are unavailable; the language reference remains visible.
       </div>
 
       <div
@@ -156,6 +161,10 @@ const props = defineProps({
     type: Boolean,
     default: true
   },
+  sourceProfile: {
+    type: String,
+    default: 'custom_function'
+  },
   collapsible: {
     type: Boolean,
     default: false
@@ -182,6 +191,16 @@ function isSubscriptChar(symbol) {
 
 const hasError = computed(() => !!props.errorMessage)
 const interactionDisabled = computed(() => props.readOnly || !props.evaluationEnabled)
+const sourceHelpLabel = computed(() => {
+  if (props.showLatex) return 'Symbolic expression language'
+  if (props.sourceProfile === 'query_predicate') return 'Query predicate language'
+  return 'Custom function context'
+})
+const sourceHelpSubject = computed(() => {
+  if (props.showLatex) return 'symbolic expressions'
+  if (props.sourceProfile === 'query_predicate') return 'tag-query predicates'
+  return 'custom functions'
+})
 const collapsedAriaLabel = computed(() => {
   if (!props.showLatex) {
     return props.modelValue ? 'Edit custom function' : 'Enter custom function'

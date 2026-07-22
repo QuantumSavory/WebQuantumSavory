@@ -49,6 +49,11 @@ describe('ApiConnector project namespaces', () => {
       const bodies = {
         '/known_functions': { known_functions: [] },
         '/states_zoo_types': { states_zoo_types: [] },
+        '/source_language': {
+          schema_version: 1,
+          function_forms: [],
+          contexts: {},
+        },
         '/background_types': { background_types: [] },
         '/slot_types': { success: true },
         '/protocol_types': { protocol_types: [] },
@@ -94,7 +99,7 @@ describe('ApiConnector project namespaces', () => {
     const connector = new ApiConnector('http://api.test')
     const context = {
       node_names: ['Alice', 'Bob'],
-      length: 100,
+      distance: 100,
       delay: 5e-7,
       refractive_index: 1.5,
       loss: 0.2,
@@ -118,6 +123,26 @@ describe('ApiConnector project namespaces', () => {
       target_type: 'Float64',
       placement: 'edge',
     })
+  })
+
+  it('fetches and caches validator-generated source-language metadata', async () => {
+    const catalog = {
+      schema_version: 1,
+      function_forms: [{ id: 'anonymous_lambda', example: 'x -> x + 1' }],
+      contexts: { edge: [{ name: 'distance', unit: 'm' }] },
+    }
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => catalog,
+    }))
+    const connector = new ApiConnector('http://api.test')
+
+    await expect(connector.fetchSourceLanguage()).resolves.toEqual(catalog)
+    await expect(connector.fetchSourceLanguage()).resolves.toEqual(catalog)
+
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls[0][0]).toBe('http://api.test/source_language')
+    expect(connector.config.value.sourceLanguage).toEqual(catalog)
   })
 
   it('preserves expanded platform metadata while adding legacy client aliases', async () => {

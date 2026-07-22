@@ -68,7 +68,10 @@
             <li><code>GENIE_ENV=dev WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION=true ./bin/server</code></li>
           </ol>
           <p class="unsafe-evaluation-note">
-            The final command enables unsafe evaluation. Use it only with projects and code you trust.
+            The final command enables the restricted expression language. Its
+            whitelist reduces risk, but accepted source still executes native
+            Julia and cannot be safely interrupted in-process. Use it only with
+            projects and code you trust.
           </p>
         </section>
 

@@ -6,6 +6,7 @@
     <CustomFunctionContextHelp
       label="Numeric expression context"
       subject="numeric expressions"
+      profile="numeric_expression"
     />
     <label v-if="!linked" class="numeric-expression-source-label">
       <span class="sr-only">{{ sourceLabel }}</span>

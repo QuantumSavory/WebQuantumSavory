@@ -258,6 +258,19 @@ function _required_nonempty_string(object, field::String, context::String)
   return value
 end
 
+"""Return nonblank source without changing the bytes that will be parsed."""
+function _required_nonempty_source(object, field::String, context::String)
+  haskey(object, field) || throw(validation_error("$context missing required field: '$field'"))
+  raw_value = object[field]
+  raw_value isa AbstractString || throw(validation_error(
+    "$context field '$field' must be a string",
+    Dict{String,Any}("field" => field, "received_type" => string(typeof(raw_value))),
+  ))
+  value = String(raw_value)
+  isempty(strip(value)) && throw(validation_error("$context field '$field' must not be blank"))
+  return value
+end
+
 function _require_exact_object_fields(
   object,
   required_fields,
@@ -318,7 +331,7 @@ function _parse_numeric_expression_test_request(payload)
     ("context",);
     context="Numeric expression request",
   )
-  expression = _required_nonempty_string(payload, "expression", "Numeric expression request")
+  expression = _required_nonempty_source(payload, "expression", "Numeric expression request")
   target_type = _required_nonempty_string(payload, "target_type", "Numeric expression request")
   target_type in NUMERIC_EXPRESSION_TARGETS || throw(validation_error(
     "Field 'target_type' must be 'Float64' or 'Int64'",
@@ -1202,22 +1215,16 @@ function _instantiate_noise(noise_def)
 
       ptype = get(param_types, original_name, "Any")
 
-      # Convert value using shared utility; if unsupported, try eval as last resort
+      # Background parameters use only the explicit typed conversion path.
       ok, converted = _convert_parameter_value(ptype, value)
       if ok
         kwargs[name] = converted
         continue
       end
-
-      # For complex types, try eval with value::type
-      eval_expr = "$(value)::$(ptype)"
-      require_unsafe_code_evaluation()
-      try
-        @info "Attempting eval for noise parameter" parameter_name=name eval_expr=eval_expr
-        kwargs[name] = eval(Meta.parse(eval_expr))
-      catch eval_error
-        @warn "Eval failed for noise parameter, skipping" parameter_name=name eval_expr=eval_expr eval_error=eval_error
-      end
+      throw(validation_error(
+        "Background noise parameter '$original_name' cannot be converted to '$ptype'",
+        Dict{String,Any}("parameter_name" => original_name, "parameter_type" => ptype),
+      ))
     end
 
     # Instantiate noise with keyword arguments; fall back to no-arg if empty
@@ -1292,11 +1299,13 @@ function _handle_function_lambda_parameter!(
     kwargs[name] = value
     return true
   elseif isa(value, String)
-    # Try to resolve by name first (works for both Function and Lambda cases),
-    # then fall back to creating a lambda from code.
-    resolved = resolve_function_reference(value)
-    resolved === nothing && (resolved = resolve_self_comparison_reference(value, self_node_index))
-    if resolved === nothing && special_type == "Lambda"
+    # Predefined Function choices are safe catalog entries. Lambda values are
+    # always user source, even when their text resembles a predefined choice.
+    resolved = special_type == "Function" ? resolve_function_reference(value) : nothing
+    if resolved === nothing && special_type == "Function"
+      resolved = resolve_self_comparison_reference(value, self_node_index)
+    end
+    if special_type == "Lambda"
       require_unsafe_code_evaluation()
       try
         resolved = create_lambda(
@@ -1314,24 +1323,15 @@ function _handle_function_lambda_parameter!(
             @info msg parameter_name=name lambda_string=value
           end
           
-          # Warn about common mistakes
-          if !occursin("return", value) && !occursin("=>", value)
-            warning_msg = "Lambda function may not return a value (no 'return' statement or '=>' found). Functions like chooseA/chooseB must return an integer, filter must return a boolean."
-            if state !== nothing
-              @log_event state Logging.Warn warning_msg parameter_name=string(name) lambda_string=value
-            else
-              @warn warning_msg parameter_name=name lambda_string=value
-            end
-          end
         end
       catch e
         isa(e, APIError) && rethrow(e)
-        msg = "Failed to create lambda from string"
-        if state !== nothing
-          @log_event state Logging.Warn msg parameter_name=string(name) value=value error=string(e)
-        else
-          @warn msg parameter_name=name value=value error=e
-        end
+        throw(validation_error(
+          "Failed to evaluate Custom Function for parameter '$(name)'",
+          evaluation_failure_details(e, Dict{String,Any}(
+            "parameter_name" => string(name),
+          )),
+        ))
       end
     end
     if resolved !== nothing
@@ -1370,19 +1370,31 @@ function _handle_symbolic_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, val
         kwargs[name] = symbolic_value  # Pass the actual evaluated symbolic object
         return true
       else
-        @warn "Failed to evaluate symbolic expression" parameter_name=name value=value error=error
+        throw(validation_error(
+          "Failed to evaluate Symbolic source for parameter '$(name)'",
+          evaluation_failure_details(error, Dict{String,Any}(
+            "parameter_name" => string(name),
+          )),
+        ))
       end
     catch e
       isa(e, APIError) && rethrow(e)
-      @warn "Failed to create symbolic expression from string" parameter_name=name value=value error=e
+      throw(validation_error(
+        "Failed to evaluate Symbolic source for parameter '$(name)'",
+        evaluation_failure_details(e, Dict{String,Any}(
+          "parameter_name" => string(name),
+        )),
+      ))
     end
   elseif _states_zoo_object_like(value) && get(value, "kind", nothing) == "states_zoo"
     kwargs[name] = construct_states_zoo_recipe(value)
     return true
   else
-    @warn "Symbolic parameter has unsupported value type; skipping" parameter_name=name value_type=typeof(value)
+    throw(validation_error(
+      "Symbolic parameter '$(name)' has an unsupported value type",
+      Dict{String,Any}("received_type" => string(typeof(value))),
+    ))
   end
-  return false
 end
 
 function _handle_numeric_expression_parameter!(
@@ -1442,19 +1454,14 @@ function _handle_regular_parameter!(kwargs::Dict{Symbol,Any}, name::Symbol, ptyp
     return false
   end
   
-  # For complex types, try eval with value::type pattern
-  eval_expr = "$(value)::$(ptype)"
-  require_unsafe_code_evaluation()
-  try
-    @info "Attempting eval" parameter_name=name eval_expr=eval_expr
-    kwargs[name] = eval(Meta.parse(eval_expr))
-    @info "Eval successful" parameter_name=name
-    return true
-  catch eval_error
-    @warn "Eval failed, skipping parameter" parameter_name=name eval_expr=eval_expr eval_error=eval_error
-    # If eval fails, skip the parameter entirely - let constructor use default
-  end
-  return false
+  throw(validation_error(
+    "Protocol parameter '$(name)' cannot be converted to '$ptype'",
+    Dict{String,Any}(
+      "parameter_name" => string(name),
+      "parameter_type" => ptype,
+      "received_type" => string(typeof(value)),
+    ),
+  ))
 end
 
 function _special_parameter_type(p_raw_type)
@@ -1538,14 +1545,14 @@ function _handle_typed_parameter!(
     end
   catch e
     isa(e, APIError) && rethrow(e)
-    msg = "Failed to convert parameter"
-    if state !== nothing
-      @log_event state Logging.Warn msg parameter_name=string(name) parameter_type=ptype value=value error=string(e)
-    else
-      @warn msg parameter_name=name parameter_type=ptype value=value error=e
-    end
-    # Don't set the parameter - let the constructor use its default value.
-    return false
+    throw(validation_error(
+      "Failed to convert protocol parameter '$(name)'",
+      Dict{String,Any}(
+        "parameter_name" => string(name),
+        "parameter_type" => ptype,
+        "conversion_error" => sprint(showerror, e),
+      ),
+    ))
   end
 end
 
@@ -1705,7 +1712,7 @@ function _instantiate_protocol(
       get(p, "type", nothing),
       value,
     )
-    _handle_typed_parameter!(
+    converted = _handle_typed_parameter!(
       kwargs,
       name,
       handling_type,
@@ -1714,6 +1721,13 @@ function _instantiate_protocol(
       state;
       constructor_metadata=parameter_metadata,
     )
+    converted || throw(validation_error(
+      "Protocol parameter '$original_name' has an invalid explicit value",
+      Dict{String,Any}(
+        "parameter_name" => original_name,
+        "parameter_type" => string(handling_type),
+      ),
+    ))
   end
 
   # Instantiate with all keyword arguments
