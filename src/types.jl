@@ -50,6 +50,7 @@ function _evaluate_complete_source(
     transform::Function=identity,
 )
     parsed = _parse_complete_source(source)
+    _assert_source_allowlisted(parsed)
     return Base.eval(evaluation_module, transform(parsed))
 end
 
@@ -442,6 +443,7 @@ function _evaluate_numeric_expression_source(
 )
     require_unsafe_code_evaluation()
     parsed = _parse_complete_source(source)
+    _assert_source_allowlisted(parsed)
     transform = if node_name_to_index === nothing
         identity
     else

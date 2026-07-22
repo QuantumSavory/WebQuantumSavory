@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Added a default-deny allowlist guard that walks parsed Custom Function,
+  numeric-expression, and Symbolic source and rejects any non-allowlisted
+  identifier or dangerous syntactic form (module qualification and property
+  access via `.`, macros, interpolation, imports, `ccall`, and the `getfield`
+  family) immediately before the existing pipeline evaluates it. The guard
+  reuses Julia's own parser and evaluator, performs no lowering or macro
+  expansion, and is one defense-in-depth layer on top of the
+  `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` gate — not a security boundary.
+  Because module qualification is now blocked, edge and variable Custom
+  Functions can no longer call `Base.length`; the edge-length binding `length`
+  shadows the function in those placements.
+
 ## 1.10.1
 
 - Added descriptor-driven physical quantities and unit metadata for global and

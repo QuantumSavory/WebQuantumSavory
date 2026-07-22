@@ -8,6 +8,7 @@ using ResumableFunctions
 using ConcurrentSim
 using ..WebQuantumSavory: NUMERIC_EXPRESSION_PLACEMENTS,
                           NUMERIC_EXPRESSION_TARGETS,
+                          _assert_source_allowlisted,
                           _cast_numeric_expression_result,
                           _evaluate_function_source,
                           _lowered_numeric_context_bindings,
@@ -185,6 +186,7 @@ function test_numeric_expression(
 
         evaluation_module = Module()
         parsed = _parse_complete_source(expression)
+        _assert_source_allowlisted(parsed)
         results = Dict{Symbol,Any}(:target_type => target_type)
 
         value = if placement == "variable"
@@ -247,6 +249,7 @@ function evaluate_symbolic_expression(expr::String)
 
         # Parse incoming expression
         parsed = Meta.parse(expr)
+        _assert_source_allowlisted(parsed; symbolic=true)
 
         # Evaluate within the temporary module to resolve symbols like Z₁, Z₂, ⊗, √, etc
         value = Base.eval(tempmod, parsed)

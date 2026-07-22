@@ -1062,11 +1062,13 @@
           ("<(self)", "node", true),
           ("==(nodeid(\"Amherst\"))", "edge", true),
           (
+            # `Base.length` is rejected by the restricted allowlist (module
+            # qualification is blocked), so this source is refused.
             "values -> length > 0 && delay >= 0 && refractive_index > 0 && " *
             "loss >= 0 && 0 <= transmissivity <= 1 && " *
             "node_a == 1 && node_b == 2 && Base.length(values) > 0",
             "edge",
-            true,
+            false,
           ),
           ("<(self)", "edge", false),
           ("value -> value == self && node_a < node_b", "variable", true),
@@ -1158,7 +1160,9 @@
           "POST",
           "/test_numeric_expression";
           body=Dict(
-            "expression" => "x = 3\nx // 1",
+            # Rationals (`//`) are not allowlisted; use plain arithmetic to
+            # exercise immediate (non-deferred) variable evaluation.
+            "expression" => "x = 3\nx + 0",
             "target_type" => "Int64",
             "placement" => "variable",
           ),
@@ -1190,6 +1194,9 @@
           merge(edge_request, Dict("expression" => "Inf")),
           merge(edge_request, Dict("expression" => "invalid(")),
           merge(edge_request, Dict("expression" => "self")),
+          # Rejected by the restricted allowlist before evaluation.
+          merge(edge_request, Dict("expression" => "Base.length([1, 2])", "target_type" => "Int64")),
+          merge(edge_request, Dict("expression" => "open(\"/tmp/x\", \"w\")")),
         )
           failing_response = make_request(
             "POST",

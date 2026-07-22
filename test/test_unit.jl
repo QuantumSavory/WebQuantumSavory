@@ -1122,10 +1122,13 @@
       @test validation_error === nothing
 
       for placement in ("edge", "variable")
+        # `Base.length(candidates)` is intentionally rejected by the restricted
+        # allowlist (module qualification is blocked); the edge-length binding
+        # `length` shadows the function in edge/variable placement.
         success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
           "candidates -> length > 0 && delay >= 0 && refractive_index > 0 && " *
           "loss >= 0 && 0 <= transmissivity <= 1 && " *
-          "node_a == 1 && node_b == 2 && Base.length(candidates) > 0";
+          "node_a == 1 && node_b == 2";
           placement=placement,
         )
         @test success
@@ -1340,8 +1343,7 @@
           "Lambda",
           "candidates -> length == 1250.0 && delay == 0.25 && " *
           "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
-          "node_a == 1 && node_b == 2 && " *
-          "Base.length(candidates) == 2",
+          "node_a == 1 && node_b == 2",
           edge_ctx,
         )
         @test edge_kwargs[:selector]([1, 2])
@@ -1409,6 +1411,59 @@
         )
         @test_throws KeyError missing_name(1)
       end
+  end
+
+  @testset "Restricted source allowlist" begin
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      # Accepted: ordinary custom functions and query predicates that stay within
+      # the allowlisted operations and context bindings.
+      for source in (
+        "x -> x + 1",
+        "f(x) = x + 1",
+        "function double(x)\n  return 2x\nend",
+        "<(1)",
+        "candidate -> candidate > 0 && isfinite(candidate)",
+      )
+        success, _, err = WebQuantumSavory.Sandbox.test_code(source; placement="query")
+        @test success
+        @test err === nothing
+      end
+
+      # Accepted: symbolic source built from QuantumSymbolics atoms, operator
+      # functions, and concrete constructors.
+      for expr in ("Z₁", "Z₁ ⊗ Z₂", "projector(Z₁)", "ZGate()")
+        success, _, err = WebQuantumSavory.Sandbox.evaluate_symbolic_expression(expr)
+        @test success
+        @test err === nothing
+      end
+
+      # Rejected: dangerous identifiers and syntactic forms are refused before
+      # evaluation and surfaced as an ArgumentError validation failure.
+      for source in (
+        "x -> run(`ls`)",
+        "Core.eval(:(1 + 1))",
+        "@eval 1",
+        "x -> read(\"/etc/passwd\", String)",
+        "getfield(Core, :eval)",
+        "getproperty(x, :im)",
+        "x -> x.im",
+        "x -> open(\"/tmp/x\", \"w\")",
+        "candidates -> Base.length(candidates) > 0",
+      )
+        success, results, err = WebQuantumSavory.Sandbox.test_code(source; placement="query")
+        @test !success
+        @test results === nothing
+        @test err isa ArgumentError
+        @test occursin("restricted expression", sprint(showerror, err))
+      end
+
+      # Rejected in the symbolic profile as well.
+      for expr in ("run(`ls`)", "Core.eval(:(1 + 1))", "getfield(Core, :eval)")
+        success, _, err = WebQuantumSavory.Sandbox.evaluate_symbolic_expression(expr)
+        @test !success
+        @test err isa ArgumentError
+      end
+    end
   end
 
   @testset "Protocol Types" begin
@@ -4560,55 +4615,47 @@
     ) == Set((:delay,))
 
     withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
-      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "x = 1 // 2\nx + π / π",
-        "Float64",
-        "floating",
+      # Non-allowlisted operations and syntax are rejected before evaluation:
+      # rationals (`//`), ranges/generators, module qualification, and property
+      # access.
+      for (source, placement) in (
+        ("x = 1 // 2\nx + π / π", "floating"),
+        ("x = 1 // 2\nx + π / π", "variable"),
+        ("sum(range(1; length=3))", "variable"),
+        ("(; delay=1).delay", "variable"),
+        ("sum(length for length in 1:3)", "variable"),
+        ("Base.length((1, 2))", "variable"),
       )
-      @test success
-      @test error === nothing
-      @test results == Dict(
-        :deferred => true,
-        :target_type => "Float64",
-        :value => "1.5",
-      )
+        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+          source,
+          "Int64",
+          placement,
+        )
+        @test !success
+        @test results === nothing
+        @test error isa ArgumentError
+        @test occursin("restricted expression", sprint(showerror, error))
+      end
 
+      # Plain assignment and finite arithmetic without a free context reference
+      # evaluate immediately.
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "x = 1 // 2\nx + π / π",
-        "Float64",
+        "if true; delay=1; end; delay",
+        "Int64",
         "variable",
       )
       @test success
       @test error === nothing
-      @test results[:deferred] == false
-      @test parse(Float64, results[:value]) == 1.5
-
-      for (source, target, expected) in (
-        ("sum(range(1; length=3))", "Int64", "6"),
-        ("(; delay=1).delay", "Int64", "1"),
-        ("sum(length for length in 1:3)", "Int64", "6"),
-        ("if true; delay=1; end; delay", "Int64", "1"),
-        ("Base.length((1, 2))", "Int64", "2"),
+      @test results == Dict(
+        :deferred => false,
+        :target_type => "Int64",
+        :value => "1",
       )
-        success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-          source,
-          target,
-          "variable",
-        )
-        @test success
-        @test error === nothing
-        @test results == Dict(
-          :deferred => false,
-          :target_type => target,
-          :value => expected,
-        )
-      end
 
       for source in (
         "delay / 2",
         "self + nodeid(\"Bob\")",
         "length + refractive_index + loss + transmissivity + node_a + node_b",
-        "@isdefined(delay)",
       )
         success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
           source,
@@ -4620,6 +4667,16 @@
         @test results[:deferred] == true
         @test !haskey(results, :value)
       end
+
+      # Macros are rejected before any lowering or expansion.
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "@isdefined(delay)",
+        "Float64",
+        "variable",
+      )
+      @test !success
+      @test results === nothing
+      @test error isa ArgumentError
 
       edge_context = (
         node_names=["Alice", "Bob"],
@@ -4683,6 +4740,7 @@
           2,
         ),
       )
+      # `all` is not an allowlisted reducer, so the expression is rejected.
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
         "all(isnothing, (length, delay, refractive_index, loss, transmissivity)) ? " *
         "node_b - node_a : 99",
@@ -4690,13 +4748,14 @@
         "edge";
         context=virtual_context,
       )
-      @test success
-      @test results[:value] == "1"
-      @test error === nothing
+      @test !success
+      @test results === nothing
+      @test error isa ArgumentError
 
+      # These evaluate past the allowlist and then fail in the target cast or
+      # parser, exercising the downstream error path rather than the guard.
       for (source, target, expected_error) in (
         ("1 / 2", "Int64", InexactError),
-        ("big(typemax(Int64)) + 1", "Int64", InexactError),
         ("Inf", "Float64", ArgumentError),
         ("true", "Int64", ArgumentError),
         ("\"not numeric\"", "Float64", ArgumentError),
@@ -4712,6 +4771,16 @@
         @test error isa expected_error
       end
 
+      # `big` and `typemax` are not allowlisted, so this is rejected up front.
+      success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
+        "big(typemax(Int64)) + 1",
+        "Int64",
+        "variable",
+      )
+      @test !success
+      @test results === nothing
+      @test error isa ArgumentError
+
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
         "delay / 2",
         "Float64",
@@ -4722,15 +4791,16 @@
       @test results === nothing
       @test error isa UndefVarError
 
+      # Module qualification is rejected; the bare allowlisted `length` is fine.
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
         "Base.length([1, 2])",
         "Int64",
         "floating";
         context=(node_names=["Alice"],),
       )
-      @test success
-      @test results[:value] == "2"
-      @test error === nothing
+      @test !success
+      @test results === nothing
+      @test error isa ArgumentError
 
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
         "length([1, 2])",
@@ -4742,6 +4812,8 @@
       @test results[:value] == "2"
       @test error === nothing
 
+      # I/O is rejected before evaluation, so the source never runs and no file
+      # is ever created.
       contextual_body_file = tempname()
       contextual_source = "open($(repr(contextual_body_file)), \"a\") do io; write(io, \"x\"); end; delay"
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
@@ -4749,8 +4821,9 @@
         "Float64",
         "variable",
       )
-      @test success
-      @test results[:deferred] == true
+      @test !success
+      @test results === nothing
+      @test error isa ArgumentError
       @test !isfile(contextual_body_file)
 
       for placement in ("variable", "floating")
@@ -4761,10 +4834,10 @@
           "Int64",
           placement,
         )
-        @test success
-        @test results[:value] == "1"
-        @test read(execution_file, String) == "x"
-        rm(execution_file)
+        @test !success
+        @test results === nothing
+        @test error isa ArgumentError
+        @test !isfile(execution_file)
       end
 
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
