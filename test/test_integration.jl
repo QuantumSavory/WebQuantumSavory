@@ -159,6 +159,17 @@
       @test all(haskey(bt, "type") for bt in data["background_types"])
       @test all(haskey(bt, "doc") for bt in data["background_types"])
       @test all(haskey(bt, "parameters") for bt in data["background_types"])
+      parameters = [parameter for bt in data["background_types"] for parameter in bt["parameters"]]
+      @test !isempty(parameters)
+      @test all(haskey(parameter, "field") for parameter in parameters)
+      @test all(haskey(parameter, "type") for parameter in parameters)
+      @test all(
+        parameter["type"] isa String || (
+          parameter["type"] isa Vector &&
+          all(member -> member isa String, parameter["type"])
+        )
+        for parameter in parameters
+      )
   end
 
   @testset "Slot Types Endpoint" begin

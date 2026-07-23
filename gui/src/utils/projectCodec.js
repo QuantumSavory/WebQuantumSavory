@@ -251,10 +251,42 @@ function normalizeBackgroundNoise(value, context) {
   if (!isRecord(value)) {
     return defaultBackgroundNoise(context)
   }
+  const type = typeof value.type === 'string' && value.type ? value.type : 'default'
   return {
     ...cloneValue(value),
-    type: typeof value.type === 'string' && value.type ? value.type : 'default',
-    parameters: Array.isArray(value.parameters) ? cloneValue(value.parameters) : [],
+    type,
+    parameters: Array.isArray(value.parameters)
+      ? value.parameters.map((parameter, index) => {
+          const source = isRecord(parameter) ? cloneValue(parameter) : {}
+          if (
+            (typeof source.field !== 'string' || !source.field)
+            && typeof source.name === 'string'
+            && source.name
+          ) {
+            source.field = source.name
+          }
+          // Schema-v1 background records may contain only `field`/`value`.
+          // Without a saved descriptor there is no sound editor branch to
+          // infer here; the live catalog supplies it when the constructor is
+          // next opened. Keep the literal losslessly in the meantime.
+          if (
+            !Object.hasOwn(source, 'type')
+            && !Object.hasOwn(source, 'selectedType')
+          ) {
+            return {
+              ...source,
+              value: normalizeNumericExpressionValue(
+                source.value,
+                `Background ${type} parameter ${index + 1}`,
+              ),
+            }
+          }
+          return normalizeConstructorParameter(
+            source,
+            `Background ${type} parameter ${index + 1}`,
+          )
+        })
+      : [],
   }
 }
 
@@ -279,7 +311,7 @@ function normalizeNumericExpressionValue(value, context) {
  * The runtime metadata snapshot remains untouched. `selectedType` identifies
  * only the durable editor branch; minimized payloads translate it separately.
  */
-function normalizeProtocolParameter(rawParameter, context = 'Protocol parameter') {
+function normalizeConstructorParameter(rawParameter, context = 'Constructor parameter') {
   const source = isRecord(rawParameter) ? rawParameter : {}
   const parameter = cloneValue(source)
   const value = normalizeNumericExpressionValue(parameter.value, context)
@@ -443,7 +475,7 @@ function hydrateProtocol(rawProtocol) {
     id: source.id,
     type: source.type,
     parameters: Array.isArray(source.parameters)
-      ? source.parameters.map((parameter, index) => normalizeProtocolParameter(
+      ? source.parameters.map((parameter, index) => normalizeConstructorParameter(
           parameter,
           `Protocol parameter ${index + 1}`,
         ))
@@ -517,7 +549,7 @@ function plainProtocol(protocol) {
   return {
     ...omitFields(source, new Set(['parameters'])),
     parameters: Array.isArray(source.parameters)
-      ? source.parameters.map((parameter, index) => normalizeProtocolParameter(
+      ? source.parameters.map((parameter, index) => normalizeConstructorParameter(
           parameter,
           `Protocol parameter ${index + 1}`,
         ))
@@ -809,7 +841,7 @@ export function decodeDesignDocument(document, context = {}) {
 }
 
 function hasValue(parameter) {
-  return parameter?.selectedType !== 'default'
+  return (!Object.hasOwn(parameter || {}, 'selectedType') || parameter.selectedType !== 'default')
     && parameter?.value != null
     && parameter.value !== ''
 }
@@ -851,10 +883,13 @@ function cleanBackgroundNoise(value) {
   source.parameters = Array.isArray(source.parameters)
     ? source.parameters
         .filter(hasValue)
-        .map(parameter => ({
-          name: parameter.field ?? parameter.name,
-          value: cloneValue(parameter.value),
-        }))
+        .map(parameter => {
+          const cleaned = {
+            name: parameter.field ?? parameter.name,
+            value: cloneValue(parameter.value),
+          }
+          return cleaned
+        })
     : []
   return source
 }

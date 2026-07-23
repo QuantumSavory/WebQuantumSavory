@@ -497,38 +497,145 @@ function _collect_protocol_definitions(payload)
   return definitions
 end
 
-function _validate_variable_references(payload, variables)
-  for (protocol, location) in _collect_protocol_definitions(payload)
-    _is_object_like(protocol) || continue
-    parameters = get(protocol, "parameters", Any[])
-    parameters isa AbstractVector || continue
-    raw_protocol_type = get(protocol, "type", nothing)
-    protocol_type = raw_protocol_type isa AbstractString ?
-      _resolve_protocol_type_from_string(raw_protocol_type) : nothing
-    declared_parameter_types = protocol_type === nothing ?
-      Dict{String,Any}() : _protocol_constructor_parameter_types(protocol_type)
+function _collect_background_definitions(payload)
+  definitions = Tuple{Any,String}[]
+  net = get(payload, "net", nothing)
+  _is_object_like(net) || return definitions
+  nodes = get(net, "nodes", Any[])
+  nodes isa AbstractVector || return definitions
 
-    for parameter in parameters
-      _is_object_like(parameter) || continue
+  for (node_index, node) in enumerate(nodes)
+    _is_object_like(node) || continue
+    node_data = get(node, "data", nothing)
+    _is_object_like(node_data) || continue
+    slots = get(node_data, "slots", Any[])
+    slots isa AbstractVector || continue
+    for (slot_index, slot) in enumerate(slots)
+      _is_object_like(slot) || continue
+      background = get(slot, "backgroundNoise", nothing)
+      background === nothing && continue
+      push!(
+        definitions,
+        (background, "node $node_index slot $slot_index background"),
+      )
+    end
+  end
+  return definitions
+end
+
+"""
+Validate all catalog-backed constructor parameter tags before construction.
+
+Despite its historical name, this covers protocols and slot backgrounds,
+including direct numeric expressions and every semantic Variable type.
+"""
+function _validate_variable_references(payload, variables)
+  constructors = Any[
+    (
+      definition=definition,
+      location=location,
+      kind=:protocol,
+      mappings=PROTOCOL_KEYWORD_MAPPINGS,
+    )
+    for (definition, location) in _collect_protocol_definitions(payload)
+  ]
+  append!(
+    constructors,
+    (
+      definition=definition,
+      location=location,
+      kind=:background,
+      mappings=Dict{String,String}(),
+    )
+    for (definition, location) in _collect_background_definitions(payload)
+  )
+
+  for constructor in constructors
+    definition = constructor.definition
+    location = constructor.location
+    kind = constructor.kind
+    if definition isa AbstractString
+      String(definition) == "default" && continue
+      resolved = kind === :protocol ?
+        _resolve_protocol_type_from_string(String(definition)) :
+        _resolve_noise_type_from_string(String(definition))
+      resolved === nothing && throw(validation_error(
+        "Unknown $(kind === :protocol ? "protocol" : "background noise") type: '$(definition)'",
+      ))
+      continue
+    end
+    _is_object_like(definition) || throw(validation_error(
+      "$location must be a catalog-backed object",
+    ))
+
+    raw_type = _required_nonempty_string(definition, "type", location)
+    if kind === :background && raw_type == "default"
+      continue
+    end
+    constructor_type = kind === :protocol ?
+      _resolve_protocol_type_from_string(raw_type) :
+      _resolve_noise_type_from_string(raw_type)
+    constructor_type === nothing && throw(validation_error(
+      "Unknown $(kind === :protocol ? "protocol" : "background noise") type: '$raw_type'",
+      Dict{String,Any}("location" => location, "constructor_type" => raw_type),
+    ))
+
+    declared_parameter_types = kind === :protocol ?
+      _protocol_constructor_parameter_types(constructor_type) :
+      _constructor_parameter_types(constructor_type)
+    parameters = get(definition, "parameters", Any[])
+    parameters isa AbstractVector || throw(validation_error(
+      "$location parameters must be an array",
+    ))
+    supplied_names = Set{String}()
+
+    for (parameter_index, parameter) in enumerate(parameters)
+      _is_object_like(parameter) || throw(validation_error(
+        "$location parameter $parameter_index must be an object",
+      ))
+      parameter_name = _required_nonempty_string(
+        parameter,
+        "name",
+        "$location parameter $parameter_index",
+      )
+      parameter_name in supplied_names && throw(validation_error(
+        "$location contains duplicate parameter '$parameter_name'",
+      ))
+      push!(supplied_names, parameter_name)
+
+      if kind === :protocol &&
+          Symbol(parameter_name) in (:sim, :net, :node, :nodeA, :nodeB)
+        continue
+      end
       haskey(parameter, "value") || continue
-      parameter_name = string(get(parameter, "name", "unknown"))
-      context = "$location parameter '$parameter_name'"
-      constructor_name = get(PROTOCOL_KEYWORD_MAPPINGS, parameter_name, parameter_name)
-      declared_type = get(declared_parameter_types, constructor_name, nothing)
       value = parameter["value"]
+      if value === nothing ||
+          (value isa AbstractString && isempty(strip(String(value))))
+        continue
+      end
+      constructor_name = get(constructor.mappings, parameter_name, parameter_name)
+      haskey(declared_parameter_types, constructor_name) || throw(validation_error(
+        "Unknown $(kind === :protocol ? "protocol" : "background noise") parameter '$parameter_name'",
+        Dict{String,Any}(
+          "parameter_name" => parameter_name,
+          "constructor_type" => raw_type,
+          "location" => location,
+        ),
+      ))
+      context = "$location parameter '$parameter_name'"
+      declared_type = declared_parameter_types[constructor_name]
 
       numeric_expression = _parse_numeric_expression(value; context=context)
       if numeric_expression !== nothing
-        target = declared_type === nothing ? nothing :
-          _numeric_expression_target_for_parameter(
-            declared_type,
-            get(parameter, "type", nothing),
-          )
+        target = _numeric_expression_target_for_parameter(
+          declared_type,
+          get(parameter, "type", nothing),
+        )
         target === nothing && throw(validation_error(
           "$context does not accept a numeric expression",
           Dict{String,Any}(
             "parameter_name" => parameter_name,
-            "protocol_type" => string(raw_protocol_type),
+            "constructor_type" => raw_type,
           ),
         ))
         continue
@@ -545,13 +652,28 @@ function _validate_variable_references(payload, variables)
         ),
       ))
       variable = variables[reference.id]
+      _named_tag_parameter_semantics(declared_type) === nothing ||
+        throw(validation_error(
+          "Named tag type parameters cannot use variables",
+          Dict{String,Any}("parameter_name" => parameter_name),
+        ))
+      _variable_uses_constructor_default(variable) && continue
+      _parameter_type_supports_variable_type(declared_type, variable.type) ||
+        throw(validation_error(
+          "Variable '$(variable.name)' is incompatible with $context",
+          Dict{String,Any}(
+            "variable_id" => variable.id,
+            "variable_type" => variable.type,
+            "parameter_name" => parameter_name,
+          ),
+        ))
+
       variable_expression = _parse_numeric_expression(
         variable.value;
         context="Variable '$(variable.name)'",
       )
       if variable_expression !== nothing
-        target = declared_type === nothing ? nothing :
-          _numeric_expression_target_for_parameter(declared_type, variable.type)
+        target = _numeric_expression_target_for_parameter(declared_type, variable.type)
         target == variable.type || throw(validation_error(
           "Variable '$(variable.name)' numeric expression is incompatible with $context",
           Dict{String,Any}(
@@ -577,7 +699,7 @@ function get_background_types()
     Dict(
       "type" => string(nameof(abt.type)),
       "doc" => string(abt.doc),
-      "parameters" => get_background_constructor_parameters(abt.type)
+      "parameters" => get_background_constructor_parameters(abt.type) |> parse_pt_type
     ) for abt in background_types
   ]
 end
@@ -634,12 +756,25 @@ function _named_tag_parameter_semantics(type)
   return (; nullable=any(member -> member === Nothing, members))
 end
 
-"""Return authoritative constructor field types, including supported private keyword aliases."""
-function _protocol_constructor_parameter_types(protocol_type)
-  declared = Dict(
+"""Return authoritative constructor field types from catalog metadata."""
+function _constructor_parameter_types(constructor_type)
+  return Dict(
     string(parameter.field) => parameter.type
-    for parameter in QuantumSavory.constructor_metadata(protocol_type)
+    for parameter in QuantumSavory.constructor_metadata(constructor_type)
   )
+end
+
+"""Return authoritative constructor metadata keyed by its wire field."""
+function _constructor_parameter_metadata(constructor_type)
+  return Dict(
+    string(parameter.field) => parameter
+    for parameter in QuantumSavory.constructor_metadata(constructor_type)
+  )
+end
+
+"""Return protocol constructor fields, including supported private keyword aliases."""
+function _protocol_constructor_parameter_types(protocol_type)
+  declared = _constructor_parameter_types(protocol_type)
   reflected_fields = Dict(string(name) => type for (name, type) in zip(
     fieldnames(protocol_type),
     fieldtypes(protocol_type),
@@ -652,10 +787,7 @@ end
 
 """Return documented constructor metadata keyed by the accepted wire keyword."""
 function _protocol_constructor_parameter_metadata(protocol_type)
-  metadata = Dict(
-    string(parameter.field) => parameter
-    for parameter in QuantumSavory.constructor_metadata(protocol_type)
-  )
+  metadata = _constructor_parameter_metadata(protocol_type)
   for (wire_name, constructor_name) in PROTOCOL_KEYWORD_MAPPINGS
     haskey(metadata, wire_name) &&
       !haskey(metadata, constructor_name) &&
@@ -670,12 +802,12 @@ function _constructor_numeric_bound(metadata, field::Symbol)
   value = getproperty(metadata, field)
   value === nothing && return nothing
   value isa Real && !(value isa Bool) || throw(server_error(
-    "Protocol constructor numeric bound is not a real number",
+    "Constructor numeric bound is not a real number",
     Dict{String,Any}("field" => string(field), "value_type" => string(typeof(value))),
   ))
   number = Float64(value)
   isfinite(number) || throw(server_error(
-    "Protocol constructor numeric bound must be finite",
+    "Constructor numeric bound must be finite",
     Dict{String,Any}("field" => string(field)),
   ))
   return number
@@ -695,6 +827,49 @@ function _numeric_expression_target_for_parameter(declared_type, client_type=not
     return String(client_type)
   end
   return length(member_targets) == 1 ? only(member_targets) : nothing
+end
+
+"""Mirror the frontend's semantic Variable-to-constructor compatibility rules."""
+function _parameter_type_supports_variable_type(declared_type, variable_type)
+  variable_type isa AbstractString || return false
+  variable_name = String(variable_type)
+  isempty(variable_name) && return false
+  lowercase(variable_name) == "default" && return true
+
+  members = try
+    Base.uniontypes(declared_type)
+  catch
+    Any[declared_type]
+  end
+  return any(members) do member
+    member === Any && return true
+    member_name = string(member)
+    if member === Function
+      return variable_name in ("Function", "Lambda")
+    elseif _is_symbolic_parameter_type(member)
+      return variable_name in (
+        "Symbolic",
+        "SymQObj",
+        "QuantumSymbolics.SymQObj",
+      ) || startswith(variable_name, "SymbolicUtils.Symbolic{") ||
+        startswith(variable_name, "QuantumSymbolics.SymQObj{")
+    elseif member === QuantumSavory.Wildcard
+      return variable_name in ("Wildcard", "QuantumSavory.Wildcard")
+    elseif member in (Int, Int64)
+      return variable_name in ("Int", "Int64")
+    end
+    return member_name == variable_name
+  end
+end
+
+"""Whether a Variable requests omission of its assigned constructor keyword."""
+function _variable_uses_constructor_default(variable)
+  variable_type = lowercase(strip(String(variable.type)))
+  return variable_type == "default" || (
+    variable_type == "function" &&
+    variable.value isa AbstractString &&
+    lowercase(strip(String(variable.value))) == "default"
+  )
 end
 
 """Choose a value-compatible member while staying inside an authoritative union type."""
@@ -727,7 +902,7 @@ function _declared_parameter_value_type(declared_type, value)
 end
 
 """Refine a union member only within the authoritative constructor declaration."""
-function _protocol_parameter_handling_type(declared_type, client_type, value)
+function _constructor_parameter_handling_type(declared_type, client_type, value)
   members = Base.uniontypes(declared_type)
   if client_type isa AbstractString
     client_type_name = String(client_type)
@@ -741,6 +916,9 @@ function _protocol_parameter_handling_type(declared_type, client_type, value)
   end
   return _declared_parameter_value_type(declared_type, value)
 end
+
+_protocol_parameter_handling_type(declared_type, client_type, value) =
+  _constructor_parameter_handling_type(declared_type, client_type, value)
 
 function parse_pt_type(parameters::AbstractVector)
   result = []
@@ -1069,13 +1247,15 @@ function create_registers_from_nodes(data)
   # Extract nodes from the validation result
   nodes = data["graph_info"]["nodes"]
   default_representations = representation_config(data["data"])
+  variables = _parse_variables(data["data"])
+  node_name_to_index = _node_name_to_index(nodes)
 
   # Create array of Register objects based on slots data
   registers = []
   slot_mapping = Dict{String, Any}()
   slot_reverse = IdDict{Any, String}()
 
-  for node in nodes
+  for (node_index, node) in enumerate(nodes)
     node_data = node["data"]
     slots = get(node_data, "slots", [])
 
@@ -1099,7 +1279,12 @@ function create_registers_from_nodes(data)
 
       # Instantiate background noise (supports string or object with parameters)
       noise_def = get(slot_data, "backgroundNoise", nothing)
-      background = noise_def === nothing ? nothing : _instantiate_noise(noise_def)
+      background_context = Dict{Symbol,Any}(
+        :node => node_index,
+        NODE_NAME_TO_INDEX_CONTEXT_KEY => node_name_to_index,
+      )
+      background = noise_def === nothing ? nothing :
+        _instantiate_noise(noise_def, background_context; variables)
       push!(background_noise, background)
     end
 
@@ -1142,8 +1327,12 @@ function _resolve_protocol_type_from_string(type_str::AbstractString)
   return T
 end
 
-# Instantiate a background noise from either a String name or an object
-function _instantiate_noise(noise_def)
+# Instantiate a background noise from either a String name or an object.
+function _instantiate_noise(
+  noise_def,
+  ctx::Dict{Symbol,Any}=Dict{Symbol,Any}();
+  variables=Dict{String,Variable}(),
+)
   # String form: "Depolarization" or any available background type name
   if isa(noise_def, AbstractString)
     if String(noise_def) == "default"
@@ -1168,63 +1357,33 @@ function _instantiate_noise(noise_def)
     T = _resolve_type_from_string(String(tstr), :noise)
     T === nothing && error("Unknown background noise type: $(tstr)")
 
-    # Fetch constructor metadata to know parameter expected types
-    md = QuantumSavory.constructor_metadata(T)
-    # Build map from field name -> type string
-    param_types = Dict{String, String}()
-    for p in md
-      fname = String(p.field)
-      ftype = string(p.type)
-      param_types[fname] = ftype
-    end
-
     raw_params = Vector{Any}(get(noise_def, "parameters", Any[]))
-    kwargs = Dict{Symbol, Any}()
+    kwargs, variable_assignments = _constructor_parameter_kwargs(
+      raw_params,
+      T,
+      ctx;
+      variables,
+      parameter_context="background noise parameter",
+    )
 
-    for p in raw_params
-      # Each p is expected to be an object with name and value
-      original_name = String(get(p, "name", ""))
-      isempty(original_name) && continue
-      name = Symbol(original_name)
-      value = get(p, "value", nothing)
-      if value === nothing
-        @warn "Noise parameter has no value, skipping" parameter_name=name
-        continue
-      end
-      numeric_expression = _parse_numeric_expression(
-        value;
-        context="Background noise parameter '$original_name'",
-      )
-      numeric_expression === nothing || throw(validation_error(
-        "Background noise parameter '$original_name' does not support numeric expressions",
-        Dict{String,Any}("parameter_name" => original_name),
-      ))
-
-      ptype = get(param_types, original_name, "Any")
-
-      # Convert value using shared utility; if unsupported, try eval as last resort
-      ok, converted = _convert_parameter_value(ptype, value)
-      if ok
-        kwargs[name] = converted
-        continue
-      end
-
-      # For complex types, try eval with value::type
-      eval_expr = "$(value)::$(ptype)"
-      require_unsafe_code_evaluation()
-      try
-        @info "Attempting eval for noise parameter" parameter_name=name eval_expr=eval_expr
-        kwargs[name] = eval(Meta.parse(eval_expr))
-      catch eval_error
-        @warn "Eval failed for noise parameter, skipping" parameter_name=name eval_expr=eval_expr eval_error=eval_error
-      end
-    end
-
-    # Instantiate noise with keyword arguments; fall back to no-arg if empty
-    if isempty(kwargs)
-      return T()
-    else
+    isempty(variable_assignments) &&
       return T(; (k => v for (k, v) in kwargs)...)
+    try
+      return T(; (k => v for (k, v) in kwargs)...)
+    catch error
+      error isa APIError && rethrow(error)
+      parameter_names = join(
+        (assignment["parameter_name"] for assignment in variable_assignments),
+        ", ",
+      )
+      throw(validation_error(
+        "Failed to instantiate background noise with variable-backed parameter(s): $parameter_names",
+        Dict{String,Any}(
+          "background_type" => string(T),
+          "variable_assignments" => variable_assignments,
+          "constructor_error" => sprint(showerror, error),
+        ),
+      ))
     end
   end
 
@@ -1479,6 +1638,7 @@ function _handle_typed_parameter!(
   ctx,
   state=nothing;
   constructor_metadata=nothing,
+  parameter_context::String="Constructor parameter",
 )
   ptype = p_raw_type === nothing ? "Any" : string(p_raw_type)
   special_type = _special_parameter_type(p_raw_type)
@@ -1493,12 +1653,12 @@ function _handle_typed_parameter!(
 
     numeric_expression = _parse_numeric_expression(
       value;
-      context="Protocol parameter '$(name)'",
+      context="$parameter_context '$(name)'",
     )
     if numeric_expression !== nothing
       target_type = _numeric_expression_target(p_raw_type)
       target_type === nothing && throw(validation_error(
-        "Protocol parameter '$(name)' does not authoritatively accept a Float64 or Int64 expression",
+        "$parameter_context '$(name)' does not authoritatively accept a Float64 or Int64 expression",
       ))
       return _handle_numeric_expression_parameter!(
         kwargs,
@@ -1534,7 +1694,20 @@ function _handle_typed_parameter!(
     elseif special_type == "Symbolic"
       return _handle_symbolic_parameter!(kwargs, name, value)
     else
-      return _handle_regular_parameter!(kwargs, name, ptype, value)
+      converted = _handle_regular_parameter!(kwargs, name, ptype, value)
+      if converted && kwargs[name] isa Real && !(kwargs[name] isa Bool)
+        minimum = _constructor_numeric_bound(constructor_metadata, :min)
+        maximum = _constructor_numeric_bound(constructor_metadata, :max)
+        minimum !== nothing && kwargs[name] < minimum && throw(validation_error(
+          "$parameter_context '$(name)' is below its minimum",
+          Dict{String,Any}("parameter_name" => string(name), "minimum" => minimum),
+        ))
+        maximum !== nothing && kwargs[name] > maximum && throw(validation_error(
+          "$parameter_context '$(name)' is above its maximum",
+          Dict{String,Any}("parameter_name" => string(name), "maximum" => maximum),
+        ))
+      end
+      return converted
     end
   catch e
     isa(e, APIError) && rethrow(e)
@@ -1547,6 +1720,169 @@ function _handle_typed_parameter!(
     # Don't set the parameter - let the constructor use its default value.
     return false
   end
+end
+
+"""
+Convert wire parameters through one catalog-authoritative constructor path.
+
+The returned assignment metadata is used to translate constructor failures
+that involve Variables into client-facing validation errors.
+"""
+function _constructor_parameter_kwargs(
+  params,
+  constructor_type,
+  ctx::Dict{Symbol,Any},
+  state=nothing;
+  variables=Dict{String,Variable}(),
+  parameter_mappings=Dict{String,String}(),
+  ignored_parameters=Set{Symbol}(),
+  parameter_context::String="Constructor parameter",
+  declared_parameter_types=_constructor_parameter_types(constructor_type),
+  constructor_parameter_metadata=_constructor_parameter_metadata(constructor_type),
+)
+  kwargs = Dict{Symbol,Any}()
+  variable_assignments = Dict{String,Any}[]
+  supplied_names = Set{String}()
+
+  for (parameter_index, parameter) in enumerate(params)
+    _is_object_like(parameter) || throw(validation_error(
+      "$parameter_context $parameter_index must be an object",
+    ))
+    original_name = _required_nonempty_string(
+      parameter,
+      "name",
+      "$parameter_context $parameter_index",
+    )
+    original_name in supplied_names && throw(validation_error(
+      "Duplicate $parameter_context '$original_name'",
+    ))
+    push!(supplied_names, original_name)
+    Symbol(original_name) in ignored_parameters && continue
+
+    value = get(parameter, "value", nothing)
+    if value === nothing || (value isa AbstractString && isempty(strip(value)))
+      continue
+    end
+
+    constructor_name = get(parameter_mappings, original_name, original_name)
+    haskey(declared_parameter_types, constructor_name) || throw(validation_error(
+      "Unknown $parameter_context '$original_name'",
+      Dict{String,Any}(
+        "parameter_name" => original_name,
+        "constructor_type" => string(constructor_type),
+      ),
+    ))
+    name = Symbol(constructor_name)
+    declared_type = declared_parameter_types[constructor_name]
+    metadata = get(constructor_parameter_metadata, constructor_name, nothing)
+    named_tag_semantics = _named_tag_parameter_semantics(declared_type)
+
+    if named_tag_semantics !== nothing
+      _parse_variable_reference(
+        value;
+        context="$parameter_context '$original_name'",
+      ) === nothing || throw(validation_error(
+        "Named tag type parameters cannot use variables",
+        Dict{String,Any}("parameter_name" => original_name),
+      ))
+      kwargs[name] = _resolve_named_abstract_tag_type(
+        value;
+        nullable=named_tag_semantics.nullable,
+        context="$parameter_context '$original_name'",
+      )
+      continue
+    end
+
+    reference = _parse_variable_reference(
+      value;
+      context="$parameter_context '$original_name'",
+    )
+    if reference !== nothing
+      variable = get(variables, reference.id, nothing)
+      variable === nothing && throw(validation_error(
+        "Unknown variable reference: '$(reference.id)'",
+        Dict{String,Any}(
+          "variable_id" => reference.id,
+          "parameter_name" => original_name,
+        ),
+      ))
+      _variable_uses_constructor_default(variable) && continue
+      _parameter_type_supports_variable_type(declared_type, variable.type) ||
+        throw(validation_error(
+          "Variable '$(variable.name)' is incompatible with $parameter_context '$original_name'",
+          Dict{String,Any}(
+            "variable_id" => variable.id,
+            "variable_type" => variable.type,
+            "parameter_name" => original_name,
+          ),
+        ))
+
+      variable_expression = _parse_numeric_expression(
+        variable.value;
+        context="Variable '$(variable.name)'",
+      )
+      if variable_expression !== nothing
+        target_type = _numeric_expression_target_for_parameter(
+          declared_type,
+          variable.type,
+        )
+        target_type == variable.type || throw(validation_error(
+          "Variable '$(variable.name)' numeric expression is incompatible with $parameter_context '$original_name'",
+          Dict{String,Any}(
+            "variable_id" => variable.id,
+            "variable_type" => variable.type,
+            "parameter_name" => original_name,
+          ),
+        ))
+      end
+
+      converted = _handle_typed_parameter!(
+        kwargs,
+        name,
+        variable.type,
+        variable.value,
+        ctx,
+        state;
+        constructor_metadata=metadata,
+        parameter_context,
+      )
+      converted || throw(validation_error(
+        "Failed to convert variable '$(variable.name)' for $parameter_context '$original_name'",
+        Dict{String,Any}(
+          "variable_id" => variable.id,
+          "variable_name" => variable.name,
+          "variable_type" => variable.type,
+          "parameter_name" => original_name,
+        ),
+      ))
+      push!(variable_assignments, Dict{String,Any}(
+        "variable_id" => variable.id,
+        "variable_name" => variable.name,
+        "variable_type" => variable.type,
+        "parameter_name" => original_name,
+        "parameter_type" => string(get(parameter, "type", "Any")),
+      ))
+      continue
+    end
+
+    handling_type = _constructor_parameter_handling_type(
+      declared_type,
+      get(parameter, "type", nothing),
+      value,
+    )
+    _handle_typed_parameter!(
+      kwargs,
+      name,
+      handling_type,
+      value,
+      ctx,
+      state;
+      constructor_metadata=metadata,
+      parameter_context,
+    )
+  end
+
+  return kwargs, variable_assignments
 end
 
 function _instantiate_protocol(
@@ -1566,10 +1902,7 @@ function _instantiate_protocol(
 
   params = Vector{Any}(get(prot_def, "parameters", Any[]))
 
-  # Keyword name mappings for exceptions
-  # Build keyword arguments from all parameters
   kwargs = Dict{Symbol, Any}()
-  variable_assignments = Dict{String,Any}[]
 
   # Add sim, net, and node(s) as keyword arguments
   kwargs[:sim] = ctx[:sim]
@@ -1582,139 +1915,19 @@ function _instantiate_protocol(
     kwargs[:nodeB] = ctx[:nodeB]
   end
 
-  # Add remaining parameters as keyword arguments
-  for p in params
-    original_name = String(p["name"])
-    name = Symbol(original_name)
-    value = get(p, "value", nothing)
-
-    # Skip sim, net, node parameters as they're already handled above
-    if name in [:sim, :net, :node, :nodeA, :nodeB]
-      continue
-    end
-
-    # Apply keyword name mapping if it exists
-    constructor_name = get(PROTOCOL_KEYWORD_MAPPINGS, original_name, original_name)
-    name = Symbol(constructor_name)
-
-    if value === nothing || (value isa AbstractString && isempty(strip(value)))
-      continue
-    end
-    haskey(declared_parameter_types, constructor_name) || throw(validation_error(
-      "Unknown protocol parameter '$original_name'",
-      Dict{String,Any}(
-        "parameter_name" => original_name,
-        "protocol_type" => string(T),
-      ),
-    ))
-    declared_type = declared_parameter_types[constructor_name]
-    parameter_metadata = get(constructor_parameter_metadata, constructor_name, nothing)
-    named_tag_semantics = _named_tag_parameter_semantics(declared_type)
-
-    # AbstractTag type fields are a safe, catalog-backed protocol contract.
-    # Classify them only from authoritative constructor metadata; old or forged
-    # client parameter type snapshots have no influence here.
-    if named_tag_semantics !== nothing
-      _parse_variable_reference(value; context="Protocol parameter '$original_name'") === nothing ||
-        throw(validation_error(
-          "Named tag type parameters cannot use variables",
-          Dict{String,Any}("parameter_name" => original_name),
-        ))
-      kwargs[name] = _resolve_named_abstract_tag_type(
-        value;
-        nullable=named_tag_semantics.nullable,
-        context="Protocol parameter '$original_name'",
-      )
-      continue
-    end
-
-    # Variable references are intentionally resolved before the literal-value
-    # pipeline. The variable's concrete type controls conversion; the protocol
-    # parameter's declared type remains constructor-level validation.
-    reference = _parse_variable_reference(value; context="Protocol parameter '$original_name'")
-    if reference !== nothing
-      variable = get(variables, reference.id, nothing)
-      variable === nothing && throw(validation_error(
-        "Unknown variable reference: '$(reference.id)'",
-        Dict{String,Any}(
-          "variable_id" => reference.id,
-          "parameter_name" => original_name,
-        ),
-      ))
-
-      # A default variable means exactly what selecting "default" in a
-      # protocol editor means: omit the keyword and use the constructor default.
-      # The predefined-function selector also represents its default choice as
-      # a Function-typed value containing the string "default".
-      uses_default = lowercase(variable.type) == "default" || (
-        variable.type == "Function" &&
-        variable.value isa AbstractString &&
-        lowercase(strip(variable.value)) == "default"
-      )
-      uses_default && continue
-
-      variable_expression = _parse_numeric_expression(
-        variable.value;
-        context="Variable '$(variable.name)'",
-      )
-      if variable_expression !== nothing
-        target_type = _numeric_expression_target_for_parameter(
-          declared_type,
-          variable.type,
-        )
-        target_type == variable.type || throw(validation_error(
-          "Variable '$(variable.name)' numeric expression is incompatible with parameter '$original_name'",
-          Dict{String,Any}(
-            "variable_id" => variable.id,
-            "variable_type" => variable.type,
-            "parameter_name" => original_name,
-          ),
-        ))
-      end
-
-      converted = _handle_typed_parameter!(
-        kwargs,
-        name,
-        variable.type,
-        variable.value,
-        ctx,
-        state;
-        constructor_metadata=parameter_metadata,
-      )
-      converted || throw(validation_error(
-        "Failed to convert variable '$(variable.name)' for parameter '$original_name'",
-        Dict{String,Any}(
-          "variable_id" => variable.id,
-          "variable_name" => variable.name,
-          "variable_type" => variable.type,
-          "parameter_name" => original_name,
-        ),
-      ))
-      push!(variable_assignments, Dict{String,Any}(
-        "variable_id" => variable.id,
-        "variable_name" => variable.name,
-        "variable_type" => variable.type,
-        "parameter_name" => original_name,
-        "parameter_type" => string(get(p, "type", "Any")),
-      ))
-      continue
-    end
-
-    handling_type = _protocol_parameter_handling_type(
-      declared_type,
-      get(p, "type", nothing),
-      value,
-    )
-    _handle_typed_parameter!(
-      kwargs,
-      name,
-      handling_type,
-      value,
-      ctx,
-      state;
-      constructor_metadata=parameter_metadata,
-    )
-  end
+  parameter_kwargs, variable_assignments = _constructor_parameter_kwargs(
+    params,
+    T,
+    ctx,
+    state;
+    variables,
+    parameter_mappings=PROTOCOL_KEYWORD_MAPPINGS,
+    ignored_parameters=Set((:sim, :net, :node, :nodeA, :nodeB)),
+    parameter_context="protocol parameter",
+    declared_parameter_types,
+    constructor_parameter_metadata,
+  )
+  merge!(kwargs, parameter_kwargs)
 
   # Instantiate with all keyword arguments
   @info "Instantiating protocol" protocol_type=T kwargs=kwargs

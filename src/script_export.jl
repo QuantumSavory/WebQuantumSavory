@@ -625,6 +625,28 @@ function _script_regular_expression(
   ))
 end
 
+function _script_assert_constructor_numeric_bounds(
+  raw_type,
+  value,
+  constructor_metadata,
+  context::String,
+)
+  constructor_metadata === nothing && return nothing
+  converted, converted_value = _convert_parameter_value(
+    _script_declared_type(raw_type),
+    value,
+  )
+  if converted && converted_value isa Real && !(converted_value isa Bool)
+    minimum = _constructor_numeric_bound(constructor_metadata, :min)
+    maximum = _constructor_numeric_bound(constructor_metadata, :max)
+    minimum !== nothing && converted_value < minimum &&
+      throw(validation_error("$context is below its minimum"))
+    maximum !== nothing && converted_value > maximum &&
+      throw(validation_error("$context is above its maximum"))
+  end
+  return nothing
+end
+
 function _script_value_expression(
   raw_type,
   value,
@@ -663,6 +685,12 @@ function _script_value_expression(
   elseif special_type == "Symbolic"
     return _script_symbolic_expression(value, context; imports)
   end
+  _script_assert_constructor_numeric_bounds(
+    raw_type,
+    value,
+    constructor_metadata,
+    context,
+  )
   return _script_regular_expression(raw_type, value, context; imports)
 end
 
@@ -767,6 +795,8 @@ end
 function _script_noise_expression(
   noise_definition,
   context::String;
+  variable_bindings=Dict{String,NamedTuple}(),
+  node_index=nothing,
   imports::Union{Nothing,_ScriptImportRegistry}=nothing,
 )
   noise_definition === nothing && return "nothing"
@@ -788,29 +818,41 @@ function _script_noise_expression(
 
   noise_type = _resolve_type_from_string(type_name, :noise)
   noise_type === nothing && throw(validation_error("$context has unknown type '$type_name'"))
-  metadata = Dict(string(parameter.field) => parameter.type for parameter in QuantumSavory.constructor_metadata(noise_type))
+  declared_parameter_types = _constructor_parameter_types(noise_type)
+  constructor_parameter_metadata = _constructor_parameter_metadata(noise_type)
   keywords = String[]
+  supplied_names = Set{String}()
   for parameter in parameters
     _is_object_like(parameter) || throw(validation_error("$context parameter must be an object"))
     name = haskey(parameter, "name") ? String(parameter["name"]) : String(get(parameter, "field", ""))
     isempty(name) && throw(validation_error("$context parameter is missing its name"))
-    haskey(metadata, name) || throw(validation_error("$context has unknown parameter '$name'"))
-    value = get(parameter, "value", nothing)
-    value === nothing && continue
-    numeric_expression = _parse_numeric_expression(
-      value;
-      context="$context parameter '$name'",
-    )
-    numeric_expression === nothing || throw(validation_error(
-      "$context parameter '$name' does not support numeric expressions",
-      Dict{String,Any}("parameter_name" => name),
+    name in supplied_names && throw(validation_error(
+      "$context contains duplicate parameter '$name'",
     ))
-    expression = _script_regular_expression(
-      metadata[name],
-      value,
-      "$context parameter '$name'";
+    push!(supplied_names, name)
+    value = get(parameter, "value", nothing)
+    if value === nothing ||
+        (value isa AbstractString && isempty(strip(String(value))))
+      continue
+    end
+    haskey(declared_parameter_types, name) ||
+      throw(validation_error("$context has unknown parameter '$name'"))
+    _, expression = _script_constructor_parameter_expression(
+      parameter,
+      variable_bindings,
+      context;
+      node_index,
+      declared_type=declared_parameter_types[name],
+      constructor_metadata=get(
+        constructor_parameter_metadata,
+        name,
+        nothing,
+      ),
       imports,
     )
+    expression === nothing && continue
+    Base.isidentifier(name) ||
+      throw(validation_error("$context parameter '$name' is not a valid Julia keyword"))
     push!(keywords, "$name = $expression")
   end
   constructor = _script_reference(imports, noise_type)
@@ -935,7 +977,7 @@ function _script_variable_bindings(
       end
       push!(
         lines,
-        "# GUI variable \"$(_script_comment(variable.name))\" is instantiated at each protocol assignment" *
+        "# GUI variable \"$(_script_comment(variable.name))\" is instantiated at each constructor assignment" *
         "  # GUI variable ID: $(_script_comment(variable.id))",
       )
       continue
@@ -961,7 +1003,7 @@ function _script_variable_bindings(
   return bindings
 end
 
-function _script_protocol_parameter_expression(
+function _script_constructor_parameter_expression(
   parameter,
   variable_bindings,
   context::String;
@@ -971,7 +1013,11 @@ function _script_protocol_parameter_expression(
   constructor_metadata=nothing,
   imports::Union{Nothing,_ScriptImportRegistry}=nothing,
 )
-  name = _required_nonempty_string(parameter, "name", "$context parameter")
+  name = if haskey(parameter, "name")
+    _required_nonempty_string(parameter, "name", "$context parameter")
+  else
+    _required_nonempty_string(parameter, "field", "$context parameter")
+  end
   value = get(parameter, "value", nothing)
   value === nothing && return name, nothing
   value isa AbstractString && isempty(strip(String(value))) && return name, nothing
@@ -996,6 +1042,12 @@ function _script_protocol_parameter_expression(
     binding = get(variable_bindings, reference.id, nothing)
     binding === nothing && throw(validation_error("$context parameter '$name' references an unknown variable"))
     binding.uses_default && return name, nothing
+    _parameter_type_supports_variable_type(
+      declared_type,
+      binding.variable.type,
+    ) || throw(validation_error(
+      "Variable '$(_script_comment(binding.variable.name))' is incompatible with $context parameter '$name'",
+    ))
     binding.fresh_wildcard && return name, "$(binding.name)()"
     if binding.per_assignment
       numeric_expression = _parse_numeric_expression(
@@ -1025,10 +1077,16 @@ function _script_protocol_parameter_expression(
       ))
       return name, expression
     end
+    _script_assert_constructor_numeric_bounds(
+      binding.variable.type,
+      binding.variable.value,
+      constructor_metadata,
+      "Variable '$(_script_comment(binding.variable.name))' assigned to $context parameter '$name'",
+    )
     return name, binding.name
   end
 
-  handling_type = _protocol_parameter_handling_type(
+  handling_type = _constructor_parameter_handling_type(
     declared_type,
     get(parameter, "type", nothing),
     value,
@@ -1044,6 +1102,9 @@ function _script_protocol_parameter_expression(
   )
   return name, expression
 end
+
+_script_protocol_parameter_expression(args...; kwargs...) =
+  _script_constructor_parameter_expression(args...; kwargs...)
 
 function _script_protocol!(
   lines::Vector{String},
@@ -1091,7 +1152,7 @@ function _script_protocol!(
         "protocol_type" => string(protocol_type),
       ),
     ))
-    name, expression = _script_protocol_parameter_expression(
+    name, expression = _script_constructor_parameter_expression(
       parameter,
       variable_bindings,
       context;
@@ -1135,9 +1196,9 @@ evaluates them and never creates or mutates a server-side simulation.
 """
 function generate_julia_script(payload)
   _is_object_like(payload) || throw(validation_error("Export payload must be an object"))
+  reject_mock_broken_protocol_export(payload)
   validation = validate_payload(payload)
   data = validation["data"]
-  reject_mock_broken_protocol_export(data)
   nodes = validation["graph_info"]["nodes"]
   edges = validation["graph_info"]["edges"]
   isempty(nodes) && throw(validation_error(
@@ -1195,6 +1256,23 @@ function generate_julia_script(payload)
 
   append!(lines, [
     "",
+    "# Resolve GUI node names to their one-based register indices.",
+    "node_indices = Dict{String,Int}(",
+  ])
+  for (node_index, node) in enumerate(nodes)
+    node_name = _script_literal(node["name"], "node name")
+    push!(
+      lines,
+      "    $node_name => $node_index,",
+    )
+  end
+  append!(lines, [
+    ")",
+    "nodeid(name::String)::Int = node_indices[name]",
+  ])
+
+  append!(lines, [
+    "",
     "# -----------------------------------------------------------------------------",
     "# Registers",
     "# -----------------------------------------------------------------------------",
@@ -1228,6 +1306,8 @@ function generate_julia_script(payload)
       push!(background_expressions, _script_noise_expression(
         get(slot, "backgroundNoise", nothing),
         "Node $node_index slot $slot_index background noise";
+        variable_bindings,
+        node_index,
         imports,
       ))
     end
@@ -1246,23 +1326,6 @@ function generate_julia_script(payload)
       "push!(registers, $(references.register)(traits, representations, backgrounds))",
     )
   end
-
-  append!(lines, [
-    "",
-    "# Resolve GUI node names to their one-based register indices.",
-    "node_indices = Dict{String,Int}(",
-  ])
-  for (node_index, node) in enumerate(nodes)
-    node_name = _script_literal(node["name"], "node name")
-    push!(
-      lines,
-      "    $node_name => $node_index,",
-    )
-  end
-  append!(lines, [
-    ")",
-    "nodeid(name::String)::Int = node_indices[name]",
-  ])
 
   append!(lines, [
     "",

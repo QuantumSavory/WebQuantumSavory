@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 1.11.0
+
+- Added the shared metadata-backed constructor input experience to slot
+  backgrounds, including defaults, typed literals, compatible Variables,
+  guarded `Float64`/`Int64` expressions, bounds, contextual `self` and
+  `nodeid`, template reevaluation, persistence, simulator construction, and
+  generated-script parity.
+- Background Variable references now participate in project-wide deletion
+  guards, and cloned Layout Tools backgrounds are revalidated with each new
+  node's concrete context before their transactional design update commits.
 
 - Added a default-deny allowlist guard that walks parsed Custom Function,
   numeric-expression, and Symbolic source and rejects any non-allowlisted

@@ -7,6 +7,13 @@ import { api } from '../../src/utils/ApiConnector'
 function mountPanel(options = {}) {
   return mount(LayoutToolsPanel, {
     ...options,
+    props: {
+      projectData: {
+        variables: [],
+        net: { nodes: [], edges: [] },
+      },
+      ...options.props,
+    },
     global: {
       ...options.global,
       directives: {
@@ -163,6 +170,7 @@ describe('layout tools physical settings', () => {
             field: 'rate',
             type: 'Float64',
             doc: 'Noise rate',
+            selectedType: 'default',
             value: null,
           }],
         },

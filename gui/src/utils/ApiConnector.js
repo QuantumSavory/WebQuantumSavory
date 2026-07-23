@@ -592,13 +592,13 @@ export class ApiConnector {
   }
 
   getBackgroundNoiseDefinition( bgNoiseName ){
-    const bgNoiseDefinition = this._config.value.bgNoiseOptions.find(b => b.type === bgNoiseName)
+    const bgNoiseDefinition = this._config.value.bgNoiseOptions?.find(b => b.type === bgNoiseName)
     return bgNoiseDefinition
   }
 
   getBackgroundNoiseParameterDefinition( bgNoiseName, paramName ){
     const bgNoiseDefinition = this.getBackgroundNoiseDefinition( bgNoiseName )
-    const param = bgNoiseDefinition.parameters.find(p => p.field === paramName)
+    const param = bgNoiseDefinition?.parameters?.find(p => p.field === paramName)
     return param
   }
 

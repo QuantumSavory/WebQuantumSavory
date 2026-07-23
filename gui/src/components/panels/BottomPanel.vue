@@ -146,6 +146,8 @@
             <LayoutToolsPanel
               :disabled="helpersDisabled"
               :physical-config="projectData.net.physicalConfig"
+              :project-data="projectData"
+              :variables="variables"
               :curve-editing-enabled="curveEditingEnabled"
               :show-physical-badges="showPhysicalBadges"
               :annotation-creation-enabled="annotationCreationEnabled"

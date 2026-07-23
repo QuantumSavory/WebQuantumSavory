@@ -119,8 +119,18 @@ export function isVariableReferenced(projectData, variableId) {
     ...(net.edges || []).flatMap(edge => edge.data?.protocols || [])
   ]
 
-  return protocols.some(protocol => (
+  if (protocols.some(protocol => (
     (protocol.parameters || []).some(parameter => (
+      isVariableReference(parameter.value) && parameter.value.id === variableId
+    ))
+  ))) return true
+
+  const slots = [
+    ...(net.nodes || []).flatMap(node => node.data?.slots || []),
+    ...(net.physicalConfig?.nodeTemplate?.slots || []),
+  ]
+  return slots.some(slot => (
+    (slot.backgroundNoise?.parameters || []).some(parameter => (
       isVariableReference(parameter.value) && parameter.value.id === variableId
     ))
   ))

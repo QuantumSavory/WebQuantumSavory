@@ -51,6 +51,9 @@
         </p>
         <SlotsEditor
           :slots="physicalConfig.nodeTemplate?.slots || []"
+          :project-data="projectData"
+          :variables="variables"
+          template
           :disabled="disabled"
           :show-results="false"
           @add-slot="createTemplateSlot"
@@ -153,6 +156,8 @@ const props = defineProps({
     type: Object,
     default: () => ({ ...DEFAULT_PHYSICAL_CONFIG_VALUES }),
   },
+  projectData: { type: Object, required: true },
+  variables: { type: Array, default: () => [] },
   curveEditingEnabled: { type: Boolean, default: false },
   showPhysicalBadges: { type: Boolean, default: true },
   annotationCreationEnabled: { type: Boolean, default: false },

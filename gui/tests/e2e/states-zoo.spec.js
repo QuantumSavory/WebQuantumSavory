@@ -314,7 +314,7 @@ test.describe('States Zoo variables', () => {
     await expect(deleteButton).toBeDisabled()
     await expect(deleteButton).toHaveAttribute(
       'title',
-      'Unlink this variable from protocol parameters before deleting it',
+      'Unlink this variable from protocol or background parameters before deleting it',
     )
 
     await setSimulationPhase(page, 'parsed')
@@ -459,7 +459,7 @@ test.describe('States Zoo variables', () => {
     await expect(reloadedDelete).toBeDisabled()
     await expect(reloadedDelete).toHaveAttribute(
       'title',
-      'Unlink the generated trace variable from protocol parameters before deleting this state',
+      'Unlink the generated trace variable from protocol or background parameters before deleting this state',
     )
     await page.evaluate(() => {
       const protocols = document.querySelector('#app')?.__vue_app__?._instance?.setupState

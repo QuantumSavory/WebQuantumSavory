@@ -2,6 +2,7 @@
   <NumericExpressionInput
     v-if="isNumericExpressionOptionId(type)"
     :parameter="parameter"
+    :parameter-name="parameterName"
     :target-type="numericExpressionTargetType(type)"
     :placement="category"
     :context="numericExpressionContext"
@@ -75,7 +76,7 @@
     <option value="" disabled>Select a function</option>
     <option v-for="func in selectableFunctions" :key="func" :value="func">{{ func }}</option>
   </select>
-  <span v-else-if="type === 'default'">Use protocol default</span>
+  <span v-else-if="type === 'default'">Use constructor default</span>
   <span v-else-if="isWildcardType(type)">Wildcard</span>
   <span v-else-if="type === 'Nothing'">Nothing</span>
   <input
@@ -113,6 +114,10 @@ const props = defineProps({
   parameter: {
     type: Object,
     required: true
+  },
+  parameterName: {
+    type: String,
+    default: ''
   },
   type: {
     type: String,
@@ -158,7 +163,9 @@ const props = defineProps({
 const emit = defineEmits(['commit'])
 
 const unsafeCodeEvaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
-const valueInputLabel = computed(() => `${props.parameter.name || 'Parameter'} value`)
+const valueInputLabel = computed(() => (
+  `${props.parameterName || props.parameter.name || props.parameter.field || 'Parameter'} value`
+))
 const numberInputStep = computed(() => {
   const normalizedType = String(props.type || '').toLowerCase()
   return normalizedType === 'int' || normalizedType === 'int64' ? 1 : 'any'

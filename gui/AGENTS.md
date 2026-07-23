@@ -39,13 +39,13 @@
 - Development API calls default to `http://localhost:8000`; production builds default to the browser origin. `VITE_API_BASE_URL` overrides both when a separate API host is intentional.
 - Runtime API metadata supplies available background, slot, and protocol types. Protocols are grouped as `node`, `edge`, or `floating`; do not replace this with a frontend-only catalog.
 - A protocol parameter is a named-tag-type field only when its current runtime constructor metadata has `kind: "named_tag_type"`; never infer that semantic from a saved `type` snapshot or parse a Julia type string. Populate these fields from the cached `/tag_types` `named_tags` catalog, persist only fully qualified IDs, honor runtime `nullable`, and keep variable assignment unavailable until variables have an explicit compatible tag-type model. Nonnullable fields use the outer Default/Tag selector; nullable fields use Default/Nothing/Tag. Mount the named-tag autocomplete without its own Default only while Tag is selected.
-- Build every editable protocol parameter and Variable from explicit input
+- Build every editable protocol parameter, background parameter, and Variable from explicit input
   descriptors with `{ id, label, inputKind, wireType, enabled }`.
   The outer selector always begins with Default, including singleton, Function,
   Symbolic, Bool, intrinsic, and named-tag fields. `selectedType` stores the
   descriptor ID, while minimized payloads use `wireType`; unsupported
   descriptors remain visible and disabled.
-- Default clears the value and omits the protocol keyword. A fresh explicit
+- Default clears the value and omits the constructor keyword. A fresh explicit
   literal, code, or tag mode is empty and may commit only after validation;
   explicit Bool means `false`, and Nothing/Wildcard are intrinsic. Function
   exposes Predefined Function and Custom Function directly with no nested
@@ -60,7 +60,7 @@
 - Use `parameter.error` as the shared submission blocker for dirty, blank,
   pending, disabled, missing-context, transport, backend, bounds, and code
   validation failures. Keep source/result/deferred/pending/request state local
-  to the input; a linked Variable validates against the protocol parameter and
+  to the input; a linked Variable validates against the constructor parameter and
   must never write errors or preview state to the shared Variable. Preserve a
   recognized explicit `selectedType` even when its value is empty, and let the
   descriptor completeness validator reject it instead of normalizing it to
@@ -71,7 +71,7 @@
   transports source data; it does not evaluate expressions or own preview
   state.
 - Tag definitions, signatures, previews, listings, and query results are runtime-only API metadata. Do not persist them in project JSON or poll them in the background; fetch on Tags & Queries activation, target changes, explicit refresh, and successful mutation, and clear transient targets/results on project changes or simulation reset.
-- Derive protocol-variable compatibility from runtime parameter metadata and keep alias rules centralized in `src/utils/parameterTypes.js`. Opening a variable picker must not create a reference until the user explicitly selects one; keep missing or newly incompatible saved references visible so users can replace or unlink them.
+- Derive protocol/background-variable compatibility from runtime parameter metadata and keep alias rules centralized in `src/utils/parameterTypes.js`. Opening a variable picker must not create a reference until the user explicitly selects one; keep missing or newly incompatible saved references visible so users can replace or unlink them.
 - In memory, edges reference `Node` instances. Serialized projects use source and target node IDs. A project-schema change must update serialization, deserialization, import validation, demos, backend payload minimization, and relevant tests together.
 - Schema-v1 physical project data consists of `net.physicalConfig.refractiveIndex` (default `1.468`) and `net.physicalConfig.lossDbPerKm` (default `0.2`) plus, on physical edges only, ordered `data.curvePoints` and nullable `data.physicalOverrides`. Curve points have durable IDs, map positions, and `smooth`/`sharp` types; overrides contain nullable distance, refractive-index, delay, loss, and transmissivity fields. Persist overrides rather than derived values; minimized simulator/export payloads emit resolved `data.distanceMeters`, `data.propagationDelaySeconds`, `data.refractiveIndex`, `data.lossDbPerKm`, and `data.transmissivity`, while virtual-edge protocol metadata carries none of those physical fields.
 - Keep physical descriptors, unit metadata, defaults, validation, formatting, override/resolved field lists, and explicit propagation/transmissivity formulas in `src/utils/physicalParameters.js`. Use `src/utils/edgeGeometry.js` only as the geometry adapter for sampled GeoJSON LineStrings, geodesic length, midpoint, and projection, delegating quantity resolution to the physical-parameter module. Do not leak `bezier-js` objects into Vue state or project documents, and never treat projected Cartesian Bézier length as physical distance.
@@ -117,7 +117,7 @@
 - Reuse and extend `components/ui/` for application-wide dialog and button behavior. Shared primitives must remain independently mountable, explicitly declare their contracts, and avoid querying application-shell selectors.
 - Declare component props and emitted events explicitly. Preserve object identity where map markers, selected items, and edge endpoint references depend on it.
 - Keep the custom-function and Symbolic editor lifecycle in the shared typed-value components: protocol parameters start compact, newly selected variables start open, only successful validation collapses to static source or the rendered symbolic result, and clicking that result reopens editing. Failed validation must remain editable, with a warning whose tooltip contains the backend diagnostic; transient open/closed state must not be added to serialized parameters or variables.
-- Keep protocol constructor parameters in the shared constructor form used by both ordinary protocol editors and layout automation. Union selection, Function/Symbolic validation, variable binding, metadata documentation, and contextual `self`/`nodeid` behavior must not be reimplemented in generator dialogs.
+- Keep protocol and background constructor parameters in the shared metadata-backed constructor form, with thin catalog adapters for their `name` and `field` identities. Use it in ordinary slots, protocol editors, Layout Tools, and node add-many/batch drafts; union selection, validation, variable binding, metadata documentation, and contextual `self`/`nodeid` behavior must not be reimplemented in those dialogs. Installed backgrounds receive their concrete node context. Layout templates validate direct expressions with representative node context, defer linked expressions, and revalidate every cloned background against its newly created node before committing the transaction.
 - Keep custom-function contextual-keyword help centralized in `src/utils/customFunctionContext.js` and render its compact, viewport-safe helper popup from the Nodes list and the shared custom-function editor so protocol and Variables-tab Lambdas stay aligned. `nodeid("Node name")` is available for every protocol placement and `self` only for node protocols. Edge protocols also receive `distance` (meters), `delay` (seconds), dimensionless `refractive_index`, `loss` (dB/km), zero-through-one dimensionless `transmissivity`, and one-based source/target `node_a`/`node_b`; virtual-edge physical values are `nothing`. The edge-distance binding is named `distance` (not `length`), so the `length` function stays callable. Manual transmissivity keeps numeric loss available in protocol context. These are backend-provided lexical bindings, so never serialize contextual values or node-name maps in stored project data.
 - Reuse that context catalog and source lifecycle for numeric expressions.
   Context-free Variable expressions show a validation result; contextual
@@ -125,7 +125,7 @@
   template/layout expressions show the representative result plus
   “Representative result; evaluated again when assigned”; linked templates
   suppress that representative value while retaining the deferred status.
-  Ordinary installed constructors build one concrete preview context from
+  Ordinary installed protocols and backgrounds build one concrete preview context from
   canonical project state and pass it explicitly; invalidate or abort stale
   previews whenever source, target, placement, node ordering/names, endpoints,
   or physical-edge values change. Edge context binds the physical distance as
@@ -139,7 +139,9 @@
   expression Variables show the source and their concrete assignment result
   below the variable picker. Keep saved source visible when unsafe evaluation
   is disabled, but disable validation/execution and leave numeric literals
-  available.
+  available. Variable reference discovery covers protocol and background
+  parameters on both installed and template slots, so deletion remains blocked
+  until every assignment is unlinked.
 - Build tag/query forms from the `/tag_types` catalog rather than hard-coded tag shapes. Commit the progressive identity combobox only on Enter or an autocomplete choice; treat a leading `:` as a Symbol head, resolve DataType heads only through unique catalog matches, reveal named fields together, and narrow general-field choices by compatible signature prefixes. Allow only last-field backtracking for general tags, require a complete signature before submission, filter DataType signatures by `allowed_data_type_ids`, and keep query Exact, Wildcard, preset Predicate, and policy-gated shared custom Function modes in the same badge flow.
 - Use the shared tag badge sequence for editable constructors and read-only results. Keep the identity badge first, field name/value/type labels together, established type and query-mode colors intact, and every badge documented with a Markdown tooltip; editable badges use white fills with colored borders while read-only badges use soft fills. Keep collapsed results to badges and actions, placing rendered text, string tag/slot IDs, time, message source, and buffer depth behind disclosure when available.
 - In Tags & Queries, Register targets always show a Slot selector whose first choice is All slots; that choice maps to the register wire target, while a concrete slot maps to the slot wire target. Message Buffer remains node-scoped with no slot selector. Hide attachment construction for Register → All slots, show it for a selected slot or Message Buffer, keep queries non-consuming for either register scope, and stack construction above results in both tabs.
