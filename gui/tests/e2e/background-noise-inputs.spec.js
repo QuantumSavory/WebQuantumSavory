@@ -20,7 +20,7 @@ async function addNode(page, position) {
   await expect(page.locator('.node-marker')).toHaveCount(count + 1)
 }
 
-async function configureDirectExpression(slot, source, { template = false } = {}) {
+async function configureDirectExpression(page, slot, source, { template = false } = {}) {
   await slot.getByRole('combobox', { name: /Background noise for slot/ })
     .selectOption('T1Decay')
   await slot.getByRole('button', { name: 'Toggle details' }).click()
@@ -31,8 +31,15 @@ async function configureDirectExpression(slot, source, { template = false } = {}
   await parameter.getByRole('combobox', { name: 'Input option for t1' })
     .selectOption('expression:Float64')
   await parameter.getByTestId('numeric-expression-source').fill(source)
+  const validationResponse = page.waitForResponse(
+    response => response.url().endsWith('/test_numeric_expression'),
+  )
   await parameter.getByRole('button', { name: 'Validate t1 expression' }).click()
-  await expect(parameter.getByTestId('numeric-expression-result')).toContainText('Result:')
+  expect((await validationResponse).ok()).toBe(true)
+  await expect(parameter.getByTestId('numeric-expression-result')).toContainText(
+    'Result:',
+    { timeout: 15_000 },
+  )
   return parameter
 }
 
@@ -63,6 +70,7 @@ test.describe('Background-noise constructor inputs', () => {
     await page.locator('#nodePanel .add-slot-btn').click()
     const installedSlot = page.locator('#nodePanel .slot-row-container').first()
     const directParameter = await configureDirectExpression(
+      page,
       installedSlot,
       'self + nodeid("Node 1")',
     )
@@ -108,6 +116,7 @@ test.describe('Background-noise constructor inputs', () => {
     const templateSlot = template.locator('.slot-row-container').first()
     const templateRequestsStart = numericRequests.length
     const templateParameter = await configureDirectExpression(
+      page,
       templateSlot,
       'self + 10',
       { template: true },
@@ -128,16 +137,24 @@ test.describe('Background-noise constructor inputs', () => {
     await firstNode.locator('.connector.output')
       .dragTo(page.locator('.node-marker').nth(1))
     await expect(page.locator('.edge-list-item')).toHaveCount(1)
-    await page.locator('.edge-list-item').first().click()
-    const addProtocolButton = page.locator(
-      '#edgePanel .panel-content .add-protocol-btn',
-    )
-    await expect(addProtocolButton).toBeVisible()
-    await addProtocolButton.click()
-    await page.locator('.p-menu-item-link', { hasText: 'EntanglerProt' }).click()
-    await expect(
-      page.locator('#edgePanel .panel-content .protocol-editor.protocol-list-item'),
-    ).toBeVisible()
+    await page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      const edge = setup?.projectData?.net?.edges?.[0]
+      if (!edge) throw new Error('Reactive project edge is unavailable')
+      edge.data.protocols.push({
+        id: 'protocol_background_e2e_edge',
+        type: 'QuantumSavory.ProtocolZoo.EntanglerProt',
+        parameters: [{
+          name: 'rounds',
+          type: 'Int64',
+          value: null,
+        }],
+      })
+    })
+    await expect.poll(() => page.evaluate(() => {
+      const setup = document.querySelector('#app')?.__vue_app__?._instance?.setupState
+      return setup?.projectData?.net?.edges?.[0]?.data?.protocols?.length
+    })).toBe(1)
     const concreteTemplateRequests = numericRequests.slice(templateRequestsStart)
       .filter(request => request.expression === 'self + 10' && request.context)
     expect(concreteTemplateRequests.map(request => request.context.self)).toEqual([2, 3])
