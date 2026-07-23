@@ -18,6 +18,7 @@
       role="separator"
       tabindex="0"
       :aria-label="label"
+      :aria-controls="controls"
       aria-orientation="vertical"
       :aria-valuemin="minWidth"
       :aria-valuemax="maxWidth"
@@ -50,6 +51,10 @@ const props = defineProps({
   disabled: {
     type: Boolean,
     default: false
+  },
+  controls: {
+    type: String,
+    required: true
   },
   label: {
     type: String,
@@ -85,9 +90,9 @@ function handleResizeKeydown(event) {
   let width = props.width
 
   if (event.key === 'ArrowLeft') {
-    width -= KEYBOARD_RESIZE_STEP
-  } else if (event.key === 'ArrowRight') {
     width += KEYBOARD_RESIZE_STEP
+  } else if (event.key === 'ArrowRight') {
+    width -= KEYBOARD_RESIZE_STEP
   } else if (event.key === 'Home') {
     width = props.minWidth
   } else if (event.key === 'End') {

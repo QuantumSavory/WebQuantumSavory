@@ -1452,6 +1452,7 @@ onUnmounted(() => {
       </button>
       
       <div 
+        id="simulation-sidebar"
         ref="rightSidebarElement"
         class="sidebar sidebar-right" 
         :class="{ 'sidebar-hidden': !isRightSidebarVisible }"
@@ -1462,6 +1463,7 @@ onUnmounted(() => {
           :min-width="rightSidebarMinWidth"
           :max-width="rightSidebarMaxWidth"
           :disabled="!isRightSidebarVisible"
+          controls="simulation-sidebar"
           @update:width="updateRightSidebarWidth"
           @resize-end="persistRightSidebarWidth"
         >

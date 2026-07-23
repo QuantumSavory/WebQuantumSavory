@@ -78,9 +78,8 @@ test.describe('Resizable simulation sidebar', () => {
     expect(resized.width).toBeGreaterThan(initial.width + 120)
     expectNear(resized.x + resized.width, initial.x + initial.width)
     expectNear(resized.height, initial.height)
-    await expect.poll(async () => (
-      await bounds(page.getByRole('button', { name: 'Hide simulation sidebar' }))
-    ).x).toBeLessThan(initialToggle.x - 120)
+    const resizedToggle = await bounds(page.getByRole('button', { name: 'Hide simulation sidebar' }))
+    expectNear(resizedToggle.x, initialToggle.x - (resized.width - initial.width))
 
     const savedWidth = await page.evaluate(key => Number(localStorage.getItem(key)), SIDEBAR_WIDTH_STORAGE_KEY)
     expectNear(savedWidth, resized.width)
@@ -103,23 +102,33 @@ test.describe('Resizable simulation sidebar', () => {
     const resizeTarget = page.getByRole('separator', { name: 'Resize simulation sidebar width' })
     const initial = await bounds(sidebar)
 
+    await expect(resizeTarget).toHaveAttribute('aria-controls', 'simulation-sidebar')
     await expect(resizeTarget).toHaveAttribute('aria-orientation', 'vertical')
     await expect(resizeTarget).toHaveAttribute('aria-valuemin', '280')
     await resizeTarget.focus()
-    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowLeft')
 
     const resized = await bounds(sidebar)
     expectNear(resized.width, initial.width + 16)
+    expectNear(resized.x, initial.x - 16)
+    expectNear(resized.x + resized.width, initial.x + initial.width)
     await expect(resizeTarget).toHaveAttribute('aria-valuenow', String(Math.round(resized.width)))
 
+    await page.keyboard.press('ArrowRight')
+    const restoredWithKeyboard = await bounds(sidebar)
+    expectNear(restoredWithKeyboard.width, initial.width)
+    expectNear(restoredWithKeyboard.x, initial.x)
+
+    await page.keyboard.press('ArrowLeft')
+    const resizedAgain = await bounds(sidebar)
     await page.getByRole('button', { name: 'Hide simulation sidebar' }).click()
     await expect(page.getByRole('separator', { name: 'Resize simulation sidebar width' })).toHaveCount(0)
     await page.getByRole('button', { name: 'Show simulation sidebar' }).click()
 
     const restored = await bounds(sidebar)
-    expectNear(restored.width, resized.width)
+    expectNear(restored.width, resizedAgain.width)
     await expect(page.getByRole('separator', { name: 'Resize simulation sidebar width' }))
-      .toHaveAttribute('aria-valuenow', String(Math.round(resized.width)))
+      .toHaveAttribute('aria-valuenow', String(Math.round(resizedAgain.width)))
   })
 
   test('clamps saved and live widths to leave usable main-panel space', async ({ page }) => {

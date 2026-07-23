@@ -24,6 +24,7 @@ function mountResizer(extraProps = {}) {
       width: 320,
       minWidth: 280,
       maxWidth: 800,
+      controls: 'simulation-sidebar',
       ...extraProps
     },
     slots: {
@@ -63,12 +64,13 @@ describe('RightSidebarResizer', () => {
     const target = wrapper.get('[data-testid="right-sidebar-width-resize-target"]')
 
     expect(target.attributes('role')).toBe('separator')
+    expect(target.attributes('aria-controls')).toBe('simulation-sidebar')
     expect(target.attributes('aria-orientation')).toBe('vertical')
     expect(target.attributes('aria-valuemin')).toBe('280')
     expect(target.attributes('aria-valuemax')).toBe('800')
     expect(target.attributes('aria-valuenow')).toBe('320')
 
-    await target.trigger('keydown', { key: 'ArrowRight' })
+    await target.trigger('keydown', { key: 'ArrowLeft' })
     await target.trigger('keydown', { key: 'Home' })
     await target.trigger('keydown', { key: 'End' })
 
