@@ -363,7 +363,7 @@ function _script_validate_source(
   context::String;
   complete::Bool=true,
 )
-  try
+  return try
     complete ? _parse_complete_source(source) : Meta.parse(source; raise=true)
   catch error
     throw(validation_error(
@@ -371,7 +371,6 @@ function _script_validate_source(
       Dict{String,Any}("parse_error" => sprint(showerror, error)),
     ))
   end
-  return nothing
 end
 
 function _script_declared_types(raw_type)
@@ -406,20 +405,254 @@ function _script_self_function(value, node_index, context::String)
   return nothing
 end
 
-function _script_assignment_bindings(node_index, edge_context; capture_nodeid::Bool=false)
-  bindings = capture_nodeid ? "    nodeid = Base.getproperty(@__MODULE__, :nodeid)\n" : ""
-  node_index === nothing || (bindings *= "    self = $node_index\n")
+const _SCRIPT_ASSIGNMENT_CONTEXT_BINDINGS = Set{Symbol}([
+  :self,
+  (descriptor.binding for descriptor in EDGE_CONTEXT_DESCRIPTORS)...,
+  (descriptor.binding for descriptor in EDGE_ENDPOINT_CONTEXT_DESCRIPTORS)...,
+])
+
+function _script_binding_names!(bindings::Set{Symbol}, expression)
+  if expression isa Symbol
+    push!(bindings, expression)
+  elseif expression isa Expr
+    if expression.head in (:tuple, :parameters)
+      foreach(argument -> _script_binding_names!(bindings, argument), expression.args)
+    elseif expression.head in (:(::), :kw, :(...), :(=)) &&
+           !isempty(expression.args)
+      _script_binding_names!(bindings, first(expression.args))
+    end
+  end
+  return bindings
+end
+
+function _script_function_signature(signature)
+  while signature isa Expr && signature.head in (:(::), :where)
+    signature = first(signature.args)
+  end
+  signature isa Expr && signature.head === :call ||
+    return (name=signature isa Symbol ? signature : nothing, arguments=Any[])
+  name = first(signature.args)
+  return (
+    name=name isa Symbol ? name : nothing,
+    arguments=collect(Iterators.drop(signature.args, 1)),
+  )
+end
+
+"""
+Collect names assigned in the current Julia scope.
+
+Nested local scopes are deliberately skipped. Assignments inside conditional
+branches still declare a name in the surrounding scope, matching Julia's
+lexical treatment closely enough for parse-only export.
+"""
+function _script_scope_bindings!(bindings::Set{Symbol}, expression)
+  expression isa Expr || return bindings
+  expression.head in (
+    :quote,
+    :let,
+    :for,
+    :while,
+    :try,
+    :generator,
+    :comprehension,
+    :->,
+  ) &&
+    return bindings
+
+  if expression.head === :function
+    signature = _script_function_signature(first(expression.args))
+    signature.name === nothing || push!(bindings, signature.name)
+    return bindings
+  elseif expression.head === :(=)
+    target = first(expression.args)
+    if target isa Expr && target.head === :call
+      signature = _script_function_signature(target)
+      signature.name === nothing || push!(bindings, signature.name)
+    else
+      _script_binding_names!(bindings, target)
+    end
+    return bindings
+  elseif expression.head in (:local, :global, :const)
+    foreach(argument -> _script_binding_names!(bindings, argument), expression.args)
+    return bindings
+  end
+
+  foreach(argument -> _script_scope_bindings!(bindings, argument), expression.args)
+  return bindings
+end
+
+"""Find free assignment-local names referenced syntactically by user source."""
+function _script_assignment_context_references(parsed)
+  references = Set{Symbol}()
+
+  function visit_arguments!(arguments, bound)
+    positional = Any[]
+    keywords = Any[]
+    for argument in arguments
+      argument isa LineNumberNode && continue
+      if argument isa Expr && argument.head === :parameters
+        append!(keywords, argument.args)
+      else
+        push!(positional, argument)
+      end
+    end
+    foreach(argument -> visit_argument!(argument, bound), positional)
+    foreach(argument -> visit_argument!(argument, bound), keywords)
+    return nothing
+  end
+
+  function visit_argument!(argument, bound)
+    if argument isa Expr && argument.head in (:tuple, :block, :parameters)
+      visit_arguments!(argument.args, bound)
+    elseif argument isa Expr && argument.head in (:kw, :(=)) &&
+           length(argument.args) >= 2
+      visit(argument.args[2], bound)
+      _script_binding_names!(bound, argument.args[1])
+    else
+      _script_binding_names!(bound, argument)
+    end
+    return nothing
+  end
+
+  function visit_function(signature_expression, body, bound)
+    signature = _script_function_signature(signature_expression)
+    function_bound = copy(bound)
+    signature.name === nothing || push!(function_bound, signature.name)
+    visit_arguments!(signature.arguments, function_bound)
+    visit(body, function_bound)
+    return nothing
+  end
+
+  function visit_iterator!(iterator, bound)
+    if iterator isa Expr && iterator.head in (:(=), :in)
+      visit(iterator.args[2], bound)
+      _script_binding_names!(bound, iterator.args[1])
+    elseif iterator isa Expr && iterator.head === :filter
+      foreach(item -> visit_iterator!(item, bound), iterator.args[2:end])
+      visit(first(iterator.args), bound)
+    else
+      visit(iterator, bound)
+    end
+    return nothing
+  end
+
+  function visit(expression, bound::Set{Symbol})
+    expression isa QuoteNode && return nothing
+    if expression isa Symbol
+      expression in _SCRIPT_ASSIGNMENT_CONTEXT_BINDINGS &&
+        !(expression in bound) &&
+        push!(references, expression)
+      return nothing
+    end
+    expression isa Expr || return nothing
+    expression.head === :quote && return nothing
+
+    if expression.head in (:block, :toplevel)
+      scope_bound = copy(bound)
+      _script_scope_bindings!(scope_bound, expression)
+      foreach(argument -> visit(argument, scope_bound), expression.args)
+    elseif expression.head === :let
+      let_bound = copy(bound)
+      for binding in expression.args[1:end-1]
+        if binding isa Expr && binding.head === :(=)
+          visit(binding.args[2], let_bound)
+          _script_binding_names!(let_bound, binding.args[1])
+        else
+          _script_binding_names!(let_bound, binding)
+        end
+      end
+      visit(last(expression.args), let_bound)
+    elseif expression.head === :->
+      lambda_bound = copy(bound)
+      visit_argument!(first(expression.args), lambda_bound)
+      visit(last(expression.args), lambda_bound)
+    elseif expression.head === :function
+      visit_function(expression.args[1], expression.args[2], bound)
+    elseif expression.head === :(=) &&
+           first(expression.args) isa Expr &&
+           first(expression.args).head === :call
+      visit_function(first(expression.args), expression.args[2], bound)
+    elseif expression.head === :(=)
+      visit(expression.args[2], bound)
+    elseif expression.head === :for
+      loop_bound = copy(bound)
+      visit_iterator!(first(expression.args), loop_bound)
+      visit(last(expression.args), loop_bound)
+    elseif expression.head === :while
+      visit(first(expression.args), bound)
+      visit(last(expression.args), copy(bound))
+    elseif expression.head === :try
+      visit(first(expression.args), copy(bound))
+      if length(expression.args) >= 3 && expression.args[3] !== false
+        catch_bound = copy(bound)
+        expression.args[2] === false ||
+          _script_binding_names!(catch_bound, expression.args[2])
+        visit(expression.args[3], catch_bound)
+      end
+      length(expression.args) >= 4 && expression.args[4] !== false &&
+        visit(expression.args[4], copy(bound))
+      length(expression.args) >= 5 && expression.args[5] !== false &&
+        visit(expression.args[5], copy(bound))
+    elseif expression.head === :generator
+      generator_bound = copy(bound)
+      foreach(
+        iterator -> visit_iterator!(iterator, generator_bound),
+        expression.args[2:end],
+      )
+      visit(first(expression.args), generator_bound)
+    elseif expression.head === :kw
+      length(expression.args) >= 2 && visit(expression.args[2], bound)
+    elseif expression.head in (:local, :global, :const)
+      for declaration in expression.args
+        declaration isa Expr && declaration.head === :(=) &&
+          visit(declaration.args[2], bound)
+      end
+    else
+      foreach(argument -> visit(argument, bound), expression.args)
+    end
+    return nothing
+  end
+
+  visit(parsed, Set{Symbol}())
+  return references
+end
+
+function _script_assignment_bindings(node_index, edge_context, references)
+  bindings = ""
+  :self in references && node_index !== nothing &&
+    (bindings *= "    self = $node_index\n")
   edge_context === nothing && return bindings
   for descriptor in EDGE_CONTEXT_DESCRIPTORS
+    descriptor.binding in references || continue
     value = getfield(edge_context, descriptor.field)
     bindings *=
       "    $(descriptor.binding) = $(_script_literal(value, descriptor.script_label))\n"
   end
   for descriptor in EDGE_ENDPOINT_CONTEXT_DESCRIPTORS
+    descriptor.binding in references || continue
     value = getfield(edge_context, descriptor.field)
     bindings *= "    $(descriptor.binding) = $value\n"
   end
   return bindings
+end
+
+function _script_user_source_expression(
+  source::AbstractString,
+  parsed,
+  context_bindings::AbstractString,
+)
+  indented = replace(source, "\n" => "\n    ")
+  if !isempty(context_bindings)
+    return "(let\n" * context_bindings * "    $indented\nend)"
+  end
+
+  statements = parsed isa Expr && parsed.head === :block ?
+    filter(statement -> !(statement isa LineNumberNode), parsed.args) :
+    Any[parsed]
+  if length(statements) == 1 && !occursin('\n', source) && !occursin('#', source)
+    return "($source)"
+  end
+  return "(begin\n    $indented\nend)"
 end
 
 function _script_custom_function_expression(
@@ -430,16 +663,14 @@ function _script_custom_function_expression(
 )
   source = strip(String(source))
   isempty(source) && throw(validation_error("$context must not be blank"))
-  _script_validate_source(source, context)
-
-  indented = replace(source, "\n" => "\n        ")
-  context_bindings = _script_assignment_bindings(node_index, edge_context)
-  return "(let\n" * context_bindings * "    function_value = let\n" *
-    "        $indented\n" *
-    "    end\n" *
-    "    function_value isa Core.Function || Base.throw(Base.ArgumentError(\"Custom function source must evaluate to a Julia Function\"))\n" *
-    "    function_value\n" *
-    "end)"
+  parsed = _script_validate_source(source, context)
+  references = _script_assignment_context_references(parsed)
+  context_bindings = _script_assignment_bindings(
+    node_index,
+    edge_context,
+    references,
+  )
+  return _script_user_source_expression(source, parsed, context_bindings)
 end
 
 function _script_function_expression(
@@ -479,53 +710,26 @@ function _script_numeric_expression(
   node_index,
   context::String;
   edge_context::Union{Nothing,_EdgeFunctionContext}=nothing,
-  minimum=nothing,
-  maximum=nothing,
 )
   expression = _parse_numeric_expression(value; context)
   expression === nothing && throw(validation_error(
     "$context must use the numeric-expression tagged representation",
   ))
-  _script_validate_source(expression.source, context)
-
-  indented = replace(expression.source, "\n" => "\n        ")
-  # A same-named local initializer (`nodeid = nodeid`) resolves its right-hand
-  # side as the new local in Julia's hard scope. Capture the generated script's
-  # global resolver explicitly before exposing the lexical expression binding.
+  parsed = _script_validate_source(expression.source, context)
+  references = _script_assignment_context_references(parsed)
   context_bindings = _script_assignment_bindings(
     node_index,
-    edge_context;
-    capture_nodeid=true,
+    edge_context,
+    references,
   )
 
   target_constructor = target_type == "Float64" ? "Base.Float64" : "Base.Int64"
-  checks =
-    "    expression_value isa Base.Real && !(expression_value isa Base.Bool) || " *
-    "Base.throw(Base.ArgumentError(\"Numeric expression must evaluate to a real number\"))\n" *
-    "    cast_value = $target_constructor(expression_value)\n"
-  if target_type == "Float64"
-    checks *=
-      "    Base.isfinite(cast_value) || Base.throw(Base.ArgumentError(" *
-      "\"Numeric expression must evaluate to a finite Float64\"))\n"
-  end
-  if minimum !== nothing
-    checks *=
-      "    cast_value >= $(_script_literal(minimum, "$context minimum")) || " *
-      "Base.throw(Base.ArgumentError(\"Numeric expression result is below its minimum\"))\n"
-  end
-  if maximum !== nothing
-    checks *=
-      "    cast_value <= $(_script_literal(maximum, "$context maximum")) || " *
-      "Base.throw(Base.ArgumentError(\"Numeric expression result is above its maximum\"))\n"
-  end
-
-  return "(let\n" * context_bindings *
-    "    expression_value = let\n" *
-    "        $indented\n" *
-    "    end\n" *
-    checks *
-    "    cast_value\n" *
-    "end)"
+  source_expression = _script_user_source_expression(
+    expression.source,
+    parsed,
+    context_bindings,
+  )
+  return "$target_constructor$source_expression"
 end
 
 function _script_validate_deferred_lambda(value, context::String)
@@ -668,8 +872,6 @@ function _script_value_expression(
       node_index,
       context;
       edge_context,
-      minimum=_constructor_numeric_bound(constructor_metadata, :min),
-      maximum=_constructor_numeric_bound(constructor_metadata, :max),
     )
   end
 
@@ -904,9 +1106,34 @@ function _script_variable_bindings(
     self_dependent = special_type in ("Function", "Lambda") && any(
       first(pair) == strip(string(variable.value)) for pair in SELF_COMPARISON_OPERATORS
     )
-    per_assignment = numeric_expression !== nothing ||
-      special_type == "Lambda" ||
-      self_dependent
+    source_references = if numeric_expression !== nothing
+      parsed = _script_validate_source(
+        numeric_expression.source,
+        "Variable '$(_script_comment(variable.name))'",
+      )
+      _script_assignment_context_references(parsed)
+    elseif special_type == "Lambda" && !uses_default && !self_dependent
+      variable.value isa AbstractString || throw(validation_error(
+        "Variable '$(_script_comment(variable.name))' must be a function name or Julia function expression",
+        Dict{String,Any}("received_type" => string(typeof(variable.value))),
+      ))
+      source = strip(String(variable.value))
+      isempty(source) && throw(validation_error(
+        "Variable '$(_script_comment(variable.name))' must not be blank",
+      ))
+      if source == "default" || resolve_function_reference(source) !== nothing
+        Set{Symbol}()
+      else
+        parsed = _script_validate_source(
+          source,
+          "Variable '$(_script_comment(variable.name))'",
+        )
+        _script_assignment_context_references(parsed)
+      end
+    else
+      Set{Symbol}()
+    end
+    per_assignment = self_dependent || !isempty(source_references)
     fresh_wildcard = variable.type in ("Wildcard", "QuantumSavory.Wildcard")
     bindings[variable.id] = (
       name=binding,
@@ -1246,19 +1473,11 @@ function generate_julia_script(payload)
     "animation_filename = $(_script_literal(output_stem * ".mp4", "animation filename"))",
     "protocol_output_directory = $(_script_literal(output_stem * "-protocols", "protocol output directory"))",
     "",
-    "# -----------------------------------------------------------------------------",
-    "# Variables",
-    "# -----------------------------------------------------------------------------",
+    "# Resolve GUI node names to their one-based register indices.",
+    "node_indices = Dict{String,Int}(",
   ]
 
   used = copy(_SCRIPT_RESERVED_IDENTIFIERS)
-  variable_bindings = _script_variable_bindings(data, lines, used; imports)
-
-  append!(lines, [
-    "",
-    "# Resolve GUI node names to their one-based register indices.",
-    "node_indices = Dict{String,Int}(",
-  ])
   for (node_index, node) in enumerate(nodes)
     node_name = _script_literal(node["name"], "node name")
     push!(
@@ -1269,7 +1488,12 @@ function generate_julia_script(payload)
   append!(lines, [
     ")",
     "nodeid(name::String)::Int = node_indices[name]",
+    "",
+    "# -----------------------------------------------------------------------------",
+    "# Variables",
+    "# -----------------------------------------------------------------------------",
   ])
+  variable_bindings = _script_variable_bindings(data, lines, used; imports)
 
   append!(lines, [
     "",

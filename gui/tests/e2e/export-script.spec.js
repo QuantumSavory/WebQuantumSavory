@@ -12,6 +12,11 @@ async function mockBackendMetadata(page) {
     contentType: 'application/json',
     json: { background_types: [] },
   }))
+  await page.route('**/slot_types', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    json: { slot_types: ['Qubit', 'Qumode'] },
+  }))
   await page.route('**/protocol_types', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -135,6 +140,9 @@ test.describe('Export Script panel', () => {
     await expect(panel).toContainText('full power of QuantumSavory.jl')
     await expect(panel).toContainText('programmatic interface')
     await expect(panel).toContainText('pedagogical onboarding')
+    await expect(panel).toContainText(
+      'UI automation makes some parts boilerplate-heavy; bespoke simulations can be simpler',
+    )
 
     const code = panel.getByLabel('Generated Julia script')
     await expect(code).toContainText('using QuantumSavory')

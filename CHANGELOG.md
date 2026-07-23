@@ -10,6 +10,11 @@
 - Background Variable references now participate in project-wide deletion
   guards, and cloned Layout Tools backgrounds are revalidated with each new
   node's concrete context before their transactional design update commits.
+- Simplified generated custom functions and numeric expressions by removing
+  runtime validation scaffolding, keeping `nodeid` global, binding only
+  referenced per-assignment context, and emitting context-free Variables once
+  as ordinary globals. The Export Script panel now briefly notes that
+  UI-generated scripts can be more boilerplate-heavy than bespoke simulations.
 
 - Made physical-link rendering, automatic distance and delay, and badge
   placement share one geodesically densified route, including short-path
