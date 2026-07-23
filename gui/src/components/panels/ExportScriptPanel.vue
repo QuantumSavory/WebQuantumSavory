@@ -13,6 +13,9 @@
           your own simulations. This script is intended as pedagogical onboarding for writing
           your own simulations.
         </p>
+        <p>
+          UI automation makes some parts boilerplate-heavy; bespoke simulations can be simpler.
+        </p>
       </div>
     </aside>
 

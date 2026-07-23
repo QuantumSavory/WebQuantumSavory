@@ -310,7 +310,7 @@
     end
     @test lambda_script == WebQuantumSavory.generate_julia_script(lambda_payload)
     @test occursin("chooseslotA = (let", lambda_script)
-    @test occursin("chooseslotB = (let", lambda_script)
+    @test occursin("chooseslotB = (slot -> slot > 0)", lambda_script)
     @test occursin(raw_context_lambda, lambda_script)
     @test occursin("distance = 12500.0", lambda_script)
     @test occursin("delay = 0.125", lambda_script)
@@ -321,6 +321,9 @@
     @test occursin("node_b = 2", lambda_script)
     @test occursin("Base.length((slot,))", lambda_script)
     @test occursin("slot -> slot > 0", lambda_script)
+    @test !occursin("function_value", lambda_script)
+    @test !occursin("isa Core.Function", lambda_script)
+    @test !occursin("nodeid = Base.getproperty", lambda_script)
     @test Meta.parseall(lambda_script) isa Expr
     lambda_import_lines = filter(
       line -> startswith(line, "using ") && occursin(": ", line),
@@ -346,6 +349,90 @@
     @test !Base.invokelatest(lambda_protocol.chooseslotA, -1)
     @test Base.invokelatest(lambda_protocol.chooseslotB, 7)
     @test lambda_protocol.tag === QuantumSavory.ProtocolZoo.EntanglementCounterpart
+
+    sparse_edge_function = WebQuantumSavory._script_custom_function_expression(
+      "slot -> transmissivity > 0 && nodeid(\"Amherst\") == 1 && slot > 0",
+      nothing,
+      "Sparse edge context";
+      edge_context=WebQuantumSavory._EdgeFunctionContext(
+        12_500.0,
+        0.125,
+        1.5,
+        0.2,
+        0.95,
+        1,
+        2,
+      ),
+    )
+    @test occursin("let\n    transmissivity = 0.95", sparse_edge_function)
+    for unused_binding in ("distance", "delay", "refractive_index", "loss", "node_a", "node_b")
+      @test !occursin("    $unused_binding =", sparse_edge_function)
+    end
+    @test !occursin("    nodeid =", sparse_edge_function)
+
+    for context_free_source in (
+      "let delay = 4; delay / 2; end",
+      "delay(x) = x + 1\ndelay(2)",
+      "distance -> distance",
+    )
+      parsed_source = WebQuantumSavory._parse_complete_source(context_free_source)
+      @test isempty(WebQuantumSavory._script_assignment_context_references(
+        parsed_source,
+      ))
+    end
+    parsed_outer_reference = WebQuantumSavory._parse_complete_source(
+      "(distance -> distance); distance",
+    )
+    @test WebQuantumSavory._script_assignment_context_references(
+      parsed_outer_reference,
+    ) == Set((:distance,))
+    parsed_default_reference = WebQuantumSavory._parse_complete_source(
+      "(distance=distance) -> distance",
+    )
+    @test WebQuantumSavory._script_assignment_context_references(
+      parsed_default_reference,
+    ) == Set((:distance,))
+    parsed_keyword_default_reference = WebQuantumSavory._parse_complete_source(
+      "(value; fallback=distance) -> fallback",
+    )
+    @test WebQuantumSavory._script_assignment_context_references(
+      parsed_keyword_default_reference,
+    ) == Set((:distance,))
+    parsed_parameter_shadow = WebQuantumSavory._parse_complete_source(
+      "fallback(distance; value=distance) = value\nfallback",
+    )
+    @test isempty(WebQuantumSavory._script_assignment_context_references(
+      parsed_parameter_shadow,
+    ))
+    parsed_generator_shadow = WebQuantumSavory._parse_complete_source(
+      "sum(delay for delay in (1, 2, 3))",
+    )
+    @test isempty(WebQuantumSavory._script_assignment_context_references(
+      parsed_generator_shadow,
+    ))
+    parsed_generator_reference = WebQuantumSavory._parse_complete_source(
+      "sum(value for value in 1:distance)",
+    )
+    @test WebQuantumSavory._script_assignment_context_references(
+      parsed_generator_reference,
+    ) == Set((:distance,))
+    for soft_scope_source in (
+      "f() = begin; while false; delay = 4; end; delay; end; f",
+      "f() = begin; try; delay = 4; catch; delay = 5; end; delay; end; f",
+    )
+      parsed_soft_scope = WebQuantumSavory._parse_complete_source(
+        soft_scope_source,
+      )
+      @test WebQuantumSavory._script_assignment_context_references(
+        parsed_soft_scope,
+      ) == Set((:delay,))
+    end
+    parsed_try_else = WebQuantumSavory._parse_complete_source(
+      "() -> try; 1; catch; 2; else; delay; end",
+    )
+    @test WebQuantumSavory._script_assignment_context_references(
+      parsed_try_else,
+    ) == Set((:delay,))
 
     # Exported node functions must not gain edge-only values merely because the
     # generated script has physical edges elsewhere.
@@ -496,6 +583,36 @@
         "type" => "Lambda",
         "value" => "candidates -> self * 100 + nodeid(\"Cambridge\") + first(candidates)",
       ),
+      Dict{String,Any}(
+        "id" => "global-node-function",
+        "name" => "global node function",
+        "type" => "Lambda",
+        "value" => "candidates -> nodeid(\"Cambridge\") + first(candidates)",
+      ),
+      Dict{String,Any}(
+        "id" => "global-rate",
+        "name" => "global rate",
+        "type" => "Float64",
+        "value" => Dict(
+          "kind" => "numeric_expression",
+          "source" => "nodeid(\"Cambridge\") / 4",
+        ),
+      ),
+      Dict{String,Any}(
+        "id" => "shadowed-rate",
+        "name" => "shadowed rate",
+        "type" => "Float64",
+        "value" => Dict(
+          "kind" => "numeric_expression",
+          "source" => "let delay = 4; delay / 2; end",
+        ),
+      ),
+      Dict{String,Any}(
+        "id" => "shadowed-function",
+        "name" => "shadowed function",
+        "type" => "Lambda",
+        "value" => "let distance = value -> value + 1; distance; end",
+      ),
     ]
     contextual_payload["net"]["edges"][1]["data"]["protocols"] = Any[]
     named_node_function = """function named_node_choice(candidates)
@@ -528,6 +645,34 @@
     @test occursin("let\n    self = 2", contextual_script)
     @test length(findall("candidates -> self * 100 + nodeid", contextual_script)) == 2
     @test length(findall("function named_node_choice", contextual_script)) == 2
+    @test occursin(
+      "variable_global_node_function = " *
+      "(candidates -> nodeid(\"Cambridge\") + first(candidates))",
+      contextual_script,
+    )
+    @test occursin(
+      "variable_global_rate = Base.Float64(nodeid(\"Cambridge\") / 4)",
+      contextual_script,
+    )
+    @test occursin(
+      "variable_shadowed_rate = Base.Float64(let delay = 4; delay / 2; end)",
+      contextual_script,
+    )
+    @test !occursin(
+      "# GUI variable \"shadowed rate\" is instantiated at each constructor assignment",
+      contextual_script,
+    )
+    @test occursin(
+      "variable_shadowed_function = " *
+      "(let distance = value -> value + 1; distance; end)",
+      contextual_script,
+    )
+    @test !occursin(
+      "# GUI variable \"shadowed function\" is instantiated at each constructor assignment",
+      contextual_script,
+    )
+    @test first(findfirst("nodeid(name::String)", contextual_script)) <
+      first(findfirst("variable_global_rate =", contextual_script))
 
     lambda_default_payload = deepcopy(contextual_payload)
     lambda_default_payload["variables"][1]["value"] = "default"
@@ -567,6 +712,11 @@
     @test Base.invokelatest(node_two_protocol.chooseL, [5]) == 207
     @test Base.invokelatest(node_one_protocol.chooseH, [5]) == 1006
     @test Base.invokelatest(node_two_protocol.chooseH, [5]) == 2006
+    @test getfield(contextual_module, :variable_shadowed_rate) == 2.0
+    @test Base.invokelatest(
+      getfield(contextual_module, :variable_shadowed_function),
+      2,
+    ) == 3
 
     complete_source_expression = WebQuantumSavory._script_value_expression(
       "Lambda",
@@ -586,33 +736,11 @@
       "Non-function custom source";
       node_index=2,
     )
-    @test_throws ArgumentError Core.eval(
+    @test Core.eval(
       contextual_module,
       Meta.parse(nonfunction_source_expression),
-    )
-
-    shadowed_nonfunction_expression = WebQuantumSavory._script_value_expression(
-      "Lambda",
-      "Function = Any\nthrow = identity\n42",
-      "Shadowed non-function custom source";
-      node_index=2,
-    )
-    @test_throws ArgumentError Core.eval(
-      contextual_module,
-      Meta.parse(shadowed_nonfunction_expression),
-    )
-
-    shadowed_function_expression = WebQuantumSavory._script_value_expression(
-      "Lambda",
-      "Function = Int\nvalue -> self + value",
-      "Shadowed valid custom source";
-      node_index=2,
-    )
-    shadowed_function = Core.eval(
-      contextual_module,
-      Meta.parse(shadowed_function_expression),
-    )
-    @test Base.invokelatest(shadowed_function, 3) == 5
+    ) == 42
+    @test !occursin("isa Core.Function", nonfunction_source_expression)
 
     for context in ("Edge custom function", "Floating custom function")
       nodeid_expression = WebQuantumSavory._script_value_expression(
@@ -5071,7 +5199,9 @@
           doc="A contextual integer constructor field.",
         ),
       )
-    @test occursin("Base.Int64(expression_value)", integer_script_expression)
+    @test occursin("Base.Int64(let\n    self = 2", integer_script_expression)
+    @test !occursin("nodeid =", integer_script_expression)
+    @test !occursin("expression_value", integer_script_expression)
     integer_script_module = Module(gensym(:IntegerBackgroundExpressionExport))
     Core.eval(
       integer_script_module,
@@ -5244,9 +5374,10 @@
       "Bounded numeric";
       constructor_metadata=(min=0.0, max=1.0),
     )
-    @test occursin("Base.Float64(expression_value)", bounded_script_expression)
-    @test occursin("cast_value >= 0.0", bounded_script_expression)
-    @test occursin("cast_value <= 1.0", bounded_script_expression)
+    @test bounded_script_expression == "Base.Float64(1 / 2)"
+    @test !occursin("isa Base.Real", bounded_script_expression)
+    @test !occursin("isfinite", bounded_script_expression)
+    @test !occursin("cast_value", bounded_script_expression)
     @test Meta.parse(bounded_script_expression) isa Expr
 
     background_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
@@ -5380,10 +5511,7 @@
       script = WebQuantumSavory.generate_julia_script(runtime_payload)
       @test occursin("(loss + transmissivity) * delay / 4", script)
       @test occursin("nodeid(\"Cambridge\")", script)
-      @test count(
-        ==("    nodeid = Base.getproperty(@__MODULE__, :nodeid)"),
-        eachline(IOBuffer(script)),
-      ) >= 2
+      @test !occursin("nodeid = Base.getproperty", script)
       @test !occursin("variable_per_assignment_expression =", script)
 
       paused_script = replace(

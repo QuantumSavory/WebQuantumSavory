@@ -13,6 +13,9 @@
 - `src/App.vue` is the composition root. It owns canonical reactive `projectData`, derives the minimized backend payload, wires composables, and coordinates menus, dialogs, panels, maps, logs, and result windows.
 - `src/components/map/` contains the MapLibre map, node/edge/slot rendering, and entanglement overlays.
 - `src/components/panels/` contains node/edge/protocol editors, the simulation runner, logs, Julia script export, and result views. Direct children of `src/components/` are project and confirmation dialogs.
+- Keep the Export Script panel's warning concise while noting that UI
+  automation can make generated source more boilerplate-heavy than a bespoke
+  simulation.
 - `src/components/tags/` contains the reusable metadata-driven tag/query constructor, Register/All slots target selector, structured results list, and the composed Tags & Queries tools panel. `TagBadgeSequence.vue` owns the shared editable/read-only wrapping badge sequence; `src/composables/useTagExplorer.js` owns catalog loading, abortable requests, mutation refreshes, and transient runtime state.
 - `src/components/ui/` contains shared application primitives. Dialogs compose `AppDialog`, and common actions use `AppButton`; keep application-shell dependencies out of these reusable components.
 - `src/components/ui/MarkdownContent.vue` owns shared safe read-only Markdown/KaTeX rendering and presentation. `MarkdownEditor.vue` composes it with the edit and clipboard-image lifecycle used by project descriptions and selected annotations; every editor instance must have unique accessible editor/help IDs.
