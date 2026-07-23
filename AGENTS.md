@@ -117,6 +117,15 @@ The normal lifecycle is:
   resolved assignment-module `GlobalRef`s and defer without executing the body
   or casting it. Only this unsafe Variables path may lower or macro-expand
   source. Reject lowering errors even when a contextual reference is present.
+- Symbolic values, Custom Functions, and direct `Float64`/`Int64` expressions
+  share the GUI's source-editor lifecycle and generic `.expression-editor`
+  presentation. Fresh or invalid drafts stay open; successful validation
+  collapses to a clickable rendered/source summary; loaded expressions start
+  compact and refresh transient previews; linked expression Variables remain
+  compact and read-only at assignment sites. Keep open state, preview results,
+  pending/error state, and evaluated values out of project data, and style the
+  shared surface through cascaded summary descendants and semantic
+  `--app-*` tokens rather than source-type-specific rules.
 - Edge context binds the physical distance as `distance`, so the `length`
   function stays the collection function in every placement. Variables
   conservatively treat unqualified context bindings (such as `distance`) as

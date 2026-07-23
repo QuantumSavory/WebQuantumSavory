@@ -1,3 +1,10 @@
+import { config } from '@vue/test-utils'
+
+config.global.directives.tooltip = {
+  beforeMount() {},
+  updated() {},
+}
+
 // MapLibre creates its worker URL while the module loads. jsdom implements URL
 // but not the object-URL methods available in browsers.
 if (typeof window !== 'undefined' && typeof window.URL.createObjectURL !== 'function') {
@@ -11,4 +18,15 @@ if (typeof window !== 'undefined' && typeof window.URL.createObjectURL !== 'func
       value: () => {},
     },
   })
+}
+
+// vue-highlight-code observes its editable surface in the browser. Keep the
+// shared expression editor mountable in jsdom without changing production
+// behavior.
+if (typeof globalThis.ResizeObserver !== 'function') {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
 }

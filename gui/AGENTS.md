@@ -119,7 +119,19 @@
 - Express application colors, spacing, radii, focus rings, and control dimensions through the semantic `--app-*` tokens in `src/css/style.css`. Keep PrimeVue's light Aura preset aligned with the same brand primary palette, and add a semantic token instead of scattering a new raw color through components.
 - Reuse and extend `components/ui/` for application-wide dialog and button behavior. Shared primitives must remain independently mountable, explicitly declare their contracts, and avoid querying application-shell selectors.
 - Declare component props and emitted events explicitly. Preserve object identity where map markers, selected items, and edge endpoint references depend on it.
-- Keep the custom-function and Symbolic editor lifecycle in the shared typed-value components: protocol parameters start compact, newly selected variables start open, only successful validation collapses to static source or the rendered symbolic result, and clicking that result reopens editing. Failed validation must remain editable, with a warning whose tooltip contains the backend diagnostic; transient open/closed state must not be added to serialized parameters or variables.
+- Keep Symbolic values, Custom Functions, and direct numeric expressions on the
+  shared `.expression-editor` lifecycle in the typed-value components. Fresh
+  or empty values start open; successful validation collapses to a clickable
+  rendered/source summary; loaded numeric expressions start compact, refresh
+  their transient preview automatically, and reopen on failure. Dirty, manual
+  pending, and failed drafts remain open. Linked numeric-expression Variables
+  stay compact and non-editable at assignment sites while showing their
+  concrete result; edit them only in Variables. Preserve the established
+  accessibility labels/test IDs, style generic summary descendants with
+  semantic `--app-*` tokens, and never serialize open state, preview results,
+  pending requests, or evaluated values. Failed Custom Function and Symbolic
+  validation remains editable with the backend diagnostic in the warning
+  tooltip.
 - Keep protocol and background constructor parameters in the shared metadata-backed constructor form, with thin catalog adapters for their `name` and `field` identities. Use it in ordinary slots, protocol editors, Layout Tools, and node add-many/batch drafts; union selection, validation, variable binding, metadata documentation, and contextual `self`/`nodeid` behavior must not be reimplemented in those dialogs. Installed backgrounds receive their concrete node context. Layout templates validate direct expressions with representative node context, defer linked expressions, and revalidate every cloned background against its newly created node before committing the transaction.
 - Keep custom-function contextual-keyword help centralized in `src/utils/customFunctionContext.js` and render its compact, viewport-safe helper popup from the Nodes list and the shared custom-function editor so protocol and Variables-tab Lambdas stay aligned. `nodeid("Node name")` is available for every protocol placement and `self` only for node protocols. Edge protocols also receive `distance` (meters), `delay` (seconds), dimensionless `refractive_index`, `loss` (dB/km), zero-through-one dimensionless `transmissivity`, and one-based source/target `node_a`/`node_b`; virtual-edge physical values are `nothing`. The edge-distance binding is named `distance` (not `length`), so the `length` function stays callable. Manual transmissivity keeps numeric loss available in protocol context. These are backend-provided lexical bindings, so never serialize contextual values or node-name maps in stored project data.
 - Reuse that context catalog and source lifecycle for numeric expressions.
@@ -138,10 +150,11 @@
   macros only while unsafe evaluation is enabled. Generated-script export is
   parse-only and must not lower, macro-expand, or execute numeric source in the
   server.
-- Direct numeric expressions show their source and actual cast result. Linked
-  expression Variables show the source and their concrete assignment result
-  below the variable picker. Keep saved source visible when unsafe evaluation
-  is disabled, but disable validation/execution and leave numeric literals
+- Direct numeric-expression summaries show both monospace source and the actual
+  cast result using the same rendered-result presentation as Symbolic values.
+  Linked expression Variables show that compact source/result summary below
+  the variable picker. Keep saved source visible when unsafe evaluation is
+  disabled, but disable validation/execution and leave numeric literals
   available. Variable reference discovery covers protocol and background
   parameters on both installed and template slots, so deletion remains blocked
   until every assignment is unlinked.

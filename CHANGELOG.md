@@ -2,6 +2,12 @@
 
 ## 1.11.0
 
+- Unified Symbolic values, Custom Functions, and `Float64`/`Int64` expressions
+  on one source-editor lifecycle: fresh and invalid drafts stay open,
+  successful validation collapses to an accessible rendered/source summary,
+  saved expressions refresh compact previews, and linked expression Variables
+  remain read-only at assignment sites. Numeric summaries now show both their
+  Julia source and cast result without changing the durable expression schema.
 - Added the shared metadata-backed constructor input experience to slot
   backgrounds, including defaults, typed literals, compatible Variables,
   guarded `Float64`/`Int64` expressions, bounds, contextual `self` and

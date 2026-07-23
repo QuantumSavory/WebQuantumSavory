@@ -224,7 +224,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { LoaderCircle, Plus, Search, Trash2 } from '@lucide/vue'
 import { useDomId } from '../../composables/useDomId'
 import { api } from '../../utils/ApiConnector.js'
@@ -241,9 +241,8 @@ import {
   serializeTagDraft,
   shortTypeName
 } from '../../utils/tagExplorer.js'
+import CodeEditorWithSymbols from '../panels/CodeEditorWithSymbols.vue'
 import TagBadgeSequence from './TagBadgeSequence.vue'
-
-const CodeEditorWithSymbols = defineAsyncComponent(() => import('../panels/CodeEditorWithSymbols.vue'))
 
 const props = defineProps({
   catalog: {
