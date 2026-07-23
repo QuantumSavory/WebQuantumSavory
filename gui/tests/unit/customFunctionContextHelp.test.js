@@ -46,7 +46,7 @@ describe('custom-function contextual help', () => {
     expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid.description)
     expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.nodeid.recommendation)
     expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.self.availability)
-    expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.length.recommendation)
+    expect(popup.textContent).toContain(CUSTOM_FUNCTION_CONTEXT_BY_ID.distance.availability)
     expect(CUSTOM_FUNCTION_CONTEXT_KEYWORDS).toHaveLength(9)
 
     closeButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))

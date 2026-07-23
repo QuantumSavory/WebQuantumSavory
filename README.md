@@ -264,18 +264,17 @@ An installed protocol uses its actual context:
 
 - Every placement has `nodeid(name)` over the ordered project node names.
 - Node protocols additionally have one-based `self`.
-- Edge protocols additionally have `length`, `delay`, `refractive_index`,
+- Edge protocols additionally have `distance`, `delay`, `refractive_index`,
   `loss`, `transmissivity`, `node_a`, and `node_b`. The five physical values
   are `null` on virtual edges. `loss` is in dB/km, transmissivity is
   dimensionless from zero through one, and both stay numerically available to
-  protocol code when transmissivity is manually overridden. Unqualified
-  `length` intentionally refers to the edge length;
-  `Base.length(collection)` always calls the collection function.
+  protocol code when transmissivity is manually overridden. The edge distance
+  is bound as `distance` (not `length`), so `length(collection)` calls the
+  collection function directly.
 - Floating protocols have only `nodeid(name)`.
 
-Variables conservatively treat unqualified `length` as assignment-dependent
-because they can later be linked to an edge. Node and floating contexts do not
-shadow ordinary `Base.length`.
+Variables conservatively treat an unqualified edge binding such as `distance`
+as assignment-dependent because they can later be linked to an edge.
 
 Preview results, validation errors, node-name maps, and physical context are
 transient and are never saved. A linked template shows the deferred status but

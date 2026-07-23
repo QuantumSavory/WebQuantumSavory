@@ -94,7 +94,7 @@ describe('ApiConnector project namespaces', () => {
     const connector = new ApiConnector('http://api.test')
     const context = {
       node_names: ['Alice', 'Bob'],
-      length: 100,
+      distance: 100,
       delay: 5e-7,
       refractive_index: 1.5,
       loss: 0.2,
