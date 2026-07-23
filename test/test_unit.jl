@@ -9,6 +9,21 @@
   using ConcurrentSim
   using Dates
 
+  @eval begin
+    """A test-only background used to exercise non-Float64 catalog fields."""
+    Base.@kwdef struct ContextualIntegerBackground
+      count::Int64 = 1
+      label::String = "default"
+    end
+    QuantumSavory.constructor_metadata(::Type{ContextualIntegerBackground}) = [
+      (field=:count, type=Int64, doc="A contextual integer constructor field."),
+      (field=:label, type=String, doc="A nonnumeric constructor field."),
+    ]
+  end
+  WebQuantumSavory._ensure_noise_types_cache!()
+  WebQuantumSavory._NOISE_TYPES_CACHE[]["contextualintegerbackground"] =
+    ContextualIntegerBackground
+
   # Load test data
   test_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload.json"))
 
@@ -146,11 +161,8 @@
       "representations = [CliffordRepr(), CliffordRepr()]",
       script,
     )
-    @test occursin(
-      "push!(registers, Register(traits, representations, backgrounds))\n\n" *
-      "# Resolve GUI node names to their one-based register indices.",
-      script,
-    )
+    @test first(findfirst("# Resolve GUI node names", script)) <
+      first(findfirst("# Registers", script))
     @test occursin(
       "node_indices = Dict{String,Int}(\n" *
       "    \"Amherst\" => 1,\n" *
@@ -387,7 +399,7 @@
     end
     variable_tag_error = tag_export_error(Dict("kind" => "variable", "id" => "state-variable"))
     @test variable_tag_error isa WebQuantumSavory.APIError
-    @test occursin("cannot use a variable", variable_tag_error.message)
+    @test occursin("cannot use variable", variable_tag_error.message)
 
     unknown_export_parameter = deepcopy(tagged_payload)
     unknown_parameters = unknown_export_parameter["net"]["edges"][1]["data"]["protocols"][1]["parameters"]
@@ -403,7 +415,10 @@
       error
     end
     @test unknown_export_error isa WebQuantumSavory.APIError
-    @test occursin("unknown parameter 'forged_parameter'", unknown_export_error.message)
+    @test occursin(
+      "unknown protocol parameter 'forged_parameter'",
+      lowercase(unknown_export_error.message),
+    )
 
     diagnostic_payload = deepcopy(payload)
     diagnostic_payload["net"]["protocols"] = Any[
@@ -505,7 +520,7 @@
     contextual_script = WebQuantumSavory.generate_julia_script(contextual_payload)
     @test Meta.parseall(contextual_script) isa Expr
     @test occursin(
-      "# GUI variable \"node context function\" is instantiated at each protocol assignment",
+      "# GUI variable \"node context function\" is instantiated at each constructor assignment",
       contextual_script,
     )
     @test !occursin("variable_node_context_function =", contextual_script)
@@ -738,7 +753,7 @@
     end
     @test invalid_protocol_error isa WebQuantumSavory.APIError
     @test invalid_protocol_error.status_code == 400
-    @test occursin("unknown type", invalid_protocol_error.message)
+    @test occursin("unknown protocol type", lowercase(invalid_protocol_error.message))
 
     empty_network_error = try
       WebQuantumSavory.generate_julia_script(Dict(
@@ -2486,9 +2501,9 @@
         end
         @test constructor_error isa WebQuantumSavory.APIError
         @test constructor_error.status_code == 400
-        @test occursin("variable-backed parameter", constructor_error.message)
-        @test constructor_error.details["variable_assignments"][1]["variable_id"] == "string_probability"
-        @test constructor_error.details["variable_assignments"][1]["parameter_name"] == "success_prob"
+        @test occursin("incompatible", constructor_error.message)
+        @test constructor_error.details["variable_id"] == "string_probability"
+        @test constructor_error.details["parameter_name"] == "success_prob"
 
         # Literal parameters use the authoritative constructor field type, not
         # a stale or forged client snapshot.
@@ -3207,7 +3222,10 @@
         "type" => "AmplitudeDamping",
         "parameters" => [Dict(
           "name" => "τ",
-          "value" => "begin error(\"must not execute\"); 2.0 end",
+          "value" => Dict(
+            "kind" => "numeric_expression",
+            "source" => "begin error(\"must not execute\"); 2.0 end",
+          ),
         )],
       )))
     end
@@ -4943,23 +4961,243 @@
       "type" => "AmplitudeDamping",
       "parameters" => [Dict(
         "name" => "τ",
-        "value" => expression("1 / 2"),
+        "value" => expression("self + nodeid(\"Alice\")"),
       )],
     )
-    noise_error = capture_error(
-      () -> WebQuantumSavory._instantiate_noise(noise_expression),
+    noise_context = Dict{Symbol,Any}(
+      :node => 2,
+      WebQuantumSavory.NODE_NAME_TO_INDEX_CONTEXT_KEY => Dict("Alice" => 1),
     )
-    @test noise_error isa WebQuantumSavory.APIError
-    @test noise_error.status_code == 400
-    @test occursin("does not support numeric expressions", noise_error.message)
-    script_noise_error = capture_error(
-      () -> WebQuantumSavory._script_noise_expression(
-        noise_expression,
-        "Test background noise",
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      default_noise = WebQuantumSavory._instantiate_noise(Dict(
+        "type" => "T1Decay",
+        "parameters" => Any[],
+      ))
+      @test default_noise.t1 == 1.0e9
+
+      noise = WebQuantumSavory._instantiate_noise(noise_expression, noise_context)
+      @test noise isa QuantumSavory.AmplitudeDamping
+      @test noise.τ == 3.0
+
+      variable_noise = WebQuantumSavory._instantiate_noise(
+        Dict(
+          "type" => "AmplitudeDamping",
+          "parameters" => [Dict(
+            "name" => "τ",
+            "value" => Dict("kind" => "variable", "id" => "noise-rate"),
+          )],
+        ),
+        noise_context;
+        variables=Dict(
+          "noise-rate" => WebQuantumSavory.Variable(
+            "noise-rate",
+            "noise rate",
+            "Float64",
+            expression("self * nodeid(\"Alice\")"),
+          ),
+        ),
+      )
+      @test variable_noise.τ == 2.0
+
+      integer_noise = WebQuantumSavory._instantiate_noise(
+        Dict(
+          "type" => "ContextualIntegerBackground",
+          "parameters" => [Dict(
+            "name" => "count",
+            "value" => expression("self + 1"),
+          )],
+        ),
+        noise_context,
+      )
+      @test integer_noise.count == 3
+      @test integer_noise.label == "default"
+
+      integer_variable = WebQuantumSavory.Variable(
+        "integer-count",
+        "integer count",
+        "Int64",
+        expression("2 * self + nodeid(\"Alice\")"),
+      )
+      variable_integer_noise = WebQuantumSavory._instantiate_noise(
+        Dict(
+          "type" => "ContextualIntegerBackground",
+          "parameters" => [Dict(
+            "name" => "count",
+            "value" => Dict("kind" => "variable", "id" => "integer-count"),
+          )],
+        ),
+        noise_context;
+        variables=Dict("integer-count" => integer_variable),
+      )
+      @test variable_integer_noise.count == 5
+    end
+
+    script_noise = WebQuantumSavory._script_noise_expression(
+      noise_expression,
+      "Test background noise";
+      node_index=2,
+    )
+    @test occursin("self = 2", script_noise)
+    @test occursin("nodeid(\"Alice\")", script_noise)
+    @test Meta.parse(script_noise) isa Expr
+
+    integer_variable = WebQuantumSavory.Variable(
+      "integer-count",
+      "integer count",
+      "Int64",
+      expression("2 * self + nodeid(\"Alice\")"),
+    )
+    _, integer_script_expression =
+      WebQuantumSavory._script_constructor_parameter_expression(
+        Dict(
+          "name" => "count",
+          "value" => Dict("kind" => "variable", "id" => "integer-count"),
+        ),
+        Dict(
+          "integer-count" => (
+            name="variable_integer_count",
+            variable=integer_variable,
+            per_assignment=true,
+            fresh_wildcard=false,
+            uses_default=false,
+          ),
+        ),
+        "Test background noise";
+        node_index=2,
+        declared_type=Int64,
+        constructor_metadata=(
+          field=:count,
+          type=Int64,
+          doc="A contextual integer constructor field.",
+        ),
+      )
+    @test occursin("Base.Int64(expression_value)", integer_script_expression)
+    integer_script_module = Module(gensym(:IntegerBackgroundExpressionExport))
+    Core.eval(
+      integer_script_module,
+      :(nodeid(name::String)::Int = Dict{String,Int}("Alice" => 1)[name]),
+    )
+    exported_integer_value = Core.eval(
+      integer_script_module,
+      Meta.parse(integer_script_expression),
+    )
+    @test exported_integer_value === Int64(5)
+
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
+      disabled_error = capture_error(
+        () -> WebQuantumSavory._instantiate_noise(noise_expression, noise_context),
+      )
+      @test disabled_error isa WebQuantumSavory.APIError
+      @test disabled_error.status_code == 403
+      @test disabled_error.error_code ==
+        WebQuantumSavory.UNSAFE_EVALUATION_DISABLED_CODE
+    end
+
+    withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
+      rejected = capture_error(() -> WebQuantumSavory._instantiate_noise(
+        Dict(
+          "type" => "AmplitudeDamping",
+          "parameters" => [Dict(
+            "name" => "τ",
+            "value" => expression("open(\"forbidden\", \"w\")"),
+          )],
+        ),
+        noise_context,
+      ))
+      @test rejected isa WebQuantumSavory.APIError
+      @test occursin("restricted expression", string(rejected.details["evaluation_error"]))
+    end
+
+    nonnumeric_expression = Dict(
+      "type" => "ContextualIntegerBackground",
+      "parameters" => [Dict(
+        "name" => "label",
+        "value" => expression("1"),
+      )],
+    )
+    nonnumeric_error = capture_error(
+      () -> WebQuantumSavory._instantiate_noise(
+        nonnumeric_expression,
+        noise_context,
       ),
     )
-    @test script_noise_error isa WebQuantumSavory.APIError
-    @test occursin("does not support numeric expressions", script_noise_error.message)
+    @test nonnumeric_error isa WebQuantumSavory.APIError
+    @test occursin("does not authoritatively accept", nonnumeric_error.message)
+    script_nonnumeric_error = capture_error(
+      () -> WebQuantumSavory._script_noise_expression(
+        nonnumeric_expression,
+        "Test background noise",
+        node_index=2,
+      ),
+    )
+    @test script_nonnumeric_error isa WebQuantumSavory.APIError
+    @test occursin(
+      "does not authoritatively accept",
+      script_nonnumeric_error.message,
+    )
+
+    function background_validation_error(background; variables=Any[])
+      payload = deepcopy(test_payload)
+      payload["variables"] = variables
+      payload["net"]["nodes"][1]["data"]["slots"][1]["backgroundNoise"] = background
+      return capture_error(() -> WebQuantumSavory.validate_payload(payload))
+    end
+
+    valid_background_payload = deepcopy(test_payload)
+    valid_background_payload["variables"] = [Dict(
+      "id" => "contextual-rate",
+      "name" => "contextual rate",
+      "type" => "Float64",
+      "value" => expression("self + nodeid(\"Amherst\")"),
+    )]
+    valid_background_payload["net"]["nodes"][1]["data"]["slots"][1]["backgroundNoise"] =
+      Dict(
+        "type" => "T1Decay",
+        "parameters" => [Dict(
+          "name" => "t1",
+          "value" => Dict("kind" => "variable", "id" => "contextual-rate"),
+        )],
+      )
+    @test WebQuantumSavory.validate_payload(valid_background_payload)["success"]
+
+    unknown_variable = background_validation_error(Dict(
+      "type" => "T1Decay",
+      "parameters" => [Dict(
+        "name" => "t1",
+        "value" => Dict("kind" => "variable", "id" => "missing"),
+      )],
+    ))
+    @test unknown_variable isa WebQuantumSavory.APIError
+    @test occursin("Unknown variable reference", unknown_variable.message)
+
+    incompatible_variable = background_validation_error(
+      Dict(
+        "type" => "T1Decay",
+        "parameters" => [Dict(
+          "name" => "t1",
+          "value" => Dict("kind" => "variable", "id" => "label"),
+        )],
+      );
+      variables=[Dict(
+        "id" => "label",
+        "name" => "label",
+        "type" => "String",
+        "value" => "not numeric",
+      )],
+    )
+    @test incompatible_variable isa WebQuantumSavory.APIError
+    @test occursin("incompatible", incompatible_variable.message)
+
+    nonnumeric_payload_error = background_validation_error(nonnumeric_expression)
+    @test nonnumeric_payload_error isa WebQuantumSavory.APIError
+    @test occursin("does not accept a numeric expression", nonnumeric_payload_error.message)
+
+    unknown_background = background_validation_error(Dict(
+      "type" => "Main.ForgedBackground",
+      "parameters" => Any[],
+    ))
+    @test unknown_background isa WebQuantumSavory.APIError
+    @test occursin("Unknown background noise type", unknown_background.message)
 
     withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true") do
       kwargs = Dict{Symbol,Any}()
@@ -5010,6 +5248,76 @@
     @test occursin("cast_value >= 0.0", bounded_script_expression)
     @test occursin("cast_value <= 1.0", bounded_script_expression)
     @test Meta.parse(bounded_script_expression) isa Expr
+
+    background_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
+    background_payload["name"] = "numeric_expression_background_runtime"
+    background_payload["variables"] = [Dict(
+      "id" => "background-rate",
+      "name" => "background rate",
+      "type" => "Float64",
+      "value" => expression("self + nodeid(\"Amherst\")"),
+    )]
+    empty!(background_payload["net"]["protocols"])
+    for node in background_payload["net"]["nodes"]
+      empty!(node["data"]["protocols"])
+      node["data"]["slots"][1]["backgroundNoise"] = Dict(
+        "type" => "T1Decay",
+        "parameters" => [Dict(
+          "name" => "t1",
+          "value" => Dict("kind" => "variable", "id" => "background-rate"),
+        )],
+      )
+      node["data"]["slots"][2]["backgroundNoise"] = Dict(
+        "type" => "T1Decay",
+        "parameters" => [Dict(
+          "name" => "t1",
+          "value" => expression("10 * self + nodeid(\"Cambridge\")"),
+        )],
+      )
+    end
+    background_validation = WebQuantumSavory.validate_payload(background_payload)
+    background_registers = withenv(
+      WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "true",
+    ) do
+      first(WebQuantumSavory.create_registers_from_nodes(background_validation))
+    end
+    @test [register.backgrounds[1].t1 for register in background_registers] ==
+      [2.0, 3.0]
+    @test [register.backgrounds[2].t1 for register in background_registers] ==
+      [12.0, 22.0]
+
+    background_script = withenv(
+      WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false",
+    ) do
+      WebQuantumSavory.generate_julia_script(background_payload)
+    end
+    @test first(findfirst("# Resolve GUI node names", background_script)) <
+      first(findfirst("# Registers", background_script))
+    @test length(findall("self + nodeid(\"Amherst\")", background_script)) == 2
+    @test length(findall("10 * self + nodeid(\"Cambridge\")", background_script)) == 2
+    @test occursin(
+      "GUI variable \"background rate\" is instantiated at each constructor assignment",
+      background_script,
+    )
+
+    paused_background_script = replace(
+      background_script,
+      "\nrun(sim, simulation_duration)\n" =>
+        "\n# run(sim, simulation_duration)  # paused by the background test\n";
+      count=1,
+    )
+    background_module = Module(gensym(:BackgroundExpressionExport))
+    Core.eval(background_module, :(using Base))
+    Base.include_string(
+      background_module,
+      paused_background_script,
+      "background-expression-export.jl",
+    )
+    exported_background_registers = Core.eval(background_module, :registers)
+    @test [register.backgrounds[1].t1 for register in exported_background_registers] ==
+      [2.0, 3.0]
+    @test [register.backgrounds[2].t1 for register in exported_background_registers] ==
+      [12.0, 22.0]
 
     runtime_payload = JSON.parsefile(joinpath(@__DIR__, "mock", "payload3.json"))
     runtime_payload["name"] = "numeric_expression_runtime"

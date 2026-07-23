@@ -417,7 +417,7 @@ function changeStateType(variable, typeId) {
   if (!type.weighted && traceIsReferenced(variable)) {
     setTraceLifecycleError(
       variable,
-      'Unlink the generated trace variable from protocol parameters before choosing an unweighted state',
+      'Unlink the generated trace variable from protocol or background parameters before choosing an unweighted state',
     )
     return
   }
@@ -604,9 +604,11 @@ function stateDeleteBlocked(variable) {
 
 function deleteTitle(variable) {
   if (props.disabled) return 'Reset the simulation to edit state variables'
-  if (isReferenced(variable.id)) return 'Unlink this variable from protocol parameters before deleting it'
+  if (isReferenced(variable.id)) {
+    return 'Unlink this variable from protocol or background parameters before deleting it'
+  }
   if (traceIsReferenced(variable)) {
-    return 'Unlink the generated trace variable from protocol parameters before deleting this state'
+    return 'Unlink the generated trace variable from protocol or background parameters before deleting this state'
   }
   return 'Delete state variable'
 }

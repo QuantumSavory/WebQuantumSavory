@@ -229,6 +229,162 @@ describe('DesignCommandService', () => {
     )
   })
 
+  it('revalidates linked template backgrounds for every concrete destination node', async () => {
+    const project = createEmptyProject('Contextual background templates')
+    const expression = { kind: 'numeric_expression', source: 'self + nodeid("A")' }
+    const validateNumericExpressionValue = vi.fn(async (_type, _source, options) => ({
+      valid: true,
+      deferred: options.context == null,
+      value: options.context?.self ?? 1,
+    }))
+    const service = serviceFor(project, {
+      backgroundCatalog: () => [{
+        type: 'ContextNoise',
+        parameters: [{ field: 'rate', type: 'Float64', min: 0, max: 10 }],
+      }],
+      validateNumericExpressionValue,
+    })
+
+    await service.execute({
+      operations: [{
+        kind: 'variables.create',
+        id: 'variable_rate',
+        value: {
+          name: 'contextual rate',
+          type: 'Float64',
+          selectedType: 'expression:Float64',
+          value: expression,
+        },
+      }, {
+        kind: 'slots.create',
+        id: 'template_slot',
+        template: true,
+        value: {
+          type: 'Qubit',
+          backgroundNoise: {
+            type: 'ContextNoise',
+            parameters: [{
+              field: 'rate',
+              type: 'Float64',
+              selectedType: 'expression:Float64',
+              value: new VariableReference('variable_rate'),
+            }],
+          },
+        },
+      }],
+    })
+
+    await expect(service.execute({
+      operations: [{
+        kind: 'variables.remove',
+        variable_id: 'variable_rate',
+      }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: expect.stringContaining('protocol or background parameters'),
+    })
+
+    await service.execute({
+      operations: [{
+        kind: 'topology.create_node',
+        id: 'node_a',
+        value: { name: 'A', position: [0, 0] },
+      }, {
+        kind: 'topology.create_node',
+        id: 'node_b',
+        value: { name: 'B', position: [1, 1] },
+      }],
+    })
+
+    const assignmentContexts = validateNumericExpressionValue.mock.calls
+      .filter(([_type, _source, options]) => options.placement === 'node')
+      .map(([_type, _source, options]) => options.context)
+    expect(assignmentContexts).toContainEqual(undefined)
+    expect(assignmentContexts).toContainEqual({ node_names: ['A'], self: 1 })
+    expect(assignmentContexts).toContainEqual({ node_names: ['A', 'B'], self: 2 })
+    for (const node of project.net.nodes) {
+      expect(node.data.slots[0].backgroundNoise.parameters[0].value)
+        .toEqual(new VariableReference('variable_rate'))
+    }
+
+    await service.execute({
+      operations: [{
+        kind: 'slots.remove',
+        template: true,
+        slot_id: 'template_slot',
+      }],
+    })
+    await expect(service.execute({
+      operations: [{
+        kind: 'variables.remove',
+        variable_id: 'variable_rate',
+      }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: expect.stringContaining('protocol or background parameters'),
+    })
+  })
+
+  it('rolls back generated nodes when a cloned background fails concrete validation', async () => {
+    const project = createEmptyProject('Generated background validation')
+    project.net.nodes.push(new Node({
+      id: 'node_a',
+      name: 'A',
+      position: [0, 0],
+      data: { slots: [], protocols: [] },
+    }))
+    const validateNumericExpressionValue = vi.fn(async (_type, _source, options) => ({
+      valid: options.context?.self !== 2,
+      value: options.context?.self,
+      message: 'Generated assignment is invalid.',
+    }))
+    const service = serviceFor(project, {
+      backgroundCatalog: () => [{
+        type: 'ContextNoise',
+        parameters: [{ field: 'count', type: 'Int64' }],
+      }],
+      validateNumericExpressionValue,
+      generators: {
+        contextual_clone: net => {
+          const generatedNode = new Node({
+            id: 'node_generated',
+            name: 'Generated',
+            position: [1, 1],
+            data: {
+              slots: [{
+                id: 'slot_generated',
+                type: 'Qubit',
+                backgroundNoise: {
+                  type: 'ContextNoise',
+                  parameters: [{
+                    field: 'count',
+                    type: 'Int64',
+                    selectedType: 'expression:Int64',
+                    value: { kind: 'numeric_expression', source: 'self' },
+                  }],
+                },
+              }],
+              protocols: [],
+            },
+          })
+          net.nodes.push(generatedNode)
+          return { generatedNodes: [generatedNode], generatedEdges: [] }
+        },
+      },
+    })
+
+    await expect(service.execute({
+      operations: [{
+        kind: 'network.generate',
+        value: { generator: 'contextual_clone' },
+      }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'Generated assignment is invalid.',
+    })
+    expect(project.net.nodes.map(node => node.id)).toEqual(['node_a'])
+  })
+
   it('rolls back every candidate change when one operation fails', async () => {
     const project = createEmptyProject('Rollback')
     const before = encodeDesignDocument(project)
@@ -591,6 +747,10 @@ describe('DesignCommandService', () => {
       position: [0, 0],
       data: { slots: [], protocols: [] },
     }))
+    const validateNumericExpressionValue = vi.fn(async () => ({
+      valid: true,
+      value: 0.5,
+    }))
     const service = serviceFor(project, {
       backgroundCatalog: () => [{
         type: 'ThermalNoise',
@@ -613,6 +773,25 @@ describe('DesignCommandService', () => {
         edge: [],
         floating: [],
       }),
+      validateNumericExpressionValue,
+    })
+
+    await expect(service.requireBackgroundNoise({
+      type: 'LegacyNoise',
+      parameters: [{ value: 0.25 }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'Unknown background noise type: LegacyNoise',
+    })
+    await expect(service.requireBackgroundNoise({
+      type: 'LegacyNoise',
+      parameters: [{ value: 0.25 }],
+    }, {
+      project,
+      allowLegacyLiteral: true,
+    })).resolves.toEqual({
+      type: 'LegacyNoise',
+      parameters: [{ value: 0.25 }],
     })
 
     await service.execute({
@@ -645,7 +824,7 @@ describe('DesignCommandService', () => {
       }],
     })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' })
 
-    await expect(service.execute({
+    await service.execute({
       operations: [{
         kind: 'slots.update',
         node_id: 'node_a',
@@ -662,10 +841,21 @@ describe('DesignCommandService', () => {
           },
         },
       }],
-    })).rejects.toMatchObject({
-      code: 'VALIDATION_FAILED',
-      message: expect.stringContaining('does not support numeric expressions'),
     })
+    expect(project.net.nodes[0].data.slots[0].backgroundNoise.parameters[0])
+      .toMatchObject({
+        field: 'rate',
+        selectedType: 'expression:Float64',
+        value: { kind: 'numeric_expression', source: '1 / 2' },
+      })
+    expect(validateNumericExpressionValue).toHaveBeenCalledWith(
+      'Float64',
+      '1 / 2',
+      expect.objectContaining({
+        placement: 'node',
+        context: { node_names: ['A'], self: 1 },
+      }),
+    )
     await expect(serviceFor(project).requireBackgroundNoise({
       type: 'TemporarilyUnavailableNoise',
       parameters: [{
@@ -674,7 +864,7 @@ describe('DesignCommandService', () => {
       }],
     })).rejects.toMatchObject({
       code: 'VALIDATION_FAILED',
-      message: expect.stringContaining('does not support numeric expressions'),
+      message: expect.stringContaining('requires catalog metadata'),
     })
 
     await service.execute({

@@ -45,7 +45,7 @@
       type="button"
       class="numeric-expression-validate"
       :disabled="disabled || !evaluationEnabled || !source.trim() || previewPending"
-      :aria-label="`Validate ${parameter.name || 'numeric'} expression`"
+      :aria-label="`Validate ${displayName || 'numeric'} expression`"
       @click="validate({ commit: true })"
     >
       {{ previewPending ? 'Validating…' : 'Validate' }}
@@ -64,7 +64,7 @@
       class="numeric-expression-result"
       data-testid="numeric-expression-result"
       role="status"
-      :aria-label="`${parameter.name || 'Numeric expression'} result`"
+      :aria-label="`${displayName || 'Numeric expression'} result`"
     >
       Result: {{ previewResult }}
     </p>
@@ -90,6 +90,7 @@ import CustomFunctionContextHelp from './CustomFunctionContextHelp.vue'
 
 const props = defineProps({
   parameter: { type: Object, required: true },
+  parameterName: { type: String, default: '' },
   validationTarget: { type: Object, default: undefined },
   targetType: { type: String, required: true },
   placement: { type: String, default: 'floating' },
@@ -118,8 +119,11 @@ const persistedSource = computed(() => (
     : ''
 ))
 const source = ref(persistedSource.value)
+const displayName = computed(() => (
+  props.parameterName || props.parameter.name || props.parameter.field || ''
+))
 const sourceLabel = computed(() => (
-  `${props.parameter.name || 'Parameter'} numeric expression source`
+  `${displayName.value || 'Parameter'} numeric expression source`
 ))
 const evaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
 const effectiveValidationTarget = computed(() => props.validationTarget || props.parameter)
@@ -228,7 +232,7 @@ async function validate({ commit = false } = {}) {
       || (Number.isFinite(props.maximum) && numericValue > props.maximum)
     )
   ) {
-    return setValidationError(`${props.parameter.name || 'Value'} must be`
+    return setValidationError(`${displayName.value || 'Value'} must be`
       + `${Number.isFinite(props.minimum) ? ` at least ${props.minimum}` : ''}`
       + `${Number.isFinite(props.minimum) && Number.isFinite(props.maximum) ? ' and' : ''}`
       + `${Number.isFinite(props.maximum) ? ` at most ${props.maximum}` : ''}.`)

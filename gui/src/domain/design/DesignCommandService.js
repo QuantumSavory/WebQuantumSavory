@@ -666,34 +666,42 @@ export class DesignCommandService {
     if (project.net.nodes.some(node => node.id === id)) {
       throw new DesignCommandError('VALIDATION_FAILED', `Node ID already exists: ${id}`)
     }
-    const slots = []
-    for (const templateSlot of this.templateSlots(project)) {
-      const slotId = this.assignId('slot', {}, context)
-      if (
-        this.allSlots(project).some(slot => slot.id === slotId)
-        || slots.some(slot => slot.id === slotId)
-      ) {
-        throw new DesignCommandError('VALIDATION_FAILED', `Slot ID already exists: ${slotId}`)
-      }
-      slots.push({
-        id: slotId,
-        type: this.requireSlotType(templateSlot.type),
-        backgroundNoise: await this.requireBackgroundNoise(templateSlot.backgroundNoise),
-        isLocked: false,
-        assignment: false,
-      })
-    }
     const node = new Node({
       id,
       name: value.name || `Node ${project.net.nodes.length + 1}`,
       position: requirePosition(value.position),
       data: {
         type: value.type || value.data?.type || 'City',
-        slots,
+        slots: [],
         protocols: [],
       },
     })
+    // Install the candidate node before validating cloned template backgrounds
+    // so `self` and node-name lookups use the concrete destination context.
     project.net.nodes.push(node)
+    for (const templateSlot of this.templateSlots(project)) {
+      const slotId = this.assignId('slot', {}, context)
+      if (
+        this.allSlots(project).some(slot => slot.id === slotId)
+        || node.data.slots.some(slot => slot.id === slotId)
+      ) {
+        throw new DesignCommandError('VALIDATION_FAILED', `Slot ID already exists: ${slotId}`)
+      }
+      node.data.slots.push({
+        id: slotId,
+        type: this.requireSlotType(templateSlot.type),
+        backgroundNoise: await this.requireBackgroundNoise(
+          templateSlot.backgroundNoise,
+          {
+            project,
+            ownerId: node.id,
+            allowLegacyLiteral: true,
+          },
+        ),
+        isLocked: false,
+        assignment: false,
+      })
+    }
   }
 
   updateNode(project, operation, context) {
@@ -885,6 +893,11 @@ export class DesignCommandService {
     this.requireSlotType(value.type || 'Qubit')
     const backgroundNoise = await this.requireBackgroundNoise(
       value.backgroundNoise || this.defaultBackgroundNoise(),
+      {
+        project,
+        ownerId: operation.template === true ? null : operation.node_id,
+        template: operation.template === true,
+      },
     )
     collection.push({
       id,
@@ -895,12 +908,19 @@ export class DesignCommandService {
     })
   }
 
-  async updateSlotIn(collection, operation, context) {
+  async updateSlotIn(collection, project, operation, context) {
     const slot = byId(collection, operation.id || operation.slot_id, 'Slot')
     const value = operation.value || operation
     if (Object.hasOwn(value, 'type')) slot.type = this.requireSlotType(value.type)
     if (Object.hasOwn(value, 'backgroundNoise')) {
-      slot.backgroundNoise = await this.requireBackgroundNoise(value.backgroundNoise)
+      slot.backgroundNoise = await this.requireBackgroundNoise(
+        value.backgroundNoise,
+        {
+          project,
+          ownerId: operation.template === true ? null : operation.node_id,
+          template: operation.template === true,
+        },
+      )
     }
     context.affectedIds.add(slot.id)
   }
@@ -937,7 +957,12 @@ export class DesignCommandService {
   }
 
   updateSlot(project, operation, context) {
-    return this.updateSlotIn(this.slotCollection(project, operation), operation, context)
+    return this.updateSlotIn(
+      this.slotCollection(project, operation),
+      project,
+      operation,
+      context,
+    )
   }
 
   removeSlot(project, operation, context) {
@@ -1171,7 +1196,15 @@ export class DesignCommandService {
     )
   }
 
-  async requireBackgroundNoise(noise) {
+  async requireBackgroundNoise(
+    noise,
+    {
+      project = this.getProject(),
+      ownerId = null,
+      template = false,
+      allowLegacyLiteral = false,
+    } = {},
+  ) {
     if (!record(noise)) {
       throw new DesignCommandError(
         'VALIDATION_FAILED',
@@ -1181,87 +1214,53 @@ export class DesignCommandService {
     const type = requireString(noise.type, 'Background noise type')
     const catalog = this.backgroundCatalog()
     const definition = catalog.find(entry => entry?.type === type)
-    if (catalog.length > 0 && !definition) {
-      throw new DesignCommandError(
-        'VALIDATION_FAILED',
-        `Unknown background noise type: ${type}`,
-      )
-    }
     if (!Array.isArray(noise.parameters)) {
       throw new DesignCommandError(
         'VALIDATION_FAILED',
         'Background noise parameters must be an array.',
       )
     }
-    const expressionParameter = noise.parameters.find(parameter => (
-      record(parameter?.value)
-      && parameter.value.kind === NUMERIC_EXPRESSION_VALUE_KIND
-    ))
-    if (expressionParameter) {
-      const field = expressionParameter.field || expressionParameter.name || 'unknown'
+    if (!definition && noise.parameters.some(parameter => (
+      (
+        record(parameter?.value)
+        && parameter.value.kind === NUMERIC_EXPRESSION_VALUE_KIND
+      )
+      || isVariableReference(parameter?.value)
+    ))) {
       throw new DesignCommandError(
         'VALIDATION_FAILED',
-        `Background noise parameter ${field} does not support numeric expressions.`,
+        `Background noise ${type} requires catalog metadata for Variables or numeric expressions.`,
       )
     }
-    if (!definition) return deepClone(noise)
-
-    const definitions = Array.isArray(definition.parameters) ? definition.parameters : []
-    const supplied = new Map()
-    for (const parameter of noise.parameters) {
-      const field = requireString(parameter?.field, 'Background noise parameter field')
-      if (supplied.has(field)) {
+    if (!definition) {
+      if (catalog.length > 0 && !allowLegacyLiteral) {
         throw new DesignCommandError(
           'VALIDATION_FAILED',
-          `Duplicate background noise parameter: ${field}`,
+          `Unknown background noise type: ${type}`,
         )
       }
-      supplied.set(field, parameter)
-    }
-    const expected = new Set(definitions.map(parameter => String(parameter.field)))
-    if (
-      expected.size !== supplied.size
-      || [...expected].some(field => !supplied.has(field))
-    ) {
-      throw new DesignCommandError(
-        'VALIDATION_FAILED',
-        `Background noise parameters must be exactly: ${[...expected].join(', ')}`,
-      )
+      return deepClone(noise)
     }
 
-    const parameters = []
-    for (const parameterDefinition of definitions) {
-      const field = String(parameterDefinition.field)
-      const suppliedParameter = supplied.get(field)
-      if (
-        Object.hasOwn(suppliedParameter, 'type')
-        && JSON.stringify(suppliedParameter.type) !== JSON.stringify(parameterDefinition.type)
-      ) {
-        throw new DesignCommandError(
-          'VALIDATION_FAILED',
-          `Background noise parameter metadata does not match the catalog: ${field}`,
-        )
-      }
-      const effectiveType = this.effectiveParameterDescriptor(
-        parameterDefinition.type,
-        suppliedParameter,
-        parameterDefinition,
-        { numericExpressions: false },
-      )
-      const value = await this.requireTypedValue(
-        effectiveType,
-        suppliedParameter.value,
-        `Background noise parameter ${field}`,
-        { parameter: parameterDefinition },
-      )
-      parameters.push({
-        ...deepClone(parameterDefinition),
-        value,
-        ...(Object.hasOwn(suppliedParameter, 'selectedType')
-          ? { selectedType: suppliedParameter.selectedType }
-          : {}),
-      })
-    }
+    const parameters = await this.constructorParameters(
+      project,
+      definition,
+      noise.parameters,
+      {
+        identity: 'field',
+        label: 'Background noise',
+        placement: 'node',
+        ownerId,
+        template,
+        rejectMetadataMismatch: true,
+        defaults: (definition.parameters || []).map(parameter => ({
+          ...deepClone(parameter),
+          field: String(parameter.field),
+          selectedType: 'default',
+          value: null,
+        })),
+      },
+    )
     return {
       ...deepClone(definition),
       type,
@@ -1376,46 +1375,92 @@ export class DesignCommandService {
     ownerId = null,
   ) {
     const defaults = createProtocolFromDefinition(definition).parameters
-    if (supplied === undefined) return defaults
+    return this.constructorParameters(project, definition, supplied, {
+      identity: 'name',
+      label: 'Protocol',
+      placement,
+      ownerId,
+      preservedTypes,
+      defaults,
+    })
+  }
+
+  /**
+   * Validate and normalize a catalog-backed constructor parameter list.
+   * Protocols and background-noise constructors intentionally share this path
+   * so defaults, Variables, expression contexts, bounds, and editor
+   * descriptors cannot drift.
+   */
+  async constructorParameters(
+    project,
+    definition,
+    supplied,
+    {
+      identity = 'name',
+      label = 'Constructor',
+      placement = 'floating',
+      ownerId = null,
+      template = false,
+      preservedTypes = null,
+      defaults = [],
+      rejectMetadataMismatch = false,
+    } = {},
+  ) {
+    const canonicalDefaults = deepClone(defaults)
+    if (supplied === undefined) return canonicalDefaults
     if (!Array.isArray(supplied)) {
       throw new DesignCommandError(
         'VALIDATION_FAILED',
-        'Protocol parameters must be an array.',
+        `${label} parameters must be an array.`,
       )
     }
     const byName = new Map()
     for (const parameter of supplied) {
-      const name = requireString(parameter?.name, 'Protocol parameter name')
+      const name = requireString(
+        parameter?.[identity],
+        `${label} parameter ${identity}`,
+      )
       if (byName.has(name)) {
         throw new DesignCommandError(
           'VALIDATION_FAILED',
-          `Duplicate protocol parameter: ${name}`,
+          `Duplicate ${label.toLowerCase()} parameter: ${name}`,
         )
       }
       byName.set(name, parameter)
     }
     const definitions = new Map(
-      definition.parameters.map(parameter => [parameter.field, parameter]),
+      (definition.parameters || []).map(parameter => [String(parameter.field), parameter]),
     )
     for (const name of byName.keys()) {
       if (!definitions.has(name)) {
         throw new DesignCommandError(
           'VALIDATION_FAILED',
-          `Unknown protocol parameter for ${definition.type}: ${name}`,
+          `Unknown ${label.toLowerCase()} parameter for ${definition.type}: ${name}`,
         )
       }
     }
     const normalizedParameters = []
-    for (const parameter of defaults) {
-      const canonicalParameter = preservedTypes?.has(parameter.name)
-        ? { ...parameter, type: deepClone(preservedTypes.get(parameter.name)) }
+    for (const parameter of canonicalDefaults) {
+      const parameterName = String(parameter?.[identity] ?? '')
+      const canonicalParameter = preservedTypes?.has(parameterName)
+        ? { ...parameter, type: deepClone(preservedTypes.get(parameterName)) }
         : parameter
-      const suppliedParameter = byName.get(parameter.name)
+      const suppliedParameter = byName.get(parameterName)
       if (!suppliedParameter) {
         normalizedParameters.push(canonicalParameter)
         continue
       }
-      const parameterDefinition = definitions.get(parameter.name)
+      const parameterDefinition = definitions.get(parameterName)
+      if (
+        rejectMetadataMismatch
+        && Object.hasOwn(suppliedParameter, 'type')
+        && JSON.stringify(suppliedParameter.type) !== JSON.stringify(parameterDefinition.type)
+      ) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `${label} parameter metadata does not match the catalog: ${parameterName}`,
+        )
+      }
       let normalizedValue
       let normalizedSelectedType
       if (isVariableReference(suppliedParameter.value)) {
@@ -1427,7 +1472,7 @@ export class DesignCommandService {
         if (!parameterTypeSupportsVariableType(declaredType, assignmentType)) {
           throw new DesignCommandError(
             'VALIDATION_FAILED',
-            `Variable ${variable.name} is incompatible with parameter ${parameter.name}.`,
+            `Variable ${variable.name} is incompatible with parameter ${parameterName}.`,
           )
         }
         const linkedOption = parameterInputOptionForVariable(
@@ -1438,26 +1483,27 @@ export class DesignCommandService {
         if (!linkedOption) {
           throw new DesignCommandError(
             'VALIDATION_FAILED',
-            `Variable ${variable.name} has no compatible input option for parameter ${parameter.name}.`,
+            `Variable ${variable.name} has no compatible input option for parameter ${parameterName}.`,
           )
         }
         normalizedSelectedType = linkedOption.id
         if (
-          linkedOption.inputKind === 'numeric-expression'
-          && isNumericExpressionValue(variable.value)
+          ['number', 'numeric-expression'].includes(linkedOption.inputKind)
+          && (
+            linkedOption.inputKind !== 'numeric-expression'
+            || isNumericExpressionValue(variable.value)
+          )
         ) {
           await this.requireTypedValue(
             linkedOption,
             variable.value,
-            `Variable ${variable.name} for protocol parameter ${parameter.name}`,
+            `Variable ${variable.name} for ${label.toLowerCase()} parameter ${parameterName}`,
             {
               placement,
               parameter: parameterDefinition,
-              numericExpressionContext: buildNumericExpressionContext(
-                project,
-                placement,
-                ownerId,
-              ),
+              numericExpressionContext: template
+                ? undefined
+                : buildNumericExpressionContext(project, placement, ownerId),
             },
           )
         }
@@ -1471,12 +1517,16 @@ export class DesignCommandService {
         normalizedValue = await this.requireTypedValue(
           effectiveType,
           suppliedParameter.value,
-          `Protocol parameter ${parameter.name}`,
+          `${label} parameter ${parameterName}`,
           {
             placement,
             parameter: parameterDefinition,
             numericExpressionContext: effectiveType.inputKind === 'numeric-expression'
-              ? buildNumericExpressionContext(project, placement, ownerId)
+              ? (
+                  template
+                    ? undefined
+                    : buildNumericExpressionContext(project, placement, ownerId)
+                )
               : undefined,
           },
         )
@@ -1636,7 +1686,7 @@ export class DesignCommandService {
     if (isVariableReferenced(project, id)) {
       throw new DesignCommandError(
         'VALIDATION_FAILED',
-        'Unlink this variable from protocol parameters before deleting it.',
+        'Unlink this variable from protocol or background parameters before deleting it.',
       )
     }
     project.variables = project.variables.filter(variable => variable.id !== id)
@@ -1848,13 +1898,28 @@ export class DesignCommandService {
     context.deletedIds.add(id)
   }
 
-  generateNetwork(project, operation, context) {
+  async generateNetwork(project, operation, context) {
     const value = operation.value || operation
     const generator = this.generators[value.generator || value.type]
     if (typeof generator !== 'function') {
       throw new DesignCommandError('VALIDATION_FAILED', `Unknown network generator: ${value.generator || value.type}`)
     }
-    const result = generator(project.net, deepClone(value.options || value))
+    const result = await generator(project.net, deepClone(value.options || value))
+    // Layout generators clone representative template values. Revalidate each
+    // cloned assignment after its destination node has a stable position in
+    // the candidate network, then commit the transaction only if all pass.
+    for (const node of result.generatedNodes || []) {
+      for (const slot of node.data?.slots || []) {
+        slot.backgroundNoise = await this.requireBackgroundNoise(
+          slot.backgroundNoise,
+          {
+            project,
+            ownerId: node.id,
+            allowLegacyLiteral: true,
+          },
+        )
+      }
+    }
     for (const node of result.generatedNodes || []) context.affectedIds.add(node.id)
     for (const edge of result.generatedEdges || []) context.affectedIds.add(edge.id)
     for (const node of result.removedNodes || []) context.deletedIds.add(node.id)

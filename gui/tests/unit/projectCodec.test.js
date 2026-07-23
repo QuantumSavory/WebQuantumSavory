@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import Edge from '../../src/models/Edge'
 import FloatingProtocol from '../../src/models/FloatingProtocol'
 import Node from '../../src/models/Node'
-import Variable, { isStatesZooTraceVariable } from '../../src/models/Variable'
+import Variable, {
+  VariableReference,
+  isStatesZooTraceVariable,
+} from '../../src/models/Variable'
 import {
   DEFAULT_MAP_CENTER,
   DEFAULT_MAP_ZOOM,
@@ -11,6 +14,7 @@ import {
   PROJECT_SCHEMA_VERSION,
   TRANSIENT_SLOT_FIELDS,
   createEmptyProject,
+  decodeDesignDocument,
   decodeStoredProject,
   encodeDesignDocument,
   encodeStoredProject,
@@ -73,6 +77,88 @@ describe('collaborative design codec', () => {
         },
       },
     })
+  })
+
+  it('round-trips background editor descriptors and minimizes only authoritative values', () => {
+    const project = createEmptyProject('Background descriptors')
+    project.variables.push(new Variable({
+      id: 'variable_rate',
+      name: 'rate',
+      type: 'Float64',
+      value: { kind: 'numeric_expression', source: 'self / 10' },
+    }))
+    project.variables[0].selectedType = 'expression:Float64'
+    project.net.nodes.push(new Node({
+      id: 'node_a',
+      name: 'A',
+      position: [0, 0],
+      data: {
+        protocols: [],
+        slots: [{
+          id: 'slot_a',
+          type: 'Qubit',
+          backgroundNoise: {
+            type: 'ContextNoise',
+            doc: 'Contextual noise.',
+            parameters: [{
+              field: 'rate',
+              type: 'Float64',
+              selectedType: 'expression:Float64',
+              value: new VariableReference('variable_rate'),
+            }, {
+              field: 'count',
+              type: 'Int64',
+              selectedType: 'expression:Int64',
+              value: { kind: 'numeric_expression', source: 'self + 1' },
+            }],
+          },
+        }],
+      },
+    }))
+
+    const document = encodeDesignDocument(project)
+    const roundTrip = decodeDesignDocument(document)
+    expect(roundTrip.net.nodes[0].data.slots[0].backgroundNoise.parameters)
+      .toEqual(document.net.nodes[0].data.slots[0].backgroundNoise.parameters)
+
+    expect(toSimulationPayload(roundTrip).net.nodes[0].data.slots[0].backgroundNoise)
+      .toEqual({
+        type: 'ContextNoise',
+        parameters: [{
+          name: 'rate',
+          value: { kind: 'variable', id: 'variable_rate' },
+        }, {
+          name: 'count',
+          value: { kind: 'numeric_expression', source: 'self + 1' },
+        }],
+      })
+  })
+
+  it('preserves schema-v1 literal-only background parameters without inventing a type', () => {
+    const project = createEmptyProject('Legacy background')
+    project.schemaVersion = 1
+    project.net.nodes.push({
+      id: 'node_a',
+      name: 'A',
+      position: [0, 0],
+      data: {
+        protocols: [],
+        slots: [{
+          id: 'slot_a',
+          type: 'Qubit',
+          backgroundNoise: {
+            type: 'LegacyNoise',
+            parameters: [{ field: 'rate', value: 0.25 }],
+          },
+        }],
+      },
+    })
+
+    const decoded = decodeDesignDocument(project)
+    const parameter = decoded.net.nodes[0].data.slots[0].backgroundNoise.parameters[0]
+    expect(parameter).toEqual({ field: 'rate', value: 0.25 })
+    expect(toSimulationPayload(decoded).net.nodes[0].data.slots[0].backgroundNoise.parameters)
+      .toEqual([{ name: 'rate', value: 0.25 }])
   })
 })
 

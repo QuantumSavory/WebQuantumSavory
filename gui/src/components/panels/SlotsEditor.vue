@@ -75,26 +75,16 @@
         </div>
         <div v-if="expandedSlotIds.has(slot.id)" class="slot-row-expanded">
           <b>Parameters</b>
-          <div class="bg-noise-param-rows">
-            <div
-              v-for="parameter in slot.backgroundNoise.parameters"
-              :key="parameter.field"
-              class="bg-noise-param-row"
-            >
-              <div
-                v-tooltip.top="backgroundParameterDoc(slot, parameter)"
-              >
-                {{ parameter.field }}
-              </div>
-              <input
-                type="number"
-                :aria-label="`${parameter.field} for slot ${slot.id}`"
-                :value="parameter.value"
-                :disabled="disabled"
-                @change="updateSlotNoiseParameter(slot, parameter, $event)"
-              >
-            </div>
-          </div>
+          <BackgroundNoiseConstructorForm
+            :key="`${slot.id}:${backgroundDraft(slot).type}`"
+            :background-noise="backgroundDraft(slot)"
+            :variables="variables"
+            :disabled="disabled"
+            :numeric-expression-context="resolvedNumericExpressionContext"
+            :template="template"
+            empty-text="This background has no configurable parameters."
+            @commit="commitSlotBackground(slot)"
+          />
         </div>
       </div>
     </div>
@@ -111,11 +101,13 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ChevronDown, ChevronUp, Plus } from '@lucide/vue'
 import SlotIcon from '../map/SlotIcon.vue'
 import { api } from '../../utils/ApiConnector'
 import { deepClone } from '../../utils/protocolConstructors'
+import { buildNumericExpressionContext } from '../../utils/numericExpressionContext.js'
+import BackgroundNoiseConstructorForm from './BackgroundNoiseConstructorForm.vue'
 import SlotEditor from './SlotEditor.vue'
 
 const props = defineProps({
@@ -126,6 +118,22 @@ const props = defineProps({
   node: {
     type: Object,
     default: null,
+  },
+  projectData: {
+    type: Object,
+    default: null,
+  },
+  variables: {
+    type: Array,
+    default: () => [],
+  },
+  numericExpressionContext: {
+    type: Object,
+    default: undefined,
+  },
+  template: {
+    type: Boolean,
+    default: false,
   },
   disabled: {
     type: Boolean,
@@ -154,10 +162,19 @@ const emit = defineEmits([
 ])
 
 const expandedSlotIds = ref(new Set())
+const backgroundDrafts = reactive(new Map())
 const backgroundNoiseOptions = computed(() => (
   api.config.value.bgNoiseOptions?.length
     ? api.config.value.bgNoiseOptions
     : [api.getDefaultBgNoise()]
+))
+const resolvedNumericExpressionContext = computed(() => (
+  props.numericExpressionContext
+    ?? (
+      props.template
+        ? undefined
+        : buildNumericExpressionContext(props.projectData, 'node', props.node)
+    )
 ))
 const slotTypes = computed(() => {
   const configured = (api.config.value.slotTypes || [])
@@ -201,48 +218,52 @@ function updateSlotBackground(slot, event) {
   const backgroundNoise = deepClone(definition)
   backgroundNoise.parameters = (definition.parameters || []).map(parameter => ({
     ...deepClone(parameter),
+    selectedType: 'default',
     value: null,
   }))
+  backgroundDrafts.set(slot.id, deepClone(backgroundNoise))
   emit('update-slot', {
     slot,
     value: { backgroundNoise },
   })
 }
 
-function updateSlotNoiseParameter(slot, parameter, event) {
-  const value = Number(event.target.value)
-  if (!Number.isFinite(value)) {
-    event.target.value = parameter.value ?? ''
-    return
+function backgroundDraft(slot) {
+  if (!backgroundDrafts.has(slot.id)) {
+    backgroundDrafts.set(slot.id, deepClone(slot.backgroundNoise))
   }
+  return backgroundDrafts.get(slot.id)
+}
+
+watch(
+  () => props.slots.map(slot => slot.backgroundNoise),
+  (backgrounds) => {
+    backgrounds.forEach((backgroundNoise, index) => {
+      const slot = props.slots[index]
+      if (slot && expandedSlotIds.value.has(slot.id)) {
+        backgroundDrafts.set(slot.id, deepClone(backgroundNoise))
+      }
+    })
+  },
+  { deep: true },
+)
+
+function commitSlotBackground(slot) {
   emit('update-slot', {
     slot,
     value: {
-      backgroundNoise: {
-        ...slot.backgroundNoise,
-        parameters: slot.backgroundNoise.parameters.map(candidate => (
-          candidate.field === parameter.field
-            ? { ...candidate, value }
-            : { ...candidate }
-        )),
-      },
+      backgroundNoise: deepClone(backgroundDraft(slot)),
     },
   })
-}
-
-function backgroundParameterDoc(slot, parameter) {
-  const definition = backgroundNoiseOptions.value.find(
-    option => option.type === slot.backgroundNoise.type,
-  )
-  return definition?.parameters?.find(
-    candidate => candidate.field === parameter.field,
-  )?.doc || parameter.doc || 'NO DOC'
 }
 
 function toggleSlotExpanded(slot) {
   const expanded = new Set(expandedSlotIds.value)
   if (expanded.has(slot.id)) expanded.delete(slot.id)
-  else expanded.add(slot.id)
+  else {
+    backgroundDrafts.set(slot.id, deepClone(slot.backgroundNoise))
+    expanded.add(slot.id)
+  }
   expandedSlotIds.value = expanded
 }
 </script>
@@ -333,27 +354,6 @@ function toggleSlotExpanded(slot) {
 }
 
 .slot-row-expanded {
-  padding: 10px;
-}
-
-.bg-noise-param-rows {
-  display: flex;
-  flex-direction: column;
-}
-
-.bg-noise-param-row {
-  display: flex;
-  flex: 1;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding: 3px;
-}
-
-.bg-noise-param-row input {
-  width: 70px;
-  margin-left: 5px;
-  padding: 0 5px;
-  text-align: right;
+  padding: var(--app-space-4);
 }
 </style>

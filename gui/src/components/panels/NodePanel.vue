@@ -51,6 +51,8 @@
         <SlotsEditor
           :slots="props.node.data.slots"
           :node="props.node"
+          :project-data="props.projectData"
+          :variables="props.variables"
           :disabled="editingLocked"
           :selection-enabled="batchEditMode"
           :selected-slot-ids="selectedSlots"
@@ -99,6 +101,17 @@
                 </select>
               </div>
             </div>
+            <div
+              v-if="slotTemplate.backgroundNoise.parameters?.length"
+              class="slot-template-parameters"
+            >
+              <BackgroundNoiseConstructorForm
+                :background-noise="slotTemplate.backgroundNoise"
+                :variables="variables"
+                :numeric-expression-context="numericExpressionContext"
+                empty-text=""
+              />
+            </div>
           </div>
           
           <div class="form-buttons">
@@ -141,6 +154,18 @@
                   <option v-for="opt in bgNoiseOptions" :key="opt.type" :value="opt.type">{{ opt.type == 'default' ? 'No background noise' : opt.type }}</option>
                 </select>
               </div>
+            </div>
+            <div
+              v-if="batchEditTemplate.backgroundNoise.parameters?.length"
+              class="slot-template-parameters"
+            >
+              <BackgroundNoiseConstructorForm
+                :background-noise="batchEditTemplate.backgroundNoise"
+                :variables="variables"
+                :numeric-expression-context="numericExpressionContext"
+                empty-text=""
+                @commit="changedProperties.add('backgroundNoise')"
+              />
             </div>
           </div>
           
@@ -191,6 +216,7 @@ import BasePanel from './BasePanel.vue'
 import FloatingProtocol from '../../models/FloatingProtocol'
 import ProtocolsManager from './ProtocolsManager.vue'
 import SlotsEditor from './SlotsEditor.vue'
+import BackgroundNoiseConstructorForm from './BackgroundNoiseConstructorForm.vue'
 import Menu from 'primevue/menu'
 import NodeIndex from './NodeIndex.vue'
 import {
@@ -247,7 +273,11 @@ const emit = defineEmits([
 ])
 const { showAlert } = useUiServices()
 
-const bgNoiseOptions = api.config.value.bgNoiseOptions;
+const bgNoiseOptions = computed(() => (
+  api.config.value.bgNoiseOptions?.length
+    ? api.config.value.bgNoiseOptions
+    : [api.getDefaultBgNoise()]
+))
 
 // Helper: get icon for the add-many and batch-edit slot templates.
 function typeIcon(type) {
@@ -424,10 +454,9 @@ function executeAddNSlots() {
   showAddNSlotsForm.value = false
 }
 
-function updateSlotTemplate(key, value) {
-  /* slotTemplate.value[key] = value */
+function updateSlotTemplate(key, value, event) {
   const bgType = event.target.value;
-  const bgTypeDefinition = bgNoiseOptions.find(opt => opt.type === bgType);
+  const bgTypeDefinition = bgNoiseOptions.value.find(opt => opt.type === bgType);
   slotTemplate.value.backgroundNoise = {
     type: bgTypeDefinition.type,
     doc: bgTypeDefinition.doc,
@@ -435,6 +464,7 @@ function updateSlotTemplate(key, value) {
       field: param.field,
       type: param.type,
       doc: param.doc, 
+      selectedType: 'default',
       value: null,
     }))
   }
@@ -488,7 +518,7 @@ function resetBatchEditTemplate() {
 
 function updateBatchEditTemplate(key, value, event) {
   const bgType = event.target.value;
-  const bgTypeDefinition = bgNoiseOptions.find(opt => opt.type === bgType);
+  const bgTypeDefinition = bgNoiseOptions.value.find(opt => opt.type === bgType);
   batchEditTemplate.value.backgroundNoise = {
     type: bgTypeDefinition.type,
     doc: bgTypeDefinition.doc,
@@ -496,6 +526,7 @@ function updateBatchEditTemplate(key, value, event) {
       field: param.field,
       type: param.type,
       doc: param.doc, 
+      selectedType: 'default',
       value: null,
     }))
   }
@@ -534,7 +565,7 @@ function executeBatchEdit() {
       kind: 'slots.update',
       node_id: props.node.id,
       slot_id: slot.id,
-      value
+      value: structuredClone(value)
     }))
   )
   
@@ -760,6 +791,11 @@ if (props.justCreated) {
   align-items: center;
   height: 32px;
   font-size: 0.9rem;
+}
+
+.slot-template-parameters {
+  padding: var(--app-space-3);
+  border-top: 1px solid var(--app-color-border);
 }
 
 .form-header {
