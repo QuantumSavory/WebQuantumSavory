@@ -13,10 +13,12 @@ and evaluator and performs no lowering or macro expansion.
 # Dangerous syntactic forms. `:.` blocks both `object.field` property access and
 # module qualification (`Core.eval`, `Base.run`), as well as broadcasting; the
 # remaining heads block macros/`@eval`/command literals, interpolation, quoting,
-# and namespace manipulation.
+# and namespace manipulation. `:parameters` blocks named-property destructuring
+# (`(; field) = obj`, which lowers to `getproperty`) and `;`-separated keyword
+# arguments, neither of which the allowlisted surface needs.
 const _RESTRICTED_FORBIDDEN_HEADS = Set{Symbol}((
     :macrocall, :., :$, :quote, :module, :baremodule,
-    :using, :import, :export, :global, :ccall,
+    :using, :import, :export, :global, :ccall, :parameters,
 ))
 
 # Named operations that are always safe to permit (the module the source runs in
@@ -36,12 +38,11 @@ const _RESTRICTED_SAFE_VALUE_NAMES = Set{Symbol}((
     :π, :pi, :Inf, :NaN, :nothing,
 ))
 
-# Lexical bindings the evaluation pipeline injects for placement context.
+# Lexical bindings the evaluation pipeline injects for placement context, reused
+# from the authoritative descriptor-derived catalog in types.jl so a future
+# context binding cannot be injected at runtime yet rejected by the guard.
 # (`distance` is the edge-length binding; the `length` function is not shadowed.)
-const _RESTRICTED_CONTEXT_NAMES = Set{Symbol}((
-    :nodeid, :self, :distance, :delay, :refractive_index,
-    :loss, :transmissivity, :node_a, :node_b,
-))
+const _RESTRICTED_CONTEXT_NAMES = _ALL_NUMERIC_CONTEXT_BINDINGS
 
 # Symbolic operator *functions* users apply. They are neither type constructors
 # nor instances, so the QuantumSymbolics type-derived set below does not capture

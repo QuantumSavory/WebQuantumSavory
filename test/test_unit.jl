@@ -1446,6 +1446,8 @@
         "getfield(Core, :eval)",
         "getproperty(x, :im)",
         "x -> x.im",
+        # Named-property destructuring lowers to `getproperty`; reject it too.
+        "obj -> begin\n  f = nothing\n  (; f) = obj\n  f()\nend",
         "x -> open(\"/tmp/x\", \"w\")",
         "candidates -> Base.length(candidates) > 0",
       )
