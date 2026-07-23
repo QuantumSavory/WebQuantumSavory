@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Made physical-link rendering, automatic distance and delay, and badge
+  placement share one geodesically densified route, including short-path
+  antimeridian rendering. Curve mode now controls handle editing only and
+  never changes a stored route's geometry.
 - Added a default-deny allowlist guard that walks parsed Custom Function,
   numeric-expression, and Symbolic source and rejects any non-allowlisted
   identifier or dangerous syntactic form (module qualification and property

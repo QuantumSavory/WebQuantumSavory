@@ -6,7 +6,11 @@ import {
   projectMapPosition,
   unprojectMapPosition,
 } from './layoutTemplates'
-import { isMapPosition } from './mapCoordinates'
+import {
+  MAX_WEB_MERCATOR_LATITUDE,
+  MIN_WEB_MERCATOR_LATITUDE,
+  isMapPosition,
+} from './mapCoordinates'
 import { resolvePhysicalParameters } from './physicalParameters'
 
 export {
@@ -20,6 +24,7 @@ export const INVALID_EDGE_GEOMETRY_REASON = 'INVALID_EDGE_GEOMETRY'
 
 const MIN_CURVE_SAMPLES = 8
 const MAX_CURVE_SAMPLES = 4096
+const MAX_GEODESIC_LEG_KILOMETERS = 100
 const MIN_PROJECTED_X = 0
 const MAX_PROJECTED_X = 1
 const MIN_PROJECTED_Y = -1
@@ -145,6 +150,109 @@ function lineFeature(coordinates) {
   }
 }
 
+function routeDistanceKilometers(line) {
+  return length(line, { units: 'kilometers' })
+}
+
+function routePointAlong(line, distanceKilometers) {
+  return along(line, distanceKilometers, { units: 'kilometers' })
+    .geometry.coordinates
+}
+
+function densifyPhysicalRoute(coordinates) {
+  const densified = [[...coordinates[0]]]
+  for (let index = 0; index < coordinates.length - 1; index += 1) {
+    const start = coordinates[index]
+    const end = coordinates[index + 1]
+    const leg = lineFeature([start, end])
+    const distanceKilometers = routeDistanceKilometers(leg)
+    const segmentCount = Math.max(
+      1,
+      Math.ceil(distanceKilometers / MAX_GEODESIC_LEG_KILOMETERS),
+    )
+    for (let segmentIndex = 1; segmentIndex < segmentCount; segmentIndex += 1) {
+      densified.push(routePointAlong(
+        leg,
+        distanceKilometers * segmentIndex / segmentCount,
+      ))
+    }
+    densified.push([...end])
+  }
+  return densified
+}
+
+/**
+ * MapLibre represents a short antimeridian crossing with a longitude outside
+ * the canonical world. Keep that adjustment local to transient route GeoJSON.
+ */
+function unwrapRouteLongitudes(coordinates) {
+  const unwrapped = [[...coordinates[0]]]
+  coordinates.slice(1).forEach(([rawLongitude, latitude]) => {
+    const previousLongitude = unwrapped.at(-1)[0]
+    let longitude = rawLongitude
+    while (longitude - previousLongitude > 180) longitude -= 360
+    while (longitude - previousLongitude < -180) longitude += 360
+    unwrapped.push([longitude, latitude])
+  })
+  return unwrapped
+}
+
+function sameCoordinate(first, second) {
+  return Math.abs(first[0] - second[0]) <= 1e-12
+    && Math.abs(first[1] - second[1]) <= 1e-12
+}
+
+function midpointInsertionIndex(line, halfDistanceKilometers) {
+  const coordinates = line.geometry.coordinates
+  let travelled = 0
+  for (let index = 0; index < coordinates.length - 1; index += 1) {
+    travelled += routeDistanceKilometers(lineFeature([
+      coordinates[index],
+      coordinates[index + 1],
+    ]))
+    if (travelled >= halfDistanceKilometers) return index + 1
+  }
+  return coordinates.length - 1
+}
+
+/**
+ * Finish the route used by every downstream consumer. Physical routes follow
+ * a geodesic between every sampled guide point and expose the half-length
+ * point as one of their render coordinates.
+ */
+function finalizeRoute(coordinates, physical) {
+  let finalizedCoordinates = coordinates.map(position => [...position])
+  if (physical) {
+    finalizedCoordinates = unwrapRouteLongitudes(
+      densifyPhysicalRoute(finalizedCoordinates),
+    )
+  }
+
+  let line = lineFeature(finalizedCoordinates)
+  const distanceKilometers = routeDistanceKilometers(line)
+  let midpoint = routePointAlong(line, distanceKilometers / 2)
+
+  if (physical) {
+    const insertionIndex = midpointInsertionIndex(line, distanceKilometers / 2)
+    const before = finalizedCoordinates[insertionIndex - 1]
+    const after = finalizedCoordinates[insertionIndex]
+    if (sameCoordinate(midpoint, before)) {
+      midpoint = before
+    } else if (sameCoordinate(midpoint, after)) {
+      midpoint = after
+    } else {
+      finalizedCoordinates.splice(insertionIndex, 0, midpoint)
+      line = lineFeature(finalizedCoordinates)
+    }
+  }
+
+  return {
+    line,
+    distanceMeters: routeDistanceKilometers(line) * 1000,
+    midpoint,
+  }
+}
+
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value))
 }
@@ -198,18 +306,13 @@ function endpointPosition(endpoint, positionOverrides) {
 export function sampleEdgeRoute(edge, options = {}) {
   const sourcePosition = endpointPosition(edge?.source, options.positionOverrides)
   const targetPosition = endpointPosition(edge?.target, options.positionOverrides)
-  const curvePoints = edge?.isLogic === true ? [] : (edge?.data?.curvePoints ?? [])
+  const physical = edge?.isLogic !== true
+  const curvePoints = physical ? (edge?.data?.curvePoints ?? []) : []
   const { positions } = routeDefinition(sourcePosition, targetPosition, curvePoints)
 
   if (curvePoints.length === 0) {
-    const line = lineFeature(positions.map(position => [...position]))
-    const distanceMeters = length(line, { units: 'kilometers' }) * 1000
-    const midpoint = along(line, distanceMeters / 2000, { units: 'kilometers' })
-      .geometry.coordinates
     return {
-      line,
-      distanceMeters,
-      midpoint,
+      ...finalizeRoute(positions, physical),
       converged: true,
       sampleCount: 1,
     }
@@ -224,30 +327,26 @@ export function sampleEdgeRoute(edge, options = {}) {
   let current
 
   while (sampleCount <= maximumSamples) {
-    const line = lineFeature(sampleSegments(segments, sampleCount))
-    const distanceMeters = length(line, { units: 'kilometers' }) * 1000
-    current = { line, distanceMeters }
+    current = finalizeRoute(
+      sampleSegments(segments, sampleCount),
+      physical,
+    )
 
     if (previousDistance !== null
-      && threeSignificantDigitKey(previousDistance) === threeSignificantDigitKey(distanceMeters)) {
+      && threeSignificantDigitKey(previousDistance)
+        === threeSignificantDigitKey(current.distanceMeters)) {
       stableIterations += 1
       if (stableIterations >= 2) break
     } else {
       stableIterations = 0
     }
 
-    previousDistance = distanceMeters
+    previousDistance = current.distanceMeters
     sampleCount *= 2
   }
 
-  const midpoint = along(
-    current.line,
-    current.distanceMeters / 2000,
-    { units: 'kilometers' },
-  ).geometry.coordinates
   return {
     ...current,
-    midpoint,
     converged: stableIterations >= 2,
     sampleCount: Math.min(sampleCount, maximumSamples),
   }
@@ -287,11 +386,18 @@ export function assertEdgeGeometry(edge, options = {}) {
   try {
     const sampled = sampleEdgeRoute(edge, options)
     const coordinates = sampled.line?.geometry?.coordinates
+    const isRenderedPosition = position => (
+      Array.isArray(position)
+      && position.length === 2
+      && position.every(Number.isFinite)
+      && position[1] >= MIN_WEB_MERCATOR_LATITUDE
+      && position[1] <= MAX_WEB_MERCATOR_LATITUDE
+    )
     if (
       !Array.isArray(coordinates)
       || coordinates.length < 2
-      || !coordinates.every(isMapPosition)
-      || !isMapPosition(sampled.midpoint)
+      || !coordinates.every(isRenderedPosition)
+      || !isRenderedPosition(sampled.midpoint)
       || !Number.isFinite(sampled.distanceMeters)
       || sampled.distanceMeters < 0
       || sampled.converged !== true
