@@ -92,6 +92,64 @@ describe('custom-function contextual help', () => {
     ))).toBe(true)
   })
 
+  it('preserves custom-function and Symbolic compact summaries', async () => {
+    const custom = shallowMount(CodeEditorWithSymbols, {
+      props: {
+        modelValue: 'x -> x + 1',
+        evaluationEnabled: true,
+        collapsible: true,
+        collapsed: true,
+      },
+    })
+    expect(custom.get('[data-testid="code-collapsed-view"]').text()).toBe('x -> x + 1')
+    expect(custom.get('.code-rendered-value').classes()).toContain(
+      'expression-editor-source-value',
+    )
+
+    const symbolic = shallowMount(CodeEditorWithSymbols, {
+      props: {
+        modelValue: 'X₁',
+        evaluationEnabled: true,
+        showLatex: true,
+        latexExpression: 'X_1',
+        collapsible: true,
+        collapsed: true,
+      },
+    })
+    expect(symbolic.get('[data-testid="symbolic-collapsed-view"] .katex').exists())
+      .toBe(true)
+    await symbolic.get('[data-testid="symbolic-collapsed-view"]').trigger('click')
+    expect(symbolic.emitted('edit')).toHaveLength(1)
+  })
+
+  it('renders a generic numeric source/result summary without making static links editable', async () => {
+    const wrapper = shallowMount(CodeEditorWithSymbols, {
+      props: {
+        editorKind: 'numeric',
+        modelValue: 'delay / 2',
+        evaluationEnabled: true,
+        collapsible: true,
+        collapsed: true,
+        summaryEditable: false,
+        summaryResult: '2.5e-7',
+        summaryDeferredMessage: 'Evaluated when assigned.',
+        sourceLabel: 'delay_scale numeric expression source',
+      },
+    })
+
+    const summary = wrapper.get('[data-testid="numeric-expression-summary"]')
+    expect(summary.element.tagName).toBe('DIV')
+    expect(summary.get('[data-testid="numeric-expression-source"]').text()).toBe('delay / 2')
+    expect(summary.get('[data-testid="numeric-expression-result"]').text()).toBe(
+      'Result: 2.5e-7',
+    )
+    expect(summary.get('[data-testid="numeric-expression-deferred"]').text()).toBe(
+      'Evaluated when assigned.',
+    )
+    await summary.trigger('click')
+    expect(wrapper.emitted('edit')).toBeUndefined()
+  })
+
   it('explains name lookup beside the one-based node indices', () => {
     const wrapper = mount(NodeListPanel, {
       props: {

@@ -159,6 +159,55 @@ describe('ProtocolConstructorForm', () => {
     expect(wrapper.get('.param-value').text()).toContain('Wildcard')
   })
 
+  it('inherits the shared open, validate, compact, and reopen expression lifecycle', async () => {
+    vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
+    vi.spyOn(api, 'validateNumericExpression').mockResolvedValue({
+      success: true,
+      results: {
+        deferred: false,
+        target_type: 'Int64',
+        value: '2',
+      },
+    })
+    const parameter = {
+      name: 'rounds',
+      type: 'Int64',
+      selectedType: 'default',
+      value: null,
+    }
+    const context = { node_names: ['Alice'], self: 1 }
+    const wrapper = mountForm({
+      protocol: { type: PROTOCOL_TYPE, parameters: [parameter] },
+      category: 'node',
+      numericExpressionContext: context,
+    })
+
+    await wrapper.get('[aria-label="Input option for rounds"]').setValue('expression:Int64')
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="numeric-expression-source"]').setValue('self + 1')
+    await wrapper.get('[aria-label="Validate rounds expression"]').trigger('click')
+    await flushPromises()
+
+    expect(api.validateNumericExpression).toHaveBeenCalledWith(
+      'self + 1',
+      'Int64',
+      'node',
+      expect.objectContaining({ context }),
+    )
+    expect(parameter.value).toEqual({
+      kind: 'numeric_expression',
+      source: 'self + 1',
+    })
+    expect(wrapper.get('[data-testid="numeric-expression-summary"]').text())
+      .toContain('Result: 2')
+    expect(wrapper.emitted('commit')).toHaveLength(1)
+
+    await wrapper.get('[data-testid="numeric-expression-summary"]').trigger('click')
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="numeric-expression-source"]').element.value)
+      .toBe('self + 1')
+  })
+
   it('links only compatible variables and restores the direct value when unlinked', async () => {
     const parameter = { name: 'rounds', type: 'Int64', value: 7 }
     const compatibleVariable = { id: 'variable-rounds', name: 'rounds', type: 'Int64' }

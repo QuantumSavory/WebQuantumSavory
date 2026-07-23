@@ -1,49 +1,99 @@
 <template>
-  <div class="code-editor-with-symbols">
-    <button
+  <div
+    class="code-editor-with-symbols expression-editor"
+    :class="`expression-editor-${effectiveEditorKind}`"
+  >
+    <component
+      :is="summaryEditable ? 'button' : 'div'"
       v-if="collapsible && collapsed"
-      type="button"
-      class="code-collapsed-view"
-      :class="{
-        'symbolic-compact-value': showLatex && !latexExpression,
-        'lambda-collapsed-value': !showLatex
-      }"
-      :data-testid="showLatex ? 'symbolic-collapsed-view' : 'code-collapsed-view'"
+      class="code-collapsed-view expression-editor-summary"
+      :class="{ 'expression-editor-summary-static': !summaryEditable }"
+      :type="summaryEditable ? 'button' : undefined"
+      :role="summaryEditable ? undefined : 'group'"
+      :data-testid="summaryTestId"
       :aria-label="collapsedAriaLabel"
-      @click="emit('edit')"
+      @click="summaryEditable && emit('edit')"
     >
+      <template v-if="effectiveEditorKind === 'numeric'">
+        <span class="expression-editor-summary-section expression-editor-summary-source">
+          <span class="visually-hidden">Source:</span>
+          <code
+            class="expression-editor-source-value"
+            data-testid="numeric-expression-source"
+          >{{ modelValue }}</code>
+        </span>
+        <span
+          v-if="summaryResult != null"
+          class="expression-editor-summary-section expression-editor-summary-result"
+          data-testid="numeric-expression-result"
+          role="status"
+          :aria-label="summaryResultAriaLabel"
+        >
+          <span class="expression-editor-summary-label">{{ summaryResultLabel }}:</span>
+          {{ summaryResult }}
+        </span>
+        <span
+          v-if="summaryDeferredMessage && !hasError"
+          class="expression-editor-summary-status"
+          data-testid="numeric-expression-deferred"
+          role="status"
+        >
+          {{ summaryDeferredMessage }}
+        </span>
+        <span
+          v-if="validationPending"
+          class="expression-editor-summary-status"
+          data-testid="numeric-expression-pending"
+          role="status"
+        >
+          Validating…
+        </span>
+        <span
+          v-if="hasError"
+          class="expression-editor-summary-error"
+          data-testid="numeric-expression-error"
+          role="alert"
+        >
+          {{ errorMessage }}
+        </span>
+      </template>
+
       <span
-        v-if="showLatex && latexExpression"
-        class="latex-wrap"
+        v-else-if="showLatex && latexExpression"
+        class="latex-wrap expression-editor-summary-rendered"
         v-html="renderedLatex"
       />
       <span
         v-else
+        class="expression-editor-source-value"
         :class="{
+          'code-rendered-value': effectiveEditorKind === 'function',
           'editor-placeholder': !modelValue,
-          'code-rendered-value': !showLatex
         }"
       >
         {{ modelValue || 'default' }}
       </span>
-    </button>
+    </component>
 
     <template v-else>
-      <CustomFunctionContextHelp v-if="!showLatex && showContextHelp" />
+      <CustomFunctionContextHelp
+        v-if="shouldShowContextHelp"
+        :label="contextHelpLabel"
+        :subject="contextHelpSubject"
+      />
 
       <div
         v-if="!evaluationEnabled"
-        class="evaluation-disabled-notice"
+        class="evaluation-disabled-notice expression-editor-disabled-notice"
         role="status"
-        data-testid="evaluation-disabled-notice"
+        :data-testid="disabledNoticeTestId"
       >
-        Server-side Julia evaluation is disabled. Raw lambda and symbolic
-        validation are unavailable; choose a listed function when supported.
+        {{ evaluationDisabledMessage }}
       </div>
 
       <div
         v-if="hasError"
-        class="function-error-badge"
+        class="function-error-badge expression-editor-error"
         role="alert"
         v-tooltip.top="{
           value: errorMessage,
@@ -52,40 +102,49 @@
         }"
       >
         <TriangleAlert :size="14" aria-hidden="true" />
-        Validation failed
+        <span>{{ errorLabel }}</span>
+        <span
+          v-if="showErrorMessage"
+          class="expression-editor-error-message"
+          :data-testid="errorTestId"
+        >
+          {{ errorMessage }}
+        </span>
       </div>
 
       <div
         v-if="showLatex && latexExpression && !collapsible"
-        class="latex-wrap-container"
+        class="latex-wrap-container expression-editor-rendered"
       >
         <div class="latex-wrap" v-html="renderedLatex" />
       </div>
 
-      <HighCode
-        ref="codeEditorRef"
-        :codeValue="modelValue"
-        @getCodeValue="handleValueChange"
-        :textEditor="true"
-        lang="julia"
-        width="100%"
-        height="150px"
-        theme="light"
-        fontSize="12px"
-        :copy="false"
-        borderRadius="4px"
-        :readOnly="interactionDisabled"
-        :class="{
-          'function-container': true,
-          'function-syntax-error': hasError,
-          'noInteraction': interactionDisabled
-        }"
-        @click="captureCursorPosition"
-        @mousedown="captureCursorPosition"
-        @keyup="captureCursorPosition"
-      />
-      
-      <div class="buttons-row">
+      <div ref="editorContainerRef" class="expression-editor-source">
+        <HighCode
+          ref="codeEditorRef"
+          :codeValue="modelValue"
+          @getCodeValue="handleValueChange"
+          :textEditor="true"
+          lang="julia"
+          width="100%"
+          :height="editorHeight"
+          theme="light"
+          fontSize="12px"
+          :copy="false"
+          borderRadius="4px"
+          :readOnly="interactionDisabled"
+          :class="{
+            'function-container': true,
+            'function-syntax-error': hasError,
+            'noInteraction': interactionDisabled
+          }"
+          @click="captureCursorPosition"
+          @mousedown="captureCursorPosition"
+          @keyup="captureCursorPosition"
+        />
+      </div>
+
+      <div class="buttons-row expression-editor-actions">
         <div class="symbol-buttons-container">
           <button
             v-for="symbol in unicodeSymbols"
@@ -104,23 +163,46 @@
         <button
           type="button"
           @click="handleValidate"
-          :disabled="interactionDisabled"
-          :title="evaluationEnabled ? 'Validate' : 'Server-side Julia evaluation is disabled'"
-          class="validate-button"
-        >Validate</button>
+          :disabled="interactionDisabled || validationPending || (
+            disableValidationWhenEmpty && !modelValue.trim()
+          )"
+          :title="evaluationEnabled ? validateTitle : 'Server-side Julia evaluation is disabled'"
+          :aria-label="validateAriaLabel"
+          class="validate-button expression-editor-validate"
+        >
+          {{ validationPending ? 'Validating…' : validateLabel }}
+        </button>
       </div>
+
+      <p
+        v-if="summaryResult != null"
+        class="expression-editor-open-result"
+        data-testid="numeric-expression-result"
+        role="status"
+        :aria-label="summaryResultAriaLabel"
+      >
+        <span class="expression-editor-summary-label">{{ summaryResultLabel }}:</span>
+        {{ summaryResult }}
+      </p>
+      <p
+        v-if="summaryDeferredMessage && !hasError"
+        class="expression-editor-open-status"
+        data-testid="numeric-expression-deferred"
+        role="status"
+      >
+        {{ summaryDeferredMessage }}
+      </p>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import katex from 'katex'
-import { HighCode } from 'vue-highlight-code';
-import 'vue-highlight-code/dist/style.css';
-import { api } from '../../utils/ApiConnector'
-import { SAFE_KATEX_OPTIONS } from '../../utils/katexOptions'
+import { HighCode } from 'vue-highlight-code'
+import 'vue-highlight-code/dist/style.css'
 import { TriangleAlert } from '@lucide/vue'
+import { SAFE_KATEX_OPTIONS } from '../../utils/katexOptions'
 import CustomFunctionContextHelp from './CustomFunctionContextHelp.vue'
 
 const props = defineProps({
@@ -140,6 +222,18 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  errorLabel: {
+    type: String,
+    default: 'Validation failed'
+  },
+  errorTestId: {
+    type: String,
+    default: undefined
+  },
+  showErrorMessage: {
+    type: Boolean,
+    default: false
+  },
   showLatex: {
     type: Boolean,
     default: false
@@ -152,9 +246,21 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  editorKind: {
+    type: String,
+    default: ''
+  },
   showContextHelp: {
     type: Boolean,
-    default: true
+    default: undefined
+  },
+  contextHelpLabel: {
+    type: String,
+    default: 'Custom Function context'
+  },
+  contextHelpSubject: {
+    type: String,
+    default: 'custom functions'
   },
   collapsible: {
     type: Boolean,
@@ -163,26 +269,102 @@ const props = defineProps({
   collapsed: {
     type: Boolean,
     default: false
+  },
+  summaryEditable: {
+    type: Boolean,
+    default: true
+  },
+  summaryResult: {
+    type: String,
+    default: null
+  },
+  summaryResultLabel: {
+    type: String,
+    default: 'Result'
+  },
+  summaryResultAriaLabel: {
+    type: String,
+    default: undefined
+  },
+  summaryDeferredMessage: {
+    type: String,
+    default: ''
+  },
+  sourceTestId: {
+    type: String,
+    default: undefined
+  },
+  sourceLabel: {
+    type: String,
+    default: undefined
+  },
+  ariaDescribedby: {
+    type: String,
+    default: undefined
+  },
+  sourcePlaceholder: {
+    type: String,
+    default: ''
+  },
+  editorHeight: {
+    type: String,
+    default: '150px'
+  },
+  validationPending: {
+    type: Boolean,
+    default: false
+  },
+  disableValidationWhenEmpty: {
+    type: Boolean,
+    default: false
+  },
+  validateLabel: {
+    type: String,
+    default: 'Validate'
+  },
+  validateAriaLabel: {
+    type: String,
+    default: undefined
+  },
+  validateTitle: {
+    type: String,
+    default: 'Validate'
+  },
+  evaluationDisabledMessage: {
+    type: String,
+    default: 'Server-side Julia evaluation is disabled. Raw lambda and symbolic validation are unavailable; choose a listed function when supported.'
+  },
+  disabledNoticeTestId: {
+    type: String,
+    default: 'evaluation-disabled-notice'
   }
 })
 
 const emit = defineEmits(['update:modelValue', 'validate', 'edit'])
 
 const codeEditorRef = ref(null)
+const editorContainerRef = ref(null)
 const cursorPosition = ref(0)
+const unicodeSymbols = ['₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉', '₀', '⊗', '√']
 
-const unicodeSymbols = ref(['₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉', '₀', '⊗','√'])
-
-function isSubscriptChar(symbol) {
-  // Check if the character is a subscript (Unicode range for subscript digits and letters)
-  const code = symbol.charCodeAt(0)
-  // Unicode ranges for subscripts: ₀-₉ (U+2080-U+2089), ₐ-ᵢ (U+2090-U+209C)
-  return (code >= 0x2080 && code <= 0x2089) || (code >= 0x2090 && code <= 0x209C)
-}
-
+const effectiveEditorKind = computed(() => {
+  if (props.editorKind) return props.editorKind
+  return props.showLatex ? 'symbolic' : 'function'
+})
 const hasError = computed(() => !!props.errorMessage)
 const interactionDisabled = computed(() => props.readOnly || !props.evaluationEnabled)
+const shouldShowContextHelp = computed(() => (
+  props.showContextHelp ?? effectiveEditorKind.value !== 'symbolic'
+))
+const summaryTestId = computed(() => {
+  if (effectiveEditorKind.value === 'numeric') return 'numeric-expression-summary'
+  return props.showLatex ? 'symbolic-collapsed-view' : 'code-collapsed-view'
+})
 const collapsedAriaLabel = computed(() => {
+  const action = props.summaryEditable ? 'Edit' : 'View'
+  if (effectiveEditorKind.value === 'numeric') {
+    return `${action} ${props.sourceLabel || 'numeric expression'}`
+  }
   if (!props.showLatex) {
     return props.modelValue ? 'Edit custom function' : 'Enter custom function'
   }
@@ -202,70 +384,76 @@ const renderedLatex = computed(() => {
   }
 })
 
+function isSubscriptChar(symbol) {
+  const code = symbol.charCodeAt(0)
+  return (code >= 0x2080 && code <= 0x2089) || (code >= 0x2090 && code <= 0x209C)
+}
+
+function editorTextarea() {
+  return editorContainerRef.value?.querySelector('textarea') || null
+}
+
+function syncEditorAttributes() {
+  const textarea = editorTextarea()
+  if (!textarea) return
+
+  if (props.sourceTestId) textarea.dataset.testid = props.sourceTestId
+  else delete textarea.dataset.testid
+  if (props.sourceLabel) textarea.setAttribute('aria-label', props.sourceLabel)
+  else textarea.removeAttribute('aria-label')
+  if (props.ariaDescribedby) {
+    textarea.setAttribute('aria-describedby', props.ariaDescribedby)
+  } else {
+    textarea.removeAttribute('aria-describedby')
+  }
+  textarea.setAttribute('aria-invalid', String(hasError.value))
+  if (interactionDisabled.value) textarea.setAttribute('readonly', '')
+  else textarea.removeAttribute('readonly')
+  if (props.sourcePlaceholder) textarea.setAttribute('placeholder', props.sourcePlaceholder)
+  else textarea.removeAttribute('placeholder')
+}
+
+function syncEditorValue(value) {
+  const editor = codeEditorRef.value
+  if (editor && editor.modelValue !== value) editor.modelValue = value
+}
+
 function handleValueChange(value) {
   emit('update:modelValue', value)
 }
 
 function captureCursorPosition() {
-  // Try to capture cursor position from the editor
-  // This is a simplified approach - we'll track it on click/focus
   try {
-    const editorElement = codeEditorRef.value?.$el
-    if (editorElement) {
-      const textarea = editorElement.querySelector('textarea') || editorElement
-      if (textarea && typeof textarea.selectionStart === 'number') {
-        cursorPosition.value = textarea.selectionStart
-      }
+    const textarea = editorTextarea()
+    if (textarea && typeof textarea.selectionStart === 'number') {
+      cursorPosition.value = textarea.selectionStart
     }
-  } catch (e) {
-    console.warn('Could not capture cursor position:', e)
+  } catch (error) {
+    console.warn('Could not capture cursor position:', error)
   }
 }
 
 async function handleSymbolClick(event, symbol) {
   event.preventDefault()
-  
-  // Capture current cursor position
   captureCursorPosition()
-  
-  // Small delay to ensure cursor position is captured
   await nextTick()
-  
+
   const currentValue = props.modelValue || ''
   const cursorPos = cursorPosition.value
-  
-  // Insert symbol at cursor position
   const newValue = currentValue.slice(0, cursorPos) + symbol + currentValue.slice(cursorPos)
-  
-  // Emit the update to parent
   emit('update:modelValue', newValue)
-  
-  // Also update the textarea directly to ensure it reflects the change immediately
+
   nextTick(() => {
     try {
-      const editorElement = codeEditorRef.value?.$el
-      if (editorElement) {
-        const textarea = editorElement.querySelector('textarea')
-        if (textarea) {
-          // Set the new value directly on the textarea
-          textarea.value = newValue
-          
-          // Set cursor position after the inserted symbol
-          const newCursorPos = cursorPos + symbol.length
-          textarea.setSelectionRange(newCursorPos, newCursorPos)
-          
-          // Trigger the input event to notify HighCode of the change
-          const inputEvent = new Event('input', { bubbles: true })
-          textarea.dispatchEvent(inputEvent)
-          
-          // Also manually call handleValueChange to ensure the parent is updated
-          handleValueChange(newValue)
-          
-          textarea.focus()
-        }
-      }
-    } catch (e) {
-      console.warn('Could not update textarea:', e)
+      const textarea = editorTextarea()
+      if (!textarea) return
+      textarea.value = newValue
+      const newCursorPos = cursorPos + symbol.length
+      textarea.setSelectionRange(newCursorPos, newCursorPos)
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+      textarea.focus()
+    } catch (error) {
+      console.warn('Could not update textarea:', error)
     }
   })
 }
@@ -274,117 +462,168 @@ function handleValidate() {
   emit('validate')
 }
 
+watch(
+  () => props.modelValue,
+  value => nextTick(() => syncEditorValue(value)),
+)
+watch(
+  () => [
+    props.sourceTestId,
+    props.sourceLabel,
+    props.ariaDescribedby,
+    props.sourcePlaceholder,
+    props.errorMessage,
+    props.readOnly,
+    props.evaluationEnabled,
+    props.collapsed,
+  ],
+  () => nextTick(syncEditorAttributes),
+)
+
 onMounted(() => {
-  // Add event listeners to track cursor position on the textarea
-  // These will be added after the next tick to ensure the ref is ready
-  nextTick(() => {
-    if (codeEditorRef.value?.$el) {
-      const editorElement = codeEditorRef.value.$el
-      const textarea = editorElement.querySelector('textarea')
-      
-      if (textarea) {
-        textarea.addEventListener('keyup', captureCursorPosition)
-        textarea.addEventListener('click', captureCursorPosition)
-        textarea.addEventListener('focus', captureCursorPosition)
-      }
-    }
-  })
+  syncEditorAttributes()
+  nextTick(syncEditorAttributes)
+  const textarea = editorTextarea()
+  textarea?.addEventListener('keyup', captureCursorPosition)
+  textarea?.addEventListener('click', captureCursorPosition)
+  textarea?.addEventListener('focus', captureCursorPosition)
+})
+
+onBeforeUnmount(() => {
+  const textarea = editorTextarea()
+  textarea?.removeEventListener('keyup', captureCursorPosition)
+  textarea?.removeEventListener('click', captureCursorPosition)
+  textarea?.removeEventListener('focus', captureCursorPosition)
 })
 </script>
 
 <style scoped>
-.code-editor-with-symbols {
-  width: 100%;
-}
-
-.code-collapsed-view {
-  display: block;
+.expression-editor {
   width: 100%;
   min-width: 0;
-  padding: 0;
-  border: 1px solid transparent;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: inherit;
-}
-
-.code-collapsed-view:hover {
-  border-color: #c7c7df;
-  background: #f8f8fd;
-}
-
-.symbolic-compact-value {
-  width: 60%;
-  min-height: 22px;
-  margin-left: auto;
-  padding: 1px 10px;
-  border-color: #ccc;
-  border-radius: 2px;
-  background: #fff;
-  text-align: right;
-}
-
-.lambda-collapsed-value {
-  height: auto;
-  min-height: 32px;
-  padding: 7px 10px;
-  border-color: var(--app-color-border);
-  background: var(--app-color-surface-subtle);
   text-align: left;
 }
 
-.code-rendered-value {
+.expression-editor-summary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 32px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--app-space-1);
+  padding: var(--app-space-2) var(--app-space-3);
+  border: 1px solid var(--app-color-border);
+  border-radius: var(--app-radius-control);
+  background: var(--app-color-surface-subtle);
+  color: var(--app-color-text);
+  text-align: left;
+}
+
+button.expression-editor-summary:hover {
+  border-color: var(--app-color-focus);
+  background: var(--app-color-primary-soft);
+  color: var(--app-color-text);
+}
+
+.expression-editor-summary-static {
+  cursor: default;
+}
+
+.expression-editor-summary-section {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--app-space-2);
+}
+
+.expression-editor-summary-source {
+  padding-bottom: var(--app-space-1);
+  border-bottom: 1px solid var(--app-color-border);
+}
+
+.expression-editor-source-value {
   display: block;
   width: 100%;
+  min-width: 0;
   overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--app-color-text);
+  font-family: var(--app-font-monospace);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
+.expression-editor-summary-result {
+  justify-content: flex-end;
+  font-size: 0.82rem;
+  text-align: right;
+}
+
+.expression-editor-summary-label {
+  color: var(--app-color-text-muted);
+  font-weight: 600;
+}
+
+.expression-editor-summary-status,
+.expression-editor-open-status {
+  color: var(--app-color-text-muted);
+  font-size: 0.78rem;
+}
+
+.expression-editor-summary-error {
+  color: var(--app-color-danger);
+  font-size: 0.78rem;
+}
+
 .editor-placeholder {
-  color: #999;
+  color: var(--app-color-text-muted);
 }
 
 .evaluation-disabled-notice {
-  margin-bottom: 0.5rem;
-  color: #8a4b08;
+  margin-bottom: var(--app-space-2);
+  color: var(--app-color-warning);
   font-size: 0.8rem;
 }
 
-.function-error-badge {
-  color: #f00;
+.expression-editor-error {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: var(--app-space-1);
+  padding: 0 0 var(--app-space-1);
+  color: var(--app-color-danger);
   font-size: 0.8rem;
   font-weight: 600;
-  display: flex;
-  flex-direction: row;
-  width: max-content;
-  justify-content: flex-end;
-  padding: 0px 0px 2px 10px;
+}
+
+.expression-editor-error-message {
+  min-width: 0;
+  font-weight: 400;
+  overflow-wrap: anywhere;
 }
 
 .function-syntax-error {
-  border: solid 1px #f00;
+  border: solid 1px var(--app-color-danger);
 }
 
 .noInteraction {
-  pointer-events: none;
-  opacity: 0.6;
   cursor: not-allowed;
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .latex-wrap-container {
-  padding: 0px 0px; 
-  margin: 5px 0px;
+  margin: var(--app-space-1) 0;
 }
 
 .latex-wrap {
+  width: 100%;
+  overflow: auto;
   white-space: normal;
   overflow-wrap: break-word;
   word-break: break-word;
-  overflow: auto;
-  width: 100%;
 }
 
 .latex-wrap :deep(.katex) {
@@ -392,41 +631,44 @@ onMounted(() => {
 }
 
 :deep(.katex-display) {
-  margin: 1px 0px;
+  margin: 1px 0;
+}
+
+.expression-editor-source {
+  width: 100%;
+  min-width: 0;
 }
 
 .buttons-row {
   display: flex;
-  align-items: top;
-  gap: 2px;
-  margin: 5px 0px;
+  align-items: flex-start;
+  gap: var(--app-space-1);
+  margin: var(--app-space-1) 0;
 }
 
 .symbol-buttons-container {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  /* padding: 2px; */
-  border-radius: 3px;
-  /* background: #f8f8f8; */
+  border-radius: var(--app-radius-control);
 }
 
 .symbol-button {
-  background: #ebebf9;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  padding: 1px 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  display: flex;
   width: 15px;
   height: 16px;
-  display: flex;
   align-items: center;
   justify-content: center;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-control);
+  background: var(--app-color-primary-soft);
+  color: var(--app-color-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1;
+  transition: all 0.15s ease;
 }
 
 .symbol-content {
@@ -439,8 +681,9 @@ onMounted(() => {
 }
 
 .symbol-button:hover:not(:disabled) {
-  background: #d5d5ff;
+  background: var(--app-color-focus);
 }
+
 .symbol-button:not(.subscript-char):hover:not(:disabled) {
   transform: translateY(-1px);
 }
@@ -449,27 +692,26 @@ onMounted(() => {
   transform: translateY(0);
 }
 
-
 .symbol-button:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .validate-button {
-  background: #4345ac;
-  color: white;
-  border: none;
-  border-radius: 4px;
   padding: 6px 16px;
+  border: none;
+  border-radius: var(--app-radius-control);
+  background: var(--app-color-primary);
+  color: var(--app-color-on-primary);
+  cursor: pointer;
   font-size: 14px;
   font-weight: 500;
-  cursor: pointer;
   transition: all 0.15s ease;
   white-space: nowrap;
 }
 
 .validate-button:hover:not(:disabled) {
-  background: #383991;
+  background: var(--app-color-primary-hover);
 }
 
 .validate-button:active:not(:disabled) {
@@ -477,7 +719,17 @@ onMounted(() => {
 }
 
 .validate-button:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.expression-editor-open-result,
+.expression-editor-open-status {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.expression-editor-open-result {
+  text-align: right;
 }
 </style>

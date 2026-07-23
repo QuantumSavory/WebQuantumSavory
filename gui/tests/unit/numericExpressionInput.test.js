@@ -39,6 +39,7 @@ describe('NumericExpressionInput', () => {
 
     expect(wrapper.get('.custom-function-context-trigger').text())
       .toContain('Numeric expression context')
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
     await wrapper.get('[data-testid="numeric-expression-source"]').setValue('delay / 2')
     expect(parameter.value).toBeNull()
     expect(parameter.error).toBe('Validate this expression before continuing')
@@ -59,10 +60,17 @@ describe('NumericExpressionInput', () => {
     expect(parameter).not.toHaveProperty('error')
     expect(wrapper.get('[data-testid="numeric-expression-result"]').text())
       .toContain('2.5e-7')
+    expect(wrapper.get('[data-testid="numeric-expression-summary"]').text())
+      .toContain('delay / 2')
     expect(wrapper.emitted('commit')).toHaveLength(1)
+
+    await wrapper.get('[data-testid="numeric-expression-summary"]').trigger('click')
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="numeric-expression-source"]').element.tagName)
+      .toBe('TEXTAREA')
   })
 
-  it('omits template context and renders deferred assignment status', async () => {
+  it('loads compact, refreshes without template context, and renders deferred status', async () => {
     vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
     const validate = vi.spyOn(api, 'validateNumericExpression').mockResolvedValue({
       success: true,
@@ -82,9 +90,9 @@ describe('NumericExpressionInput', () => {
       },
     })
 
-    await wrapper.get('[aria-label="Validate rounds expression"]').trigger('click')
     await flushPromises()
 
+    expect(wrapper.get('[data-testid="numeric-expression-summary"]').exists()).toBe(true)
     expect(validate).toHaveBeenCalledWith(
       'self + 1',
       'Int64',
@@ -95,6 +103,35 @@ describe('NumericExpressionInput', () => {
       .toBe('Representative result; evaluated again when assigned.')
     expect(wrapper.get('[data-testid="numeric-expression-result"]').text())
       .toContain('2')
+  })
+
+  it('reopens a loaded expression when automatic revalidation fails', async () => {
+    vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
+    vi.spyOn(api, 'validateNumericExpression').mockResolvedValue({
+      success: false,
+      error: 'Saved expression is no longer valid.',
+    })
+    const parameter = {
+      name: 'rate',
+      value: { kind: 'numeric_expression', source: 'old_context + 1' },
+    }
+    const wrapper = mount(NumericExpressionInput, {
+      props: {
+        parameter,
+        targetType: 'Float64',
+        placement: 'floating',
+        context: { node_names: [] },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="numeric-expression-summary"]').exists()).toBe(true)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="numeric-expression-source"]').element.value)
+      .toBe('old_context + 1')
+    expect(wrapper.get('[data-testid="numeric-expression-error"]').text())
+      .toContain('Saved expression is no longer valid.')
   })
 
   it('enforces evaluated metadata bounds before committing', async () => {
@@ -199,6 +236,7 @@ describe('NumericExpressionInput', () => {
     await wrapper.get('[aria-label="Validate rate expression"]').trigger('click')
     expect(parameter.error).toBe('Expression validation is in progress')
     expect(requestSignal.aborted).toBe(false)
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="numeric-expression-source"]').setValue('1 / 3')
     expect(requestSignal.aborted).toBe(true)
@@ -256,6 +294,7 @@ describe('NumericExpressionInput', () => {
     })
     expect(wrapper.get('[data-testid="numeric-expression-result"]').text())
       .toContain('2.5e-7')
+    expect(wrapper.get('[data-testid="numeric-expression-summary"]').element.tagName).toBe('DIV')
   })
 
   it('suppresses representative values for linked templates', async () => {

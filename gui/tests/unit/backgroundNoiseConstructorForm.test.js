@@ -144,6 +144,13 @@ describe('BackgroundNoiseConstructorForm', () => {
       expect.objectContaining({ context }),
     )
     expect(wrapper.get('[data-testid="numeric-expression-result"]').text()).toContain('2')
+    expect(wrapper.get('[data-testid="numeric-expression-summary"]').text())
+      .toContain('self + 1')
+
+    await wrapper.get('[data-testid="numeric-expression-summary"]').trigger('click')
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="numeric-expression-source"]').element.value)
+      .toBe('self + 1')
 
     await wrapper.setProps({ template: true })
     await flushPromises()

@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Checkbox from 'primevue/checkbox'
 import { Check } from '@lucide/vue'
 import { api } from '../../utils/ApiConnector'
@@ -106,9 +106,8 @@ import {
   parameterTypeIsNumber,
   parseNumericParameterValue
 } from '../../utils/parameterTypes'
+import CodeEditorWithSymbols from './CodeEditorWithSymbols.vue'
 import NumericExpressionInput from './NumericExpressionInput.vue'
-
-const CodeEditorWithSymbols = defineAsyncComponent(() => import('./CodeEditorWithSymbols.vue'))
 
 const props = defineProps({
   parameter: {

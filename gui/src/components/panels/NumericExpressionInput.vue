@@ -3,79 +3,38 @@
     class="numeric-expression-input"
     :data-testid="linked ? 'linked-numeric-expression' : 'numeric-expression-input'"
   >
-    <CustomFunctionContextHelp
-      label="Numeric expression context"
-      subject="numeric expressions"
+    <CodeEditorWithSymbols
+      editor-kind="numeric"
+      :model-value="source"
+      :read-only="disabled"
+      :evaluation-enabled="evaluationEnabled"
+      :error-message="previewError"
+      error-label="Validation failed"
+      error-test-id="numeric-expression-error"
+      show-error-message
+      show-context-help
+      context-help-label="Numeric expression context"
+      context-help-subject="numeric expressions"
+      collapsible
+      :collapsed="linked || !editorOpen"
+      :summary-editable="!linked && !disabled"
+      :summary-result="visiblePreviewResult"
+      :summary-result-aria-label="`${displayName || 'Numeric expression'} result`"
+      :summary-deferred-message="previewDeferredMessage"
+      source-test-id="numeric-expression-source"
+      :source-label="sourceLabel"
+      :aria-describedby="ariaDescribedby"
+      source-placeholder="Julia numeric expression"
+      editor-height="90px"
+      :validation-pending="previewPending"
+      disable-validation-when-empty
+      :validate-aria-label="`Validate ${displayName || 'numeric'} expression`"
+      evaluation-disabled-message="Numeric expression validation is unavailable because server-side Julia evaluation is disabled."
+      disabled-notice-test-id="numeric-expression-disabled"
+      @update:model-value="onSourceInput"
+      @validate="validate({ commit: true })"
+      @edit="openEditor"
     />
-    <label v-if="!linked" class="numeric-expression-source-label">
-      <span class="sr-only">{{ sourceLabel }}</span>
-      <textarea
-        :value="source"
-        class="numeric-expression-source"
-        data-testid="numeric-expression-source"
-        :aria-label="sourceLabel"
-        :aria-describedby="ariaDescribedby"
-        :aria-invalid="Boolean(previewError)"
-        :disabled="disabled"
-        :readonly="!evaluationEnabled"
-        rows="3"
-        placeholder="Julia numeric expression"
-        @input="onSourceInput($event.target.value)"
-      />
-    </label>
-    <code
-      v-else
-      class="numeric-expression-linked-source"
-      data-testid="numeric-expression-source"
-      :aria-label="sourceLabel"
-    >{{ source }}</code>
-
-    <div
-      v-if="!evaluationEnabled"
-      class="numeric-expression-disabled-notice"
-      data-testid="numeric-expression-disabled"
-      role="status"
-    >
-      Numeric expression validation is unavailable because server-side Julia
-      evaluation is disabled.
-    </div>
-
-    <button
-      v-if="!linked"
-      type="button"
-      class="numeric-expression-validate"
-      :disabled="disabled || !evaluationEnabled || !source.trim() || previewPending"
-      :aria-label="`Validate ${displayName || 'numeric'} expression`"
-      @click="validate({ commit: true })"
-    >
-      {{ previewPending ? 'Validating…' : 'Validate' }}
-    </button>
-
-    <p
-      v-if="previewError"
-      class="numeric-expression-error"
-      data-testid="numeric-expression-error"
-      role="alert"
-    >
-      {{ previewError }}
-    </p>
-    <p
-      v-if="previewResult != null && !(linked && template)"
-      class="numeric-expression-result"
-      data-testid="numeric-expression-result"
-      role="status"
-      :aria-label="`${displayName || 'Numeric expression'} result`"
-    >
-      Result: {{ previewResult }}
-    </p>
-    <p
-      v-if="!previewError && previewDeferred"
-      class="numeric-expression-deferred"
-      data-testid="numeric-expression-deferred"
-      role="status"
-    >
-      {{ template ? 'Representative result; evaluated again when assigned.' : 'Evaluated when assigned.' }}
-    </p>
   </div>
 </template>
 
@@ -86,7 +45,7 @@ import {
   createNumericExpressionValue,
   isNumericExpressionValue,
 } from '../../utils/parameterTypes.js'
-import CustomFunctionContextHelp from './CustomFunctionContextHelp.vue'
+import CodeEditorWithSymbols from './CodeEditorWithSymbols.vue'
 
 const props = defineProps({
   parameter: { type: Object, required: true },
@@ -108,6 +67,7 @@ let requestController = null
 let requestGeneration = 0
 let ownedError = null
 let ownedErrorTarget = null
+let locallyCommittedSource = null
 const previewResult = ref(null)
 const previewError = ref('')
 const previewDeferred = ref(false)
@@ -119,6 +79,7 @@ const persistedSource = computed(() => (
     : ''
 ))
 const source = ref(persistedSource.value)
+const editorOpen = ref(!props.linked && !persistedSource.value.trim())
 const displayName = computed(() => (
   props.parameterName || props.parameter.name || props.parameter.field || ''
 ))
@@ -127,6 +88,21 @@ const sourceLabel = computed(() => (
 ))
 const evaluationEnabled = computed(() => api.isUnsafeCodeEvaluationEnabled())
 const effectiveValidationTarget = computed(() => props.validationTarget || props.parameter)
+const visiblePreviewResult = computed(() => (
+  previewResult.value != null && !(props.linked && props.template)
+    ? previewResult.value
+    : null
+))
+const previewDeferredMessage = computed(() => {
+  if (previewError.value || !previewDeferred.value) return ''
+  return props.template
+    ? 'Representative result; evaluated again when assigned.'
+    : 'Evaluated when assigned.'
+})
+
+function openEditor() {
+  if (!props.linked && !props.disabled) editorOpen.value = true
+}
 
 function abortRequest() {
   requestController?.abort()
@@ -160,19 +136,22 @@ function clearPreview() {
 function setValidationError(message) {
   previewError.value = message
   setOwnedError(message)
+  if (!props.linked) editorOpen.value = true
   return false
 }
 
 function onSourceInput(value) {
-  if (props.disabled || !evaluationEnabled.value) return
+  if (props.disabled || !evaluationEnabled.value || props.linked) return
   source.value = value
+  editorOpen.value = true
   clearPreview()
   setValidationError('Validate this expression before continuing')
 }
 
-async function validate({ commit = false } = {}) {
+async function validate({ commit = false, automatic = false } = {}) {
   const currentSource = source.value
   if (props.disabled) return false
+  if (!automatic && !props.linked) editorOpen.value = true
   const localError = !currentSource.trim()
     ? 'Validate this expression before continuing'
     : !evaluationEnabled.value
@@ -239,6 +218,7 @@ async function validate({ commit = false } = {}) {
   }
 
   if (!props.linked) {
+    locallyCommittedSource = currentSource
     props.parameter.value = createNumericExpressionValue(currentSource)
   }
   previewDeferred.value = response.results?.deferred === true
@@ -246,6 +226,7 @@ async function validate({ commit = false } = {}) {
     previewResult.value = String(evaluatedValue)
   }
   clearOwnedError()
+  if (!props.linked) editorOpen.value = false
   if (commit) emit('commit')
   return true
 }
@@ -260,19 +241,27 @@ watch(
   () => {
     const shouldRevalidate = props.linked || persistedSource.value === source.value
     clearPreview()
-    if (shouldRevalidate && source.value.trim()) void validate()
+    if (shouldRevalidate && source.value.trim()) {
+      void validate({ automatic: true })
+    }
   },
 )
 
 watch(
   [persistedSource, () => props.linked],
   ([persisted, linked]) => {
+    if (persisted === locallyCommittedSource && persisted === source.value) {
+      locallyCommittedSource = null
+      return
+    }
+    locallyCommittedSource = null
     if (persisted !== source.value) source.value = persisted
+    editorOpen.value = !linked && !source.value.trim()
     clearPreview()
     if (!source.value.trim()) {
       setValidationError('Validate this expression before continuing')
-    } else if (linked || source.value === persisted) {
-      void validate()
+    } else {
+      void validate({ automatic: true })
     }
   },
   { immediate: true },
@@ -291,36 +280,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: var(--app-space-1);
   text-align: left;
-}
-
-.numeric-expression-source {
-  width: 100%;
-  min-height: 58px;
-  resize: vertical;
-  font-family: var(--font-family-monospace, monospace);
-  font-size: 0.82rem;
-}
-
-.numeric-expression-linked-source {
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.numeric-expression-validate {
-  align-self: flex-end;
-}
-
-.numeric-expression-error {
-  color: #b42318;
-}
-
-.numeric-expression-deferred,
-.numeric-expression-result,
-.numeric-expression-disabled-notice,
-.numeric-expression-error {
-  margin: 0;
-  font-size: 0.78rem;
 }
 </style>

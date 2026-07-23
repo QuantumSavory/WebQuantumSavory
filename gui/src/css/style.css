@@ -58,6 +58,7 @@
   --app-shadow-marker: 0 1px 4px rgba(0, 0, 0, 0.35);
   --app-radius-control: 4px;
   --app-radius-surface: 8px;
+  --app-font-monospace: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --app-control-height: 25px;
   --app-control-padding-y: 4px;
   --app-control-padding-x: 15px;

@@ -229,9 +229,17 @@ test.describe('Default-first numeric expression inputs', () => {
     await source.fill('delay / 2')
     await row.getByRole('button', { name: 'Validate delay_scale expression' }).click()
     await expect(row.getByTestId('numeric-expression-result')).toHaveText('Result: 2.5e-7')
+    const summary = row.getByTestId('numeric-expression-summary')
+    await expect(summary.getByTestId('numeric-expression-source')).toHaveText('delay / 2')
+    await summary.click()
+    await expect(row.getByTestId('numeric-expression-source')).toHaveValue('delay / 2')
+    await row.getByTestId('numeric-expression-source').fill('delay / 4')
+    await row.getByRole('button', { name: 'Validate delay_scale expression' }).click()
+    await expect(summary.getByTestId('numeric-expression-source')).toHaveText('delay / 4')
+    await expect(summary.getByTestId('numeric-expression-result')).toHaveText('Result: 2.5e-7')
 
     expect(numericRequests.at(-1)).toMatchObject({
-      expression: 'delay / 2',
+      expression: 'delay / 4',
       target_type: 'Float64',
       placement: 'edge',
       context: {
@@ -250,12 +258,12 @@ test.describe('Default-first numeric expression inputs', () => {
       name: 'delay_scale',
       type: 'Float64',
       selectedType: 'expression:Float64',
-      value: { kind: 'numeric_expression', source: 'delay / 2' },
+      value: { kind: 'numeric_expression', source: 'delay / 4' },
     })
     expect(await serializedParameter(page, true)).toEqual({
       name: 'delay_scale',
       type: 'Float64',
-      value: { kind: 'numeric_expression', source: 'delay / 2' },
+      value: { kind: 'numeric_expression', source: 'delay / 4' },
     })
 
     await page.locator('.hamburger-btn').click()
@@ -267,7 +275,7 @@ test.describe('Default-first numeric expression inputs', () => {
       name: 'delay_scale',
       type: 'Float64',
       selectedType: 'expression:Float64',
-      value: { kind: 'numeric_expression', source: 'delay / 2' },
+      value: { kind: 'numeric_expression', source: 'delay / 4' },
     })
 
     const requestsBeforeReload = numericRequests.length
@@ -277,8 +285,11 @@ test.describe('Default-first numeric expression inputs', () => {
     row = parameterRow(editor, 'delay_scale')
     selector = row.getByRole('combobox', { name: 'Input option for delay_scale' })
     await expect(selector).toHaveValue('expression:Float64')
-    await expect(row.getByTestId('numeric-expression-source')).toHaveValue('delay / 2')
+    await expect(row.getByTestId('numeric-expression-summary')).toBeVisible()
+    await expect(row.getByTestId('numeric-expression-source')).toHaveText('delay / 4')
     await expect(row.getByTestId('numeric-expression-result')).toHaveText('Result: 2.5e-7')
+    await row.getByTestId('numeric-expression-summary').click()
+    await expect(row.getByTestId('numeric-expression-source')).toHaveValue('delay / 4')
     expect(numericRequests.length).toBeGreaterThan(requestsBeforeReload)
   })
 
@@ -307,7 +318,8 @@ test.describe('Default-first numeric expression inputs', () => {
       placement: 'variable',
     })
 
-    await source.fill('delay / 2')
+    await variable.getByTestId('numeric-expression-summary').click()
+    await variable.getByTestId('numeric-expression-source').fill('delay / 2')
     await variable.getByRole('button', { name: 'Validate edge_delay expression' }).click()
     await expect(variable.getByTestId('numeric-expression-deferred')).toHaveText(
       'Evaluated when assigned.',
