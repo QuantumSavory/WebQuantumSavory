@@ -91,7 +91,7 @@ describe('simulation sidebar width', () => {
     expect(localStorage.getItem('rightSidebar_width')).toBe('544')
   })
 
-  it('clamps stored and live widths while retaining usable main-panel space', async () => {
+  it('reserves main-panel space when possible without shrinking below the sidebar minimum', async () => {
     localStorage.setItem('rightSidebar_width', '5000')
     const layout = mountPanelLayout()
 
@@ -112,9 +112,9 @@ describe('simulation sidebar width', () => {
     window.dispatchEvent(new Event('resize'))
     await nextTick()
 
-    expect(layout.rightSidebarMinWidth.value).toBe(170)
-    expect(layout.rightSidebarMaxWidth.value).toBe(170)
-    expect(layout.rightSidebarWidth.value).toBe(170)
+    expect(layout.rightSidebarMinWidth.value).toBe(280)
+    expect(layout.rightSidebarMaxWidth.value).toBe(280)
+    expect(layout.rightSidebarWidth.value).toBe(280)
 
     window.innerWidth = 1920
     window.dispatchEvent(new Event('resize'))

@@ -88,13 +88,10 @@ export function usePanelLayout() {
     RIGHT_SIDEBAR_DIMENSION_FALLBACKS.inlineOffset
   )
   const rightSidebarMaxWidth = computed(() => Math.max(
-    1,
+    preferredRightSidebarMinWidth,
     Math.floor(viewportWidth.value - mainPanelMinWidth - rightSidebarInlineOffset)
   ))
-  const rightSidebarMinWidth = computed(() => Math.min(
-    preferredRightSidebarMinWidth,
-    rightSidebarMaxWidth.value
-  ))
+  const rightSidebarMinWidth = computed(() => preferredRightSidebarMinWidth)
   const storedRightSidebarWidth = readRightSidebarWidth()
   const rightSidebarWidth = ref(clamp(
     storedRightSidebarWidth ?? defaultRightSidebarWidth,
