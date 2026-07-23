@@ -62,6 +62,8 @@ describe('NumericExpressionInput', () => {
       .toContain('2.5e-7')
     expect(wrapper.get('[data-testid="numeric-expression-summary"]').text())
       .toContain('delay / 2')
+    expect(wrapper.get('[data-testid="numeric-expression-summary"]').attributes('aria-label'))
+      .toContain('delay / 2; Result: 2.5e-7')
     expect(wrapper.emitted('commit')).toHaveLength(1)
 
     await wrapper.get('[data-testid="numeric-expression-summary"]').trigger('click')
@@ -80,6 +82,7 @@ describe('NumericExpressionInput', () => {
       name: 'rounds',
       value: { kind: 'numeric_expression', source: 'self + 1' },
     }
+    const durableValue = parameter.value
     const wrapper = mount(NumericExpressionInput, {
       props: {
         parameter,
@@ -103,6 +106,42 @@ describe('NumericExpressionInput', () => {
       .toBe('Representative result; evaluated again when assigned.')
     expect(wrapper.get('[data-testid="numeric-expression-result"]').text())
       .toContain('2')
+    expect(parameter.value).toBe(durableValue)
+  })
+
+  it('preserves an editor reopened during automatic preview validation', async () => {
+    vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
+    let resolvePreview
+    vi.spyOn(api, 'validateNumericExpression').mockImplementation(() => (
+      new Promise(resolve => { resolvePreview = resolve })
+    ))
+    const durableValue = { kind: 'numeric_expression', source: 'delay / 2' }
+    const parameter = { name: 'rate', value: durableValue }
+    const wrapper = mount(NumericExpressionInput, {
+      props: {
+        parameter,
+        targetType: 'Float64',
+        placement: 'edge',
+        context: { node_names: ['Alice', 'Bob'], delay: 5e-7 },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="numeric-expression-summary"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="numeric-expression-summary"]').trigger('click')
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
+
+    resolvePreview({
+      success: true,
+      results: { deferred: false, target_type: 'Float64', value: '2.5e-7' },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="numeric-expression-source"]').element.value)
+      .toBe('delay / 2')
+    expect(wrapper.get('[data-testid="numeric-expression-result"]').text())
+      .toContain('2.5e-7')
+    expect(parameter.value).toBe(durableValue)
   })
 
   it('reopens a loaded expression when automatic revalidation fails', async () => {
@@ -248,6 +287,49 @@ describe('NumericExpressionInput', () => {
     await flushPromises()
     expect(parameter.value).toBeNull()
     expect(wrapper.emitted('commit')).toBeUndefined()
+  })
+
+  it('restores a dirty validation error when context changes abort pending work', async () => {
+    vi.spyOn(api, 'isUnsafeCodeEvaluationEnabled').mockReturnValue(true)
+    let pendingSignal
+    const validate = vi.spyOn(api, 'validateNumericExpression')
+      .mockResolvedValueOnce({
+        success: true,
+        results: { deferred: false, target_type: 'Float64', value: '0.5' },
+      })
+      .mockImplementationOnce((_source, _target, _placement, options) => {
+        pendingSignal = options.signal
+        return new Promise(() => {})
+      })
+    const parameter = {
+      name: 'rate',
+      value: { kind: 'numeric_expression', source: 'self / 2' },
+    }
+    const wrapper = mount(NumericExpressionInput, {
+      props: {
+        parameter,
+        targetType: 'Float64',
+        placement: 'node',
+        context: { node_names: ['Alice'], self: 1 },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="numeric-expression-summary"]').trigger('click')
+    await wrapper.get('[data-testid="numeric-expression-source"]').setValue('self / 3')
+    await wrapper.get('[aria-label="Validate rate expression"]').trigger('click')
+    expect(parameter.error).toBe('Expression validation is in progress')
+    expect(pendingSignal.aborted).toBe(false)
+
+    await wrapper.setProps({ context: { node_names: ['Bob'], self: 1 } })
+    await flushPromises()
+
+    expect(validate).toHaveBeenCalledTimes(2)
+    expect(pendingSignal.aborted).toBe(true)
+    expect(parameter.error).toBe('Validate this expression before continuing')
+    expect(wrapper.get('[data-testid="numeric-expression-error"]').text())
+      .toContain('Validate this expression before continuing')
+    expect(wrapper.find('[data-testid="numeric-expression-summary"]').exists()).toBe(false)
   })
 
   it('owns linked validation errors on the protocol parameter only', async () => {

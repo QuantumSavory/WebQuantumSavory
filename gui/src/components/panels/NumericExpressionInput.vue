@@ -217,7 +217,7 @@ async function validate({ commit = false, automatic = false } = {}) {
       + `${Number.isFinite(props.maximum) ? ` at most ${props.maximum}` : ''}.`)
   }
 
-  if (!props.linked) {
+  if (!props.linked && commit) {
     locallyCommittedSource = currentSource
     props.parameter.value = createNumericExpressionValue(currentSource)
   }
@@ -226,7 +226,7 @@ async function validate({ commit = false, automatic = false } = {}) {
     previewResult.value = String(evaluatedValue)
   }
   clearOwnedError()
-  if (!props.linked) editorOpen.value = false
+  if (!props.linked && commit) editorOpen.value = false
   if (commit) emit('commit')
   return true
 }
@@ -243,6 +243,8 @@ watch(
     clearPreview()
     if (shouldRevalidate && source.value.trim()) {
       void validate({ automatic: true })
+    } else if (!shouldRevalidate) {
+      setValidationError('Validate this expression before continuing')
     }
   },
 )

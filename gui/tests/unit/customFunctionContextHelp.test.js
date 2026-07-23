@@ -146,6 +146,10 @@ describe('custom-function contextual help', () => {
     expect(summary.get('[data-testid="numeric-expression-deferred"]').text()).toBe(
       'Evaluated when assigned.',
     )
+    expect(summary.attributes('aria-label')).toBe(
+      'delay_scale numeric expression source; delay / 2; Result: 2.5e-7; '
+      + 'Evaluated when assigned.',
+    )
     await summary.trigger('click')
     expect(wrapper.emitted('edit')).toBeUndefined()
   })

@@ -1,9 +1,11 @@
 <template>
   <div
+    ref="editorRootRef"
     class="code-editor-with-symbols expression-editor"
     :class="`expression-editor-${effectiveEditorKind}`"
   >
     <component
+      ref="summaryRef"
       :is="summaryEditable ? 'button' : 'div'"
       v-if="collapsible && collapsed"
       class="code-collapsed-view expression-editor-summary"
@@ -12,7 +14,8 @@
       :role="summaryEditable ? undefined : 'group'"
       :data-testid="summaryTestId"
       :aria-label="collapsedAriaLabel"
-      @click="summaryEditable && emit('edit')"
+      :aria-live="summaryEditable ? 'polite' : undefined"
+      @click="handleEdit"
     >
       <template v-if="effectiveEditorKind === 'numeric'">
         <span class="expression-editor-summary-section expression-editor-summary-source">
@@ -26,7 +29,7 @@
           v-if="summaryResult != null"
           class="expression-editor-summary-section expression-editor-summary-result"
           data-testid="numeric-expression-result"
-          role="status"
+          :role="summaryEditable ? undefined : 'status'"
           :aria-label="summaryResultAriaLabel"
         >
           <span class="expression-editor-summary-label">{{ summaryResultLabel }}:</span>
@@ -36,7 +39,7 @@
           v-if="summaryDeferredMessage && !hasError"
           class="expression-editor-summary-status"
           data-testid="numeric-expression-deferred"
-          role="status"
+          :role="summaryEditable ? undefined : 'status'"
         >
           {{ summaryDeferredMessage }}
         </span>
@@ -44,7 +47,7 @@
           v-if="validationPending"
           class="expression-editor-summary-status"
           data-testid="numeric-expression-pending"
-          role="status"
+          :role="summaryEditable ? undefined : 'status'"
         >
           Validating…
         </span>
@@ -52,7 +55,7 @@
           v-if="hasError"
           class="expression-editor-summary-error"
           data-testid="numeric-expression-error"
-          role="alert"
+          :role="summaryEditable ? undefined : 'alert'"
         >
           {{ errorMessage }}
         </span>
@@ -342,9 +345,13 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'validate', 'edit'])
 
+const editorRootRef = ref(null)
+const summaryRef = ref(null)
 const codeEditorRef = ref(null)
 const editorContainerRef = ref(null)
 const cursorPosition = ref(0)
+let focusEditorOnOpen = false
+let focusSummaryOnCollapse = false
 const unicodeSymbols = ['₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉', '₀', '⊗', '√']
 
 const effectiveEditorKind = computed(() => {
@@ -363,7 +370,21 @@ const summaryTestId = computed(() => {
 const collapsedAriaLabel = computed(() => {
   const action = props.summaryEditable ? 'Edit' : 'View'
   if (effectiveEditorKind.value === 'numeric') {
-    return `${action} ${props.sourceLabel || 'numeric expression'}`
+    const description = [
+      props.summaryEditable
+        ? `Edit ${props.sourceLabel || 'numeric expression'}`
+        : (props.sourceLabel || 'Numeric expression'),
+    ]
+    if (props.modelValue) description.push(props.modelValue)
+    if (props.summaryResult != null) {
+      description.push(`${props.summaryResultLabel}: ${props.summaryResult}`)
+    }
+    if (props.summaryDeferredMessage && !hasError.value) {
+      description.push(props.summaryDeferredMessage)
+    }
+    if (props.validationPending) description.push('Validating')
+    if (hasError.value) description.push(`Validation failed: ${props.errorMessage}`)
+    return description.join('; ')
   }
   if (!props.showLatex) {
     return props.modelValue ? 'Edit custom function' : 'Enter custom function'
@@ -422,6 +443,12 @@ function handleValueChange(value) {
   emit('update:modelValue', value)
 }
 
+function handleEdit() {
+  if (!props.summaryEditable) return
+  focusEditorOnOpen = true
+  emit('edit')
+}
+
 function captureCursorPosition() {
   try {
     const textarea = editorTextarea()
@@ -459,12 +486,42 @@ async function handleSymbolClick(event, symbol) {
 }
 
 function handleValidate() {
+  focusSummaryOnCollapse = true
   emit('validate')
+}
+
+function handleDocumentFocusIn(event) {
+  if (
+    focusSummaryOnCollapse
+    && editorRootRef.value
+    && !editorRootRef.value.contains(event.target)
+  ) {
+    focusSummaryOnCollapse = false
+  }
 }
 
 watch(
   () => props.modelValue,
-  value => nextTick(() => syncEditorValue(value)),
+  value => {
+    focusSummaryOnCollapse = false
+    nextTick(() => syncEditorValue(value))
+  },
+)
+watch(
+  () => props.collapsed,
+  (collapsed, wasCollapsed) => {
+    if (!collapsed && wasCollapsed) {
+      const shouldFocusEditor = focusEditorOnOpen
+      focusEditorOnOpen = false
+      if (shouldFocusEditor) nextTick(() => editorTextarea()?.focus())
+      return
+    }
+    if (collapsed && !wasCollapsed) {
+      const shouldFocusSummary = focusSummaryOnCollapse
+      focusSummaryOnCollapse = false
+      if (shouldFocusSummary) nextTick(() => summaryRef.value?.focus())
+    }
+  },
 )
 watch(
   () => [
@@ -487,6 +544,7 @@ onMounted(() => {
   textarea?.addEventListener('keyup', captureCursorPosition)
   textarea?.addEventListener('click', captureCursorPosition)
   textarea?.addEventListener('focus', captureCursorPosition)
+  document.addEventListener('focusin', handleDocumentFocusIn)
 })
 
 onBeforeUnmount(() => {
@@ -494,6 +552,7 @@ onBeforeUnmount(() => {
   textarea?.removeEventListener('keyup', captureCursorPosition)
   textarea?.removeEventListener('click', captureCursorPosition)
   textarea?.removeEventListener('focus', captureCursorPosition)
+  document.removeEventListener('focusin', handleDocumentFocusIn)
 })
 </script>
 
@@ -582,7 +641,7 @@ button.expression-editor-summary:hover {
 
 .evaluation-disabled-notice {
   margin-bottom: var(--app-space-2);
-  color: var(--app-color-warning);
+  color: var(--app-color-warning-text);
   font-size: 0.8rem;
 }
 

@@ -231,12 +231,19 @@ test.describe('Default-first numeric expression inputs', () => {
     await expect(row.getByTestId('numeric-expression-result')).toHaveText('Result: 2.5e-7')
     const summary = row.getByTestId('numeric-expression-summary')
     await expect(summary.getByTestId('numeric-expression-source')).toHaveText('delay / 2')
-    await summary.click()
+    await expect(summary).toHaveAttribute(
+      'aria-label',
+      /delay \/ 2; Result: 2\.5e-7/,
+    )
+    await summary.focus()
+    await summary.press('Enter')
     await expect(row.getByTestId('numeric-expression-source')).toHaveValue('delay / 2')
+    await expect(row.getByTestId('numeric-expression-source')).toBeFocused()
     await row.getByTestId('numeric-expression-source').fill('delay / 4')
     await row.getByRole('button', { name: 'Validate delay_scale expression' }).click()
     await expect(summary.getByTestId('numeric-expression-source')).toHaveText('delay / 4')
     await expect(summary.getByTestId('numeric-expression-result')).toHaveText('Result: 2.5e-7')
+    await expect(summary).toBeFocused()
 
     expect(numericRequests.at(-1)).toMatchObject({
       expression: 'delay / 4',
