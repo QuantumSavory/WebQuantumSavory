@@ -2,7 +2,10 @@
 
 :root {
   --app-shell-topbar-height: 40px;
-  --app-shell-sidebar-width: 320px;
+  --app-shell-sidebar-default-width: 320px;
+  --app-shell-sidebar-min-width: 280px;
+  --app-shell-main-panel-min-width: 320px;
+  --app-shell-sidebar-width: var(--app-shell-sidebar-default-width);
   --app-shell-sidebar-inline-offset: 10px;
   --app-shell-sidebar-top: 50px;
   --app-shell-sidebar-bottom: 20px;
@@ -105,7 +108,11 @@
   cursor: pointer;
   color: #666;
   font-size: 0.7rem;
-  transition: all 0.3s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
   display: flex;
   align-items: center;
   justify-content: center;
