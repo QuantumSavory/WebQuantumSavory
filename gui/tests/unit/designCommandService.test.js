@@ -779,6 +779,16 @@ describe('DesignCommandService', () => {
     await expect(service.requireBackgroundNoise({
       type: 'LegacyNoise',
       parameters: [{ value: 0.25 }],
+    })).rejects.toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: 'Unknown background noise type: LegacyNoise',
+    })
+    await expect(service.requireBackgroundNoise({
+      type: 'LegacyNoise',
+      parameters: [{ value: 0.25 }],
+    }, {
+      project,
+      allowLegacyLiteral: true,
     })).resolves.toEqual({
       type: 'LegacyNoise',
       parameters: [{ value: 0.25 }],

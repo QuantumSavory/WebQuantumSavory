@@ -692,7 +692,11 @@ export class DesignCommandService {
         type: this.requireSlotType(templateSlot.type),
         backgroundNoise: await this.requireBackgroundNoise(
           templateSlot.backgroundNoise,
-          { project, ownerId: node.id },
+          {
+            project,
+            ownerId: node.id,
+            allowLegacyLiteral: true,
+          },
         ),
         isLocked: false,
         assignment: false,
@@ -1194,7 +1198,12 @@ export class DesignCommandService {
 
   async requireBackgroundNoise(
     noise,
-    { project = this.getProject(), ownerId = null, template = false } = {},
+    {
+      project = this.getProject(),
+      ownerId = null,
+      template = false,
+      allowLegacyLiteral = false,
+    } = {},
   ) {
     if (!record(noise)) {
       throw new DesignCommandError(
@@ -1223,7 +1232,15 @@ export class DesignCommandService {
         `Background noise ${type} requires catalog metadata for Variables or numeric expressions.`,
       )
     }
-    if (!definition) return deepClone(noise)
+    if (!definition) {
+      if (catalog.length > 0 && !allowLegacyLiteral) {
+        throw new DesignCommandError(
+          'VALIDATION_FAILED',
+          `Unknown background noise type: ${type}`,
+        )
+      }
+      return deepClone(noise)
+    }
 
     const parameters = await this.constructorParameters(
       project,
@@ -1895,7 +1912,11 @@ export class DesignCommandService {
       for (const slot of node.data?.slots || []) {
         slot.backgroundNoise = await this.requireBackgroundNoise(
           slot.backgroundNoise,
-          { project, ownerId: node.id },
+          {
+            project,
+            ownerId: node.id,
+            allowLegacyLiteral: true,
+          },
         )
       }
     }

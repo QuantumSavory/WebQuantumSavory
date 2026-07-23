@@ -101,7 +101,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ChevronDown, ChevronUp, Plus } from '@lucide/vue'
 import SlotIcon from '../map/SlotIcon.vue'
 import { api } from '../../utils/ApiConnector'
@@ -234,6 +234,19 @@ function backgroundDraft(slot) {
   }
   return backgroundDrafts.get(slot.id)
 }
+
+watch(
+  () => props.slots.map(slot => slot.backgroundNoise),
+  (backgrounds) => {
+    backgrounds.forEach((backgroundNoise, index) => {
+      const slot = props.slots[index]
+      if (slot && expandedSlotIds.value.has(slot.id)) {
+        backgroundDrafts.set(slot.id, deepClone(backgroundNoise))
+      }
+    })
+  },
+  { deep: true },
+)
 
 function commitSlotBackground(slot) {
   emit('update-slot', {

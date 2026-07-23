@@ -69,7 +69,13 @@ function mountPanel() {
         ProtocolsManager: true,
         SlotEditor: {
           emits: ['delete-slot', 'toggle-details'],
-          template: '<button type="button" aria-label="Toggle details" />',
+          template: `
+            <button
+              type="button"
+              aria-label="Toggle details"
+              @click="$emit('toggle-details')"
+            />
+          `,
         },
       },
     },
@@ -179,5 +185,46 @@ describe('NodePanel background constructor drafts', () => {
     ))).toBe(true)
     expect(operations[0].value.backgroundNoise)
       .not.toBe(operations[1].value.backgroundNoise)
+  })
+
+  it('refreshes an expanded draft after an authoritative background update', async () => {
+    const wrapper = mountPanel()
+    const node = wrapper.props('node')
+    node.data.slots[0].backgroundNoise = {
+      type: 'T1Decay',
+      parameters: [{
+        field: 't1',
+        type: 'Float64',
+        selectedType: 'Float64',
+        value: 0.25,
+      }],
+    }
+    await flushPromises()
+
+    await wrapper.findAll('[aria-label="Toggle details"]')[0].trigger('click')
+    const expanded = wrapper.get('.slot-row-expanded')
+    expect(expanded.get('input[type="number"]').element.value).toBe('0.25')
+
+    node.data.slots[0].backgroundNoise.parameters[0].value = 0.75
+    await flushPromises()
+    expect(expanded.get('input[type="number"]').element.value).toBe('0.75')
+
+    await expanded.get('input[type="number"]').setValue('0.5')
+    const operation = wrapper.emitted('design-operations').at(-1)[0][0]
+    expect(operation).toMatchObject({
+      kind: 'slots.update',
+      node_id: 'node_a',
+      slot_id: 'slot_1',
+      value: {
+        backgroundNoise: {
+          type: 'T1Decay',
+          parameters: [{
+            field: 't1',
+            selectedType: 'Float64',
+            value: 0.5,
+          }],
+        },
+      },
+    })
   })
 })

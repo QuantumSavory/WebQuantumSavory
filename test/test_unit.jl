@@ -5011,6 +5011,25 @@
       )
       @test integer_noise.count == 3
       @test integer_noise.label == "default"
+
+      integer_variable = WebQuantumSavory.Variable(
+        "integer-count",
+        "integer count",
+        "Int64",
+        expression("2 * self + nodeid(\"Alice\")"),
+      )
+      variable_integer_noise = WebQuantumSavory._instantiate_noise(
+        Dict(
+          "type" => "ContextualIntegerBackground",
+          "parameters" => [Dict(
+            "name" => "count",
+            "value" => Dict("kind" => "variable", "id" => "integer-count"),
+          )],
+        ),
+        noise_context;
+        variables=Dict("integer-count" => integer_variable),
+      )
+      @test variable_integer_noise.count == 5
     end
 
     script_noise = WebQuantumSavory._script_noise_expression(
@@ -5021,6 +5040,48 @@
     @test occursin("self = 2", script_noise)
     @test occursin("nodeid(\"Alice\")", script_noise)
     @test Meta.parse(script_noise) isa Expr
+
+    integer_variable = WebQuantumSavory.Variable(
+      "integer-count",
+      "integer count",
+      "Int64",
+      expression("2 * self + nodeid(\"Alice\")"),
+    )
+    _, integer_script_expression =
+      WebQuantumSavory._script_constructor_parameter_expression(
+        Dict(
+          "name" => "count",
+          "value" => Dict("kind" => "variable", "id" => "integer-count"),
+        ),
+        Dict(
+          "integer-count" => (
+            name="variable_integer_count",
+            variable=integer_variable,
+            per_assignment=true,
+            fresh_wildcard=false,
+            uses_default=false,
+          ),
+        ),
+        "Test background noise";
+        node_index=2,
+        declared_type=Int64,
+        constructor_metadata=(
+          field=:count,
+          type=Int64,
+          doc="A contextual integer constructor field.",
+        ),
+      )
+    @test occursin("Base.Int64(expression_value)", integer_script_expression)
+    integer_script_module = Module(gensym(:IntegerBackgroundExpressionExport))
+    Core.eval(
+      integer_script_module,
+      :(nodeid(name::String)::Int = Dict{String,Int}("Alice" => 1)[name]),
+    )
+    exported_integer_value = Core.eval(
+      integer_script_module,
+      Meta.parse(integer_script_expression),
+    )
+    @test exported_integer_value === Int64(5)
 
     withenv(WebQuantumSavory.UNSAFE_EVALUATION_ENV_VAR => "false") do
       disabled_error = capture_error(
