@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import length from '@turf/length'
 import { describe, expect, it } from 'vitest'
 
 import Edge from '../../src/models/Edge'
@@ -35,15 +36,31 @@ function makeEdge({
   })
 }
 
-describe('edge geometry adapter', () => {
-  it('uses one geodesic LineString for a straight edge and its midpoint', () => {
-    const edge = makeEdge()
-    const sampled = sampleEdgeRoute(edge)
+function legLengthKilometers(start, end) {
+  return length({
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates: [start, end] },
+  }, { units: 'kilometers' })
+}
 
-    expect(sampled.line.geometry.coordinates).toEqual([[-72, 42], [-70, 42]])
-    expect(sampled.distanceMeters).toBeGreaterThan(160_000)
-    expect(sampled.distanceMeters).toBeLessThan(170_000)
-    expect(sampled.midpoint[0]).toBeCloseTo(-71, 3)
+describe('edge geometry adapter', () => {
+  it('renders a long handle-free physical edge as one bounded geodesic route', () => {
+    const edge = makeEdge({ targetPosition: [-60, 42] })
+    const sampled = sampleEdgeRoute(edge)
+    const coordinates = sampled.line.geometry.coordinates
+
+    expect(coordinates[0]).toEqual([-72, 42])
+    expect(coordinates.at(-1)).toEqual([-60, 42])
+    expect(coordinates.length).toBeGreaterThan(10)
+    expect(coordinates).toContainEqual(sampled.midpoint)
+    expect(coordinates.slice(1, -1).every(([, latitude]) => latitude > 42)).toBe(true)
+    expect(coordinates.slice(1).every((coordinate, index) => (
+      legLengthKilometers(coordinates[index], coordinate) <= 100
+    ))).toBe(true)
+    expect(sampled.distanceMeters).toBeGreaterThan(980_000)
+    expect(sampled.distanceMeters).toBeLessThan(1_000_000)
+    expect(sampled.midpoint[0]).toBeCloseTo(-66, 3)
     expect(sampled.midpoint[1]).toBeGreaterThan(42)
   })
 
@@ -87,6 +104,46 @@ describe('edge geometry adapter', () => {
     expect(sampled.sampleCount).toBeGreaterThan(8)
     expect(sampled.line.geometry.coordinates.length).toBeGreaterThan(2)
     expect(sampled.distanceMeters).toBeGreaterThan(sampleEdgeRoute(makeEdge()).distanceMeters)
+  })
+
+  it('finalizes a handled curve independently of curve-mode visibility', () => {
+    const edge = makeEdge({
+      targetPosition: [-60, 42],
+      curvePoints: [{ id: 'anchor', position: [-66, 48], type: 'smooth' }],
+    })
+    const hidden = sampleEdgeRoute(edge, { curveEditingEnabled: false })
+    const visible = sampleEdgeRoute(edge, { curveEditingEnabled: true })
+
+    expect(visible).toEqual(hidden)
+    expect(hidden.line.geometry.coordinates).toContainEqual(hidden.midpoint)
+    expect(hidden.line.geometry.coordinates.length).toBeGreaterThan(hidden.sampleCount)
+    expect(hidden.line.geometry.coordinates.slice(1).every((coordinate, index, route) => (
+      legLengthKilometers(
+        index === 0 ? hidden.line.geometry.coordinates[0] : route[index - 1],
+        coordinate,
+      ) <= 100
+    ))).toBe(true)
+  })
+
+  it('unwraps an antimeridian route into one finite short path', () => {
+    const edge = makeEdge({
+      sourcePosition: [179, 10],
+      targetPosition: [-179, 10],
+    })
+    const sampled = sampleEdgeRoute(edge)
+    const coordinates = sampled.line.geometry.coordinates
+
+    expect(coordinates[0]).toEqual([179, 10])
+    expect(coordinates.at(-1)).toEqual([181, 10])
+    expect(coordinates).toContainEqual(sampled.midpoint)
+    expect(coordinates.flat().every(Number.isFinite)).toBe(true)
+    expect(coordinates.slice(1).every((coordinate, index) => (
+      Math.abs(coordinate[0] - coordinates[index][0]) < 180
+    ))).toBe(true)
+    expect(sampled.distanceMeters).toBeGreaterThan(210_000)
+    expect(sampled.distanceMeters).toBeLessThan(230_000)
+    expect(edge.target.getPosition()).toEqual([-179, 10])
+    expect(() => assertEdgeGeometry(edge)).not.toThrow()
   })
 
   it('projects a click onto the closest segment for ordered insertion', () => {
@@ -135,6 +192,7 @@ describe('edge geometry adapter', () => {
     const sampled = sampleEdgeRoute(edge, { positionOverrides })
     expect(sampled.distanceMeters).toBeGreaterThan(20_000_000)
     expect(sampled.converged).toBe(true)
+    expect(sampled.line.geometry.coordinates).toContainEqual(sampled.midpoint)
     expect(edge.target.getPosition()).toEqual(originalPosition)
     expect(assertNodeMoveGeometry(edge.target, [170, 42], [edge])).toEqual([170, 42])
   })
