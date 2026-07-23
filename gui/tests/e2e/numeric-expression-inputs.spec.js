@@ -240,7 +240,7 @@ test.describe('Default-first numeric expression inputs', () => {
         node_b: 2,
       },
     })
-    expect(Number.isFinite(numericRequests.at(-1).context.length)).toBe(true)
+    expect(Number.isFinite(numericRequests.at(-1).context.distance)).toBe(true)
     expect(Number.isFinite(numericRequests.at(-1).context.delay)).toBe(true)
     expect(Number.isFinite(numericRequests.at(-1).context.refractive_index)).toBe(true)
     expect(Number.isFinite(numericRequests.at(-1).context.loss)).toBe(true)
