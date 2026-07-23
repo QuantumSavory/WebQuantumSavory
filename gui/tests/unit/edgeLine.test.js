@@ -43,6 +43,12 @@ const CurveHandleStub = {
   template: '<button class="curve-handle-stub" @click="$emit(\'cycle\', point)" />',
 }
 
+const BadgeStub = {
+  name: 'EdgeBadgeStack',
+  props: ['position', 'rows'],
+  template: '<div class="edge-badge-stub" />',
+}
+
 function makeEdge({ isLogic = false } = {}) {
   const source = new Node({ id: 'a', name: 'A', position: [-72, 42] })
   const target = new Node({ id: 'b', name: 'B', position: [-70, 42] })
@@ -140,6 +146,46 @@ describe('edge curve editing', () => {
     expect(map.sources.get('edge-edge').data.geometry.coordinates).toEqual([[-72, 42], [-70, 42]])
   })
 
+  it('uses the finalized rendered route for the badge regardless of curve mode', async () => {
+    const edge = makeEdge()
+    edge.data.curvePoints = [{
+      id: 'curve-point',
+      position: [-71, 44],
+      type: 'smooth',
+    }]
+    const map = makeMap()
+    const wrapper = mount(EdgeLine, {
+      props: {
+        edge,
+        map,
+        isSelected: true,
+        curveEditingEnabled: false,
+      },
+      global: {
+        stubs: { CurvePointHandle: CurveHandleStub, EdgeBadgeStack: BadgeStub },
+      },
+    })
+    const source = map.sources.get('edge-edge')
+    const initialGeometry = structuredClone(source.data.geometry)
+    const midpoint = wrapper.getComponent(BadgeStub).props('position')
+
+    expect(initialGeometry.coordinates.length).toBeGreaterThan(2)
+    expect(initialGeometry.coordinates).toContainEqual(midpoint)
+    expect(wrapper.find('.curve-handle-stub').exists()).toBe(false)
+
+    await wrapper.setProps({ curveEditingEnabled: true })
+    expect(wrapper.find('.curve-handle-stub').exists()).toBe(true)
+    expect(source.data.geometry).toEqual(initialGeometry)
+    expect(wrapper.getComponent(BadgeStub).props('position')).toEqual(midpoint)
+    expect(source.setData).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ curveEditingEnabled: false })
+    expect(wrapper.find('.curve-handle-stub').exists()).toBe(false)
+    expect(source.data.geometry).toEqual(initialGeometry)
+    expect(wrapper.getComponent(BadgeStub).props('position')).toEqual(midpoint)
+    expect(source.setData).not.toHaveBeenCalled()
+  })
+
   it('renders node-drag overrides without mutating durable endpoints', () => {
     const edge = makeEdge()
     const map = makeMap()
@@ -156,8 +202,11 @@ describe('edge curve editing', () => {
       },
     })
 
-    expect(map.sources.get('edge-edge').data.geometry.coordinates)
-      .toEqual([[-72, 42], [170, 42]])
+    const renderedCoordinates = map.sources.get('edge-edge').data.geometry.coordinates
+    expect(renderedCoordinates[0]).toEqual([-72, 42])
+    expect(renderedCoordinates.at(-1)).toEqual([-190, 42])
+    expect(renderedCoordinates.length).toBeGreaterThan(2)
+    expect(renderedCoordinates.flat().every(Number.isFinite)).toBe(true)
     expect(edge.target.position).toEqual([-70, 42])
   })
 

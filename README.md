@@ -194,6 +194,10 @@ representative attenuation for modern telecom single-mode fiber near the
 1550-nm window ([Corning SMF-28 Ultra specification](https://www.corning.com/media/worldwide/coc/documents/Fiber/product-information-sheets/PI-1424-AEN.pdf)).
 Each physical edge may override distance, refractive index, propagation delay,
 loss, and transmissivity. Virtual edges carry no physical payload fields.
+The displayed physical route is geodesically sampled between its endpoints or
+persisted curve-guide samples, and that same route determines automatic
+distance, delay, and badge placement. Curve mode only reveals editing handles;
+toggling it does not change the link geometry.
 
 Automatic transmissivity is dimensionless and is calculated explicitly from
 the resolved route distance and loss:
