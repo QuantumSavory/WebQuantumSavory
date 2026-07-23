@@ -2037,13 +2037,13 @@ end
                   - type: object
                     title: Edge protocol context
                     additionalProperties: false
-                    required: [node_names, length, delay, refractive_index, loss, transmissivity, node_a, node_b]
+                    required: [node_names, distance, delay, refractive_index, loss, transmissivity, node_a, node_b]
                     properties:
                       node_names:
                         type: array
                         items:
                           type: string
-                      length:
+                      distance:
                         type: number
                         nullable: true
                         minimum: 0

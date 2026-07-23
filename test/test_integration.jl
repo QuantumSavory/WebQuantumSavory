@@ -995,7 +995,7 @@
         @test Set(context_schemas[2]["required"]) == Set(["node_names", "self"])
         @test Set(context_schemas[3]["required"]) == Set([
           "node_names",
-          "length",
+          "distance",
           "delay",
           "refractive_index",
           "loss",
@@ -1003,7 +1003,7 @@
           "node_a",
           "node_b",
         ])
-        @test context_schemas[3]["properties"]["length"]["nullable"] == true
+        @test context_schemas[3]["properties"]["distance"]["nullable"] == true
         @test context_schemas[3]["properties"]["delay"]["nullable"] == true
         @test context_schemas[3]["properties"]["refractive_index"]["nullable"] == true
         @test context_schemas[3]["properties"]["loss"]["nullable"] == true
@@ -1062,9 +1062,11 @@
           ("<(self)", "node", true),
           ("==(nodeid(\"Amherst\"))", "edge", true),
           (
-            "values -> length > 0 && delay >= 0 && refractive_index > 0 && " *
+            # The edge-distance binding is `distance`, so `length` is not
+            # shadowed and may be called directly.
+            "values -> distance > 0 && delay >= 0 && refractive_index > 0 && " *
             "loss >= 0 && 0 <= transmissivity <= 1 && " *
-            "node_a == 1 && node_b == 2 && Base.length(values) > 0",
+            "node_a == 1 && node_b == 2 && length(values) > 0",
             "edge",
             true,
           ),
@@ -1112,7 +1114,7 @@
         "placement" => "edge",
         "context" => Dict(
           "node_names" => ["Alice", "Bob"],
-          "length" => 100.0,
+          "distance" => 100.0,
           "delay" => 5.0e-7,
           "refractive_index" => 1.5,
           "loss" => 0.2,
@@ -1158,7 +1160,9 @@
           "POST",
           "/test_numeric_expression";
           body=Dict(
-            "expression" => "x = 3\nx // 1",
+            # Rationals (`//`) are not allowlisted; use plain arithmetic to
+            # exercise immediate (non-deferred) variable evaluation.
+            "expression" => "x = 3\nx + 0",
             "target_type" => "Int64",
             "placement" => "variable",
           ),
@@ -1190,6 +1194,9 @@
           merge(edge_request, Dict("expression" => "Inf")),
           merge(edge_request, Dict("expression" => "invalid(")),
           merge(edge_request, Dict("expression" => "self")),
+          # Rejected by the restricted allowlist before evaluation.
+          merge(edge_request, Dict("expression" => "Base.length([1, 2])", "target_type" => "Int64")),
+          merge(edge_request, Dict("expression" => "open(\"/tmp/x\", \"w\")")),
         )
           failing_response = make_request(
             "POST",

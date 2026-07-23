@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Added a default-deny allowlist guard that walks parsed Custom Function,
+  numeric-expression, and Symbolic source and rejects any non-allowlisted
+  identifier or dangerous syntactic form (module qualification and property
+  access via `.`, macros, interpolation, imports, `ccall`, and the `getfield`
+  family) immediately before the existing pipeline evaluates it. The guard
+  reuses Julia's own parser and evaluator, performs no lowering or macro
+  expansion, and is one defense-in-depth layer on top of the
+  `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` gate — not a security boundary.
+- Renamed the edge-length lexical binding from `length` to `distance` in Custom
+  Function, numeric-expression, and Symbolic source (and the corresponding
+  numeric-expression context field). Because `length` no longer shadows the
+  function, edge and variable sources may now call `length(collection)`
+  directly.
+
 ## 1.10.1
 
 - Added descriptor-driven physical quantities and unit metadata for global and

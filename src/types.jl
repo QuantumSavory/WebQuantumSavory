@@ -50,6 +50,7 @@ function _evaluate_complete_source(
     transform::Function=identity,
 )
     parsed = _parse_complete_source(source)
+    _assert_source_allowlisted(parsed)
     return Base.eval(evaluation_module, transform(parsed))
 end
 
@@ -175,7 +176,7 @@ const EDGE_FUNCTION_CONTEXT_KEY = :edge_function_context
 """Ordered physical edge bindings shared by validation, evaluation, and export."""
 const EDGE_CONTEXT_DESCRIPTORS = (
     (
-        binding=:length,
+        binding=:distance,
         field=:distance_meters,
         payload_key="distanceMeters",
         payload_label="distance",
@@ -184,7 +185,7 @@ const EDGE_CONTEXT_DESCRIPTORS = (
         payload_default=nothing,
         payload_nullable=true,
         representative=1.0,
-        script_label="edge length",
+        script_label="edge distance",
     ),
     (
         binding=:delay,
@@ -442,6 +443,7 @@ function _evaluate_numeric_expression_source(
 )
     require_unsafe_code_evaluation()
     parsed = _parse_complete_source(source)
+    _assert_source_allowlisted(parsed)
     transform = if node_name_to_index === nothing
         identity
     else

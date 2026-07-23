@@ -57,7 +57,7 @@ describe('numeric expression assignment context', () => {
 
     expect(buildNumericExpressionContext(project, 'edge', edge)).toEqual({
       node_names: ['Alice', 'Bob'],
-      length: expect.any(Number),
+      distance: expect.any(Number),
       delay: expect.any(Number),
       refractive_index: 1.5,
       loss: 0.2,
@@ -72,7 +72,7 @@ describe('numeric expression assignment context', () => {
 
     expect(buildNumericExpressionContext(project, 'edge', edge)).toEqual({
       node_names: ['Alice', 'Bob'],
-      length: null,
+      distance: null,
       delay: null,
       refractive_index: null,
       loss: null,

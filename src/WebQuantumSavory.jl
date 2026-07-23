@@ -36,6 +36,10 @@ include("evaluation_policy.jl")
 include("mcp_config.jl")
 include("platform_info.jl")
 include("types.jl")
+# After types.jl so the guard can derive its context-name allowlist from the
+# authoritative EDGE_CONTEXT_DESCRIPTORS-based binding catalog. types.jl only
+# calls the guard from function bodies, which resolve at runtime.
+include("source_allowlist.jl")
 include("Sandbox.jl")
 include("Logger.jl")
 include("states_zoo.jl")
