@@ -1,6 +1,8 @@
-import { ref, computed, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
+import { readCssPixels } from '../utils/cssPixels.js'
 
 const SELECTED_ELEMENT_STORAGE_KEY = 'panelCollapsed_selected_element'
+const RIGHT_SIDEBAR_WIDTH_STORAGE_KEY = 'rightSidebar_width'
 const LEGACY_SELECTED_ELEMENT_KEYS = [
   'panelCollapsed_node_panel',
   'panelCollapsed_edge_panel',
@@ -15,6 +17,12 @@ const PANEL_STORAGE_KEYS = Object.freeze({
   bottomPanel: 'panelCollapsed_logs_panel'
 })
 const COLLAPSED_PANEL_FLEX = '0 0 var(--app-panel-collapsed-height)'
+const RIGHT_SIDEBAR_DIMENSION_FALLBACKS = Object.freeze({
+  defaultWidth: 320,
+  minimumWidth: 280,
+  mainPanelMinimumWidth: 320,
+  inlineOffset: 10
+})
 
 function readStoredBoolean(key) {
   const value = localStorage.getItem(key)
@@ -40,12 +48,62 @@ function readPanelCollapsed(key) {
   return readStoredBoolean(key) === true
 }
 
+function readRightSidebarWidth() {
+  const storedWidth = localStorage.getItem(RIGHT_SIDEBAR_WIDTH_STORAGE_KEY)
+  if (storedWidth === null) return null
+
+  const width = Number(storedWidth)
+  if (Number.isFinite(width) && width > 0) return Math.round(width)
+
+  console.warn('Ignoring invalid saved simulation sidebar width')
+  localStorage.removeItem(RIGHT_SIDEBAR_WIDTH_STORAGE_KEY)
+  return null
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value))
+}
+
 /**
  * Owns persisted shell layout state. Panels are controlled views of these refs;
  * no panel component reads or writes localStorage independently.
  */
 export function usePanelLayout() {
   const isRightSidebarVisible = ref(true)
+  const viewportWidth = ref(window.innerWidth)
+  const defaultRightSidebarWidth = readCssPixels(
+    '--app-shell-sidebar-default-width',
+    RIGHT_SIDEBAR_DIMENSION_FALLBACKS.defaultWidth
+  )
+  const preferredRightSidebarMinWidth = readCssPixels(
+    '--app-shell-sidebar-min-width',
+    RIGHT_SIDEBAR_DIMENSION_FALLBACKS.minimumWidth
+  )
+  const mainPanelMinWidth = readCssPixels(
+    '--app-shell-main-panel-min-width',
+    RIGHT_SIDEBAR_DIMENSION_FALLBACKS.mainPanelMinimumWidth
+  )
+  const rightSidebarInlineOffset = readCssPixels(
+    '--app-shell-sidebar-inline-offset',
+    RIGHT_SIDEBAR_DIMENSION_FALLBACKS.inlineOffset
+  )
+  const rightSidebarMaxWidth = computed(() => Math.max(
+    1,
+    Math.floor(viewportWidth.value - mainPanelMinWidth - rightSidebarInlineOffset)
+  ))
+  const rightSidebarMinWidth = computed(() => Math.min(
+    preferredRightSidebarMinWidth,
+    rightSidebarMaxWidth.value
+  ))
+  const storedRightSidebarWidth = readRightSidebarWidth()
+  const rightSidebarWidth = ref(clamp(
+    storedRightSidebarWidth ?? defaultRightSidebarWidth,
+    rightSidebarMinWidth.value,
+    rightSidebarMaxWidth.value
+  ))
+  const rightSidebarStyle = computed(() => ({
+    '--app-shell-sidebar-width': `${rightSidebarWidth.value}px`
+  }))
   const panelCollapsedStates = ref({
     selectedElementPanel: readSelectedElementCollapsed(),
     nodeListPanel: readPanelCollapsed(PANEL_STORAGE_KEYS.nodeListPanel),
@@ -71,14 +129,53 @@ export function usePanelLayout() {
     }
   })
 
+  function updateRightSidebarWidth(width) {
+    if (!Number.isFinite(width)) return
+    rightSidebarWidth.value = clamp(
+      Math.round(width),
+      rightSidebarMinWidth.value,
+      rightSidebarMaxWidth.value
+    )
+  }
+
+  function persistRightSidebarWidth() {
+    localStorage.setItem(RIGHT_SIDEBAR_WIDTH_STORAGE_KEY, String(rightSidebarWidth.value))
+  }
+
   function toggleRightSidebar() {
     isRightSidebarVisible.value = !isRightSidebarVisible.value
   }
+
+  function updateViewportWidth() {
+    viewportWidth.value = window.innerWidth
+  }
+
+  watch([rightSidebarMinWidth, rightSidebarMaxWidth], () => {
+    const previousWidth = rightSidebarWidth.value
+    updateRightSidebarWidth(previousWidth)
+    if (rightSidebarWidth.value !== previousWidth) persistRightSidebarWidth()
+  })
+
+  onMounted(() => {
+    updateViewportWidth()
+    persistRightSidebarWidth()
+    window.addEventListener('resize', updateViewportWidth)
+  })
+
+  onScopeDispose(() => {
+    window.removeEventListener('resize', updateViewportWidth)
+  })
 
   return {
     isRightSidebarVisible,
     panelCollapsedStates,
     panelFlexValues,
+    rightSidebarMaxWidth,
+    rightSidebarMinWidth,
+    rightSidebarStyle,
+    rightSidebarWidth,
+    persistRightSidebarWidth,
+    updateRightSidebarWidth,
     toggleRightSidebar
   }
 }

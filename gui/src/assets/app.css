@@ -2,7 +2,10 @@
 
 :root {
   --app-shell-topbar-height: 40px;
-  --app-shell-sidebar-width: 320px;
+  --app-shell-sidebar-default-width: 320px;
+  --app-shell-sidebar-min-width: 280px;
+  --app-shell-main-panel-min-width: 320px;
+  --app-shell-sidebar-width: var(--app-shell-sidebar-default-width);
   --app-shell-sidebar-inline-offset: 10px;
   --app-shell-sidebar-top: 50px;
   --app-shell-sidebar-bottom: 20px;

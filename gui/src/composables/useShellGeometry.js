@@ -1,9 +1,5 @@
 import { nextTick, onMounted, onScopeDispose, readonly, ref, watch } from 'vue'
-
-function cssPixels(propertyName) {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(propertyName)
-  return Number.parseFloat(value) || 0
-}
+import { readCssPixels } from '../utils/cssPixels.js'
 
 /**
  * Measures the application shell using only elements explicitly owned by App.
@@ -24,7 +20,7 @@ export function useShellGeometry({
   let resizeObserver = null
 
   function measure() {
-    const gap = cssPixels('--app-shell-panel-gap')
+    const gap = readCssPixels('--app-shell-panel-gap')
     const left = bottomPanelContainer.value?.getBoundingClientRect().left ?? 0
     const top = (topbar.value?.getBoundingClientRect().bottom ?? 0) + gap
     let right = window.innerWidth - gap

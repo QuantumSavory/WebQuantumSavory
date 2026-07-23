@@ -35,6 +35,7 @@ import EdgeListPanel from './components/panels/EdgeListPanel.vue'
 import EdgePanel from './components/panels/EdgePanel.vue'
 import AnnotationPanel from './components/panels/AnnotationPanel.vue'
 import BottomPanel from './components/panels/BottomPanel.vue'
+import RightSidebarResizer from './components/RightSidebarResizer.vue'
 import ProjectNameDialog from './components/ProjectNameDialog.vue'
 import ImportConflictDialog from './components/ImportConflictDialog.vue'
 import OpenProjectDialog from './components/OpenProjectDialog.vue'
@@ -392,6 +393,12 @@ const {
   isRightSidebarVisible,
   panelCollapsedStates,
   panelFlexValues,
+  rightSidebarMaxWidth,
+  rightSidebarMinWidth,
+  rightSidebarStyle,
+  rightSidebarWidth,
+  persistRightSidebarWidth,
+  updateRightSidebarWidth,
   toggleRightSidebar
 } = usePanelLayout()
 
@@ -1396,7 +1403,7 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    <div class="app">
+    <div class="app" :style="rightSidebarStyle">
       <div class="main-panel">
         <BaseMap 
           ref="baseMapInstance"
@@ -1433,9 +1440,11 @@ onUnmounted(() => {
       <!-- Sidebar Toggle Button (outside sidebar so it doesn't slide with it) -->
       <button 
         v-if="projectData"
+        type="button"
         class="sidebar-toggle-btn" 
         :class="{ 'sidebar-toggle-btn-hidden': !isRightSidebarVisible }"
         @click="toggleRightSidebar"
+        :aria-label="isRightSidebarVisible ? 'Hide simulation sidebar' : 'Show simulation sidebar'"
         :title="isRightSidebarVisible ? 'Hide panel' : 'Show panel'"
       >
         <PanelRightClose v-if="isRightSidebarVisible" :size="15" aria-hidden="true" />
@@ -1448,7 +1457,15 @@ onUnmounted(() => {
         :class="{ 'sidebar-hidden': !isRightSidebarVisible }"
         v-if="projectData"
       >
-        <div class="info-panel">
+        <RightSidebarResizer
+          :width="rightSidebarWidth"
+          :min-width="rightSidebarMinWidth"
+          :max-width="rightSidebarMaxWidth"
+          :disabled="!isRightSidebarVisible"
+          @update:width="updateRightSidebarWidth"
+          @resize-end="persistRightSidebarWidth"
+        >
+          <div class="info-panel">
             <div style="padding: 1px 4px 0px !important;">
               <RunnerPanel 
                 id="runnerPanel" 
@@ -1572,7 +1589,8 @@ onUnmounted(() => {
 
           
 
-        </div>
+          </div>
+        </RightSidebarResizer>
       </div>
     </div>
 

@@ -15,6 +15,9 @@
   referenced per-assignment context, and emitting context-free Variables once
   as ordinary globals. The Export Script panel now briefly notes that
   UI-generated scripts can be more boilerplate-heavy than bespoke simulations.
+- Made the simulation sidebar resizable from its left edge with pointer and
+  keyboard controls, persisted viewport-clamped widths, and collapse/expand
+  behavior that retains the chosen width.
 
 - Made physical-link rendering, automatic distance and delay, and badge
   placement share one geodesically densified route, including short-path
