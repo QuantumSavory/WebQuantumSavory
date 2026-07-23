@@ -128,6 +128,16 @@ test.describe('Background-noise constructor inputs', () => {
     await firstNode.locator('.connector.output')
       .dragTo(page.locator('.node-marker').nth(1))
     await expect(page.locator('.edge-list-item')).toHaveCount(1)
+    await page.locator('.edge-list-item').first().click()
+    const addProtocolButton = page.locator(
+      '#edgePanel .panel-content .add-protocol-btn',
+    )
+    await expect(addProtocolButton).toBeVisible()
+    await addProtocolButton.click()
+    await page.locator('.p-menu-item-link', { hasText: 'EntanglerProt' }).click()
+    await expect(
+      page.locator('#edgePanel .panel-content .protocol-editor.protocol-list-item'),
+    ).toBeVisible()
     const concreteTemplateRequests = numericRequests.slice(templateRequestsStart)
       .filter(request => request.expression === 'self + 10' && request.context)
     expect(concreteTemplateRequests.map(request => request.context.self)).toEqual([2, 3])
