@@ -176,7 +176,7 @@ const EDGE_FUNCTION_CONTEXT_KEY = :edge_function_context
 """Ordered physical edge bindings shared by validation, evaluation, and export."""
 const EDGE_CONTEXT_DESCRIPTORS = (
     (
-        binding=:length,
+        binding=:distance,
         field=:distance_meters,
         payload_key="distanceMeters",
         payload_label="distance",
@@ -185,7 +185,7 @@ const EDGE_CONTEXT_DESCRIPTORS = (
         payload_default=nothing,
         payload_nullable=true,
         representative=1.0,
-        script_label="edge length",
+        script_label="edge distance",
     ),
     (
         binding=:delay,

@@ -37,8 +37,9 @@ const _RESTRICTED_SAFE_VALUE_NAMES = Set{Symbol}((
 ))
 
 # Lexical bindings the evaluation pipeline injects for placement context.
+# (`distance` is the edge-length binding; the `length` function is not shadowed.)
 const _RESTRICTED_CONTEXT_NAMES = Set{Symbol}((
-    :nodeid, :self, :length, :delay, :refractive_index,
+    :nodeid, :self, :distance, :delay, :refractive_index,
     :loss, :transmissivity, :node_a, :node_b,
 ))
 

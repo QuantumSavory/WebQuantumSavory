@@ -10,9 +10,11 @@
   reuses Julia's own parser and evaluator, performs no lowering or macro
   expansion, and is one defense-in-depth layer on top of the
   `WEBQUANTUMSAVORY_ENABLE_UNSAFE_EVALUATION` gate — not a security boundary.
-  Because module qualification is now blocked, edge and variable Custom
-  Functions can no longer call `Base.length`; the edge-length binding `length`
-  shadows the function in those placements.
+- Renamed the edge-length lexical binding from `length` to `distance` in Custom
+  Function, numeric-expression, and Symbolic source (and the corresponding
+  numeric-expression context field). Because `length` no longer shadows the
+  function, edge and variable sources may now call `length(collection)`
+  directly.
 
 ## 1.10.1
 

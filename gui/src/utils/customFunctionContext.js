@@ -13,11 +13,10 @@ const contextualKeywordDefinitions = [
     availability: 'Available only when the source is assigned to a node protocol.'
   },
   {
-    id: 'length',
-    syntax: 'length',
+    id: 'distance',
+    syntax: 'distance',
     description: 'The resolved route or overridden physical-edge distance in meters.',
-    availability: 'Available only for edge protocol source; it is nothing on virtual edges.',
-    recommendation: 'This binding shadows Base.length; use Base.length(collection) for collections.'
+    availability: 'Available only for edge protocol source; it is nothing on virtual edges.'
   },
   {
     id: 'delay',

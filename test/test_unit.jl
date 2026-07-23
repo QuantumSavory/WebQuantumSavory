@@ -286,7 +286,7 @@
     lambda_by_name = Dict(parameter["name"] => parameter for parameter in lambda_parameters)
     raw_context_lambda =
       "slot -> (MessageBuffer; EntanglementConsumer; LinearAlgebra.tr; " *
-      "length == 12500.0 && delay == 0.125 && refractive_index == 1.5 && " *
+      "distance == 12500.0 && delay == 0.125 && refractive_index == 1.5 && " *
       "loss == 0.2 && transmissivity == 0.95 && " *
       "node_a == 1 && node_b == 2 && Base.length((slot,)) == 1 && slot > 0)"
     lambda_by_name["chooseA"]["type"] = "Lambda"
@@ -300,7 +300,7 @@
     @test occursin("chooseslotA = (let", lambda_script)
     @test occursin("chooseslotB = (let", lambda_script)
     @test occursin(raw_context_lambda, lambda_script)
-    @test occursin("length = 12500.0", lambda_script)
+    @test occursin("distance = 12500.0", lambda_script)
     @test occursin("delay = 0.125", lambda_script)
     @test occursin("refractive_index = 1.5", lambda_script)
     @test occursin("loss = 0.2", lambda_script)
@@ -627,7 +627,7 @@
 
     virtual_edge_expression = WebQuantumSavory._script_value_expression(
       "Lambda",
-      "() -> isnothing(length) && isnothing(delay) && isnothing(refractive_index) && " *
+      "() -> isnothing(distance) && isnothing(delay) && isnothing(refractive_index) && " *
       "isnothing(loss) && isnothing(transmissivity) && " *
       "node_a == 2 && node_b == 1",
       "Virtual edge custom function";
@@ -1122,13 +1122,12 @@
       @test validation_error === nothing
 
       for placement in ("edge", "variable")
-        # `Base.length(candidates)` is intentionally rejected by the restricted
-        # allowlist (module qualification is blocked); the edge-length binding
-        # `length` shadows the function in edge/variable placement.
+        # The edge-distance binding is `distance`, so the `length` function is
+        # not shadowed and may be called directly in edge/variable placement.
         success, results, validation_error = WebQuantumSavory.Sandbox.test_code(
-          "candidates -> length > 0 && delay >= 0 && refractive_index > 0 && " *
+          "candidates -> distance > 0 && delay >= 0 && refractive_index > 0 && " *
           "loss >= 0 && 0 <= transmissivity <= 1 && " *
-          "node_a == 1 && node_b == 2";
+          "node_a == 1 && node_b == 2 && length(candidates) > 0";
           placement=placement,
         )
         @test success
@@ -1341,15 +1340,15 @@
           edge_kwargs,
           :selector,
           "Lambda",
-          "candidates -> length == 1250.0 && delay == 0.25 && " *
+          "candidates -> distance == 1250.0 && delay == 0.25 && " *
           "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
-          "node_a == 1 && node_b == 2",
+          "node_a == 1 && node_b == 2 && length(candidates) == 2",
           edge_ctx,
         )
         @test edge_kwargs[:selector]([1, 2])
 
         virtual_function = WebQuantumSavory.create_lambda(
-          "() -> isnothing(length) && isnothing(delay) && isnothing(refractive_index) && " *
+          "() -> isnothing(distance) && isnothing(delay) && isnothing(refractive_index) && " *
           "isnothing(loss) && isnothing(transmissivity) && " *
           "node_a == 2 && node_b == 1";
           edge_context=WebQuantumSavory._EdgeFunctionContext(
@@ -2546,7 +2545,7 @@
       ))
       choose_a["type"] = "Lambda"
       choose_a["value"] =
-        "slot -> length == 12500.0 && delay == 0.125 && " *
+        "slot -> distance == 12500.0 && delay == 0.125 && " *
         "refractive_index == 1.5 && loss == 0.2 && transmissivity == 0.95 && " *
         "node_a == 1 && node_b == 2 ? " *
         "slot > 0 : false"
@@ -4655,7 +4654,7 @@
       for source in (
         "delay / 2",
         "self + nodeid(\"Bob\")",
-        "length + refractive_index + loss + transmissivity + node_a + node_b",
+        "distance + refractive_index + loss + transmissivity + node_a + node_b",
       )
         success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
           source,
@@ -4742,7 +4741,7 @@
       )
       # `all` is not an allowlisted reducer, so the expression is rejected.
       success, results, error = WebQuantumSavory.Sandbox.test_numeric_expression(
-        "all(isnothing, (length, delay, refractive_index, loss, transmissivity)) ? " *
+        "all(isnothing, (distance, delay, refractive_index, loss, transmissivity)) ? " *
         "node_b - node_a : 99",
         "Int64",
         "edge";
@@ -4856,7 +4855,7 @@
       "placement" => "edge",
       "context" => Dict(
         "node_names" => ["Alice", "Bob"],
-        "length" => 100.0,
+        "distance" => 100.0,
         "delay" => 5.0e-7,
         "refractive_index" => 1.5,
         "loss" => 0.2,
@@ -4897,7 +4896,7 @@
         "placement" => "edge",
         "context" => Dict(
           "node_names" => ["Alice", "Bob"],
-          "length" => nothing,
+          "distance" => nothing,
           "delay" => 1.0,
           "refractive_index" => nothing,
           "loss" => nothing,
@@ -4912,7 +4911,7 @@
         "placement" => "edge",
         "context" => Dict(
           "node_names" => ["Alice", "Bob"],
-          "length" => 100.0,
+          "distance" => 100.0,
           "delay" => 5.0e-7,
           "refractive_index" => 1.5,
           "loss" => 0.2,
@@ -5032,7 +5031,7 @@
       "id" => "per-assignment-expression",
     )
     parameter_by_name["attempt_time"]["value"] =
-      expression("(length + nodeid(\"Cambridge\") - 2) / 1000")
+      expression("(distance + nodeid(\"Cambridge\") - 2) / 1000")
 
     try
       validation = WebQuantumSavory.validate_payload(runtime_payload)

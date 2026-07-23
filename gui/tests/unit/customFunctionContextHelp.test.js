@@ -35,7 +35,7 @@ describe('custom-function contextual help', () => {
     expect([...popup.querySelectorAll('dt code')].map(keyword => keyword.textContent)).toEqual([
       'nodeid("Node name")',
       'self',
-      'length',
+      'distance',
       'delay',
       'refractive_index',
       'loss',
